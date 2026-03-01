@@ -1166,6 +1166,12 @@ class ToolLoopEngine:
                             session_id=getattr(_debug_logger, "_session_id", ""),
                         )
 
+                        if on_step and fn_name in ("evolve_submit_pr", "evolve_deploy", "evolve_test"):
+                            try:
+                                on_step(step, fn_name, "(running...)")
+                            except Exception:
+                                pass
+
                         t0 = time.time()
                         try:
                             if not ok_intent:

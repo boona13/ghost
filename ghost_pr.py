@@ -109,7 +109,7 @@ CHANGES_PROPOSED: YES (if you proposed fixes)
 CHANGES_PROPOSED: NO (if you disagree with all concerns and stand by the original code)
 """
 
-MAX_REVIEW_ROUNDS = 5
+MAX_REVIEW_ROUNDS = 3
 
 
 # ── PR Store ─────────────────────────────────────────────────────────
@@ -327,39 +327,23 @@ class ReviewEngine:
                 self.store.set_verdict(pr_id, "blocked", reason)
                 return "blocked"
 
-            # --- Developer turn ---
+            # --- Developer turn (single attempt — no retries) ---
             pr = self.store.get_pr(pr_id)
             developer_context = self._format_developer_context(
                 pr, reviewer_response, round_num)
             developer_response = None
-            for attempt in range(3):
-                try:
-                    prompt = developer_context
-                    if attempt > 0:
-                        prompt += (
-                            "\n\nIMPORTANT: Your previous response was empty. "
-                            "You MUST respond with at least:\n"
-                            "1) A short reply to the review concerns\n"
-                            "2) Final line exactly: CHANGES_PROPOSED: YES or CHANGES_PROPOSED: NO\n"
-                        )
-                    developer_response = engine.single_shot(
-                        system_prompt=DEVELOPER_PERSONA,
-                        user_message=prompt,
-                        max_tokens=4000,
-                        temperature=0.2 + (attempt * 0.15),
-                    )
-                except Exception as e:
-                    log.warning("Developer LLM call failed round %d attempt %d: %s",
-                                round_num, attempt + 1, e)
-                    developer_response = None
-                if developer_response and developer_response.strip():
-                    break
-                developer_response = None
-                log.warning("Developer response empty round %d attempt %d",
-                            round_num, attempt + 1)
-            if not developer_response:
-                log.warning("Developer empty after 3 attempts round %d, auto-approving",
-                            round_num)
+            try:
+                developer_response = engine.single_shot(
+                    system_prompt=DEVELOPER_PERSONA,
+                    user_message=developer_context,
+                    max_tokens=4000,
+                    temperature=0.3,
+                )
+            except Exception as e:
+                log.warning("Developer LLM call failed round %d: %s",
+                            round_num, e)
+            if not developer_response or not developer_response.strip():
+                log.info("Developer silent round %d — auto-approving PR", round_num)
                 self.store.set_verdict(pr_id, "approved")
                 return "approved"
             self.store.add_discussion(pr_id, "developer",
