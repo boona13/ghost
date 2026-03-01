@@ -1380,7 +1380,7 @@ def build_evolve_tools(cfg):
     """Build tool definitions for the LLM to self-modify Ghost."""
     engine = get_engine()
 
-    def evolve_plan_exec(description, files, level=None):
+    def evolve_plan_exec(description, files, level=None, confirmed_not_duplicate: bool = False):
         evo_id, info = engine.plan(description, files, cfg)
         if evo_id is None:
             return f"Evolution blocked: {info.get('error', 'unknown error')}"
@@ -1404,7 +1404,7 @@ def build_evolve_tools(cfg):
         ok, msg = engine.apply_change(evolution_id, file_path, content=content, patches=patches)
         return msg
 
-    def evolve_apply_config_exec(evolution_id=None, updates=None):
+    def evolve_apply_config_exec(evolution_id=None, updates=None, **kwargs):
         if not evolution_id:
             return "Error: evolution_id is required. Call evolve_plan first."
         if not updates or not isinstance(updates, dict):

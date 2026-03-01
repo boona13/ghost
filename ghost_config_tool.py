@@ -307,7 +307,7 @@ def build_config_tools(cfg=None):
 
         return json.dumps(sanitized, indent=2)
 
-    def config_patch_exec(updates):
+    def config_patch_exec(updates, **kwargs):
         if not isinstance(updates, dict):
             return "Error: updates must be a JSON object"
 
