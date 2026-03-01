@@ -682,12 +682,6 @@ class EvolutionEngine:
         diff = ghost_git.get_diff("main", branch_name)
         changed_files = ghost_git.get_changed_files("main", branch_name)
 
-        # Switch back to main BEFORE the review runs. The review only uses
-        # the diff text, not the files on disk. Staying on the feature branch
-        # during the (slow) review exposes half-finished changes to the live
-        # dashboard, causing broken imports and blank pages.
-        ghost_git.stash_and_checkout("main")
-
         # Reuse existing open/reviewing PR for this evolution+branch to
         # prevent duplicate records if submit_pr is retried after an error.
         store = get_pr_store()

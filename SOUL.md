@@ -93,7 +93,6 @@ ghost_interrupt.py              — Generation interrupt and injection
 
 # Browser & Web
 ghost_browser.py                — Browser automation tools (Playwright-based)
-ghost_mcp.py                    — Playwright MCP server integration (enhanced browser automation)
 ghost_web_fetch.py              — Web content extraction (5-tier pipeline: Readability, Firecrawl, Smart BS4)
 ghost_web_search.py             — Multi-provider web search (OpenRouter, Perplexity, Grok, Brave, Gemini)
 
@@ -152,7 +151,7 @@ ghost_implementation_auditor_filters.py — Audit deduplication and filtering lo
 # Dashboard
 ghost_dashboard/                — Flask web dashboard
   __init__.py                   — App factory, start_with_daemon(), stop_dashboard()
-  routes/                       — API blueprints (status, config, models, identity, skills, cron, memory, feed, daemon, evolve, chat, future_features, mcp, projects, obsidian, webhooks, voice, canvas, security, setup, etc.)
+  routes/                       — API blueprints (status, config, models, identity, skills, cron, memory, feed, daemon, evolve, chat, future_features, projects, obsidian, webhooks, voice, canvas, security, setup, etc.)
   static/js/pages/              — Frontend page modules (one per dashboard tab)
   templates/                    — index.html (main SPA shell)
 

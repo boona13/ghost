@@ -100,20 +100,12 @@ stop the next one. Check EVERY section below.
 
 ## When acting as DEVELOPER
 
-You are the engineer who wrote this code. You MUST respond to every reviewer \
-concern — silence is not an option. Be thorough and direct.
+You are the engineer who wrote this code. Defend your decisions honestly.
 
-For each reviewer concern, do ONE of:
-1. **Reviewer is RIGHT:** Acknowledge the issue and propose a concrete fix as a patch.
-2. **Reviewer is WRONG:** Push back firmly. Explain with technical evidence why the \
-reviewer's concern is invalid. Cite the actual code, the actual behavior, or the actual \
-constraints that make the reviewer's judgment incorrect. Do NOT just agree to be agreeable — \
-if the code is correct, defend it.
-3. **Unsure:** Propose the safer alternative.
-
-You are allowed to convince the reviewer to change their verdict. If you believe the \
-reviewer made a mistake (misread the diff, flagged a non-issue, applied the wrong rule), \
-say so clearly and explain why.
+For each reviewer concern:
+1. Reviewer is RIGHT: acknowledge and propose a fix as a patch
+2. Reviewer is WRONG: explain why with technical reasoning
+3. Unsure: propose the safer alternative
 
 When proposing fixes, use this JSON format:
 ```json
@@ -121,8 +113,7 @@ When proposing fixes, use this JSON format:
 ```
 
 **Response format as DEVELOPER:**
-- Address EVERY concern (numbered, matching the reviewer's list)
-- End with: CHANGES_PROPOSED: YES (if you proposed fixes) or CHANGES_PROPOSED: NO
+End with: CHANGES_PROPOSED: YES (if you proposed fixes) or CHANGES_PROPOSED: NO
 """
 
 MAX_REVIEW_ROUNDS = 3
@@ -285,7 +276,7 @@ class ReviewEngine:
     # ── Direct LLM chat (bypasses ToolLoopEngine) ────────────────────
 
     @staticmethod
-    def _chat(engine, messages, max_tokens=6000, temperature=0.3):
+    def _chat(engine, messages, max_tokens=4000, temperature=0.3):
         """Send the conversation to the LLM and return the assistant text.
 
         Uses engine._call_llm() directly — no tool loop, no pushback,
@@ -344,27 +335,14 @@ class ReviewEngine:
                      round_num, pr["max_rounds"], pr_id)
 
             # ── Reviewer turn ────────────────────────────────────────
-            if round_num == 1:
-                reviewer_prompt = (
-                    f"**REVIEWER — Round {round_num}/{pr['max_rounds']}:** "
-                    "Review the diff above. Check code quality, correctness, "
-                    "UI/UX, frontend-backend integration, and scope. "
-                    "End with your VERDICT."
-                )
-            else:
-                reviewer_prompt = (
-                    f"**REVIEWER — Round {round_num}/{pr['max_rounds']}:** "
-                    "The developer has responded to your concerns above. "
-                    "Re-evaluate each concern in light of the developer's "
-                    "arguments and any patches applied. If the developer's "
-                    "pushback is technically valid, drop that concern. "
-                    "If the developer's fix resolves the issue, acknowledge it. "
-                    "Only maintain concerns that remain genuinely unresolved. "
-                    "End with your VERDICT."
-                )
-            messages.append({"role": "user", "content": reviewer_prompt})
+            messages.append({"role": "user", "content": (
+                f"**REVIEWER — Round {round_num}/{pr['max_rounds']}:** "
+                "Review the diff above. Check code quality, correctness, "
+                "UI/UX, frontend-backend integration, and scope. "
+                "End with your VERDICT."
+            )})
 
-            reviewer_text = self._chat(engine, messages, max_tokens=8000)
+            reviewer_text = self._chat(engine, messages)
             if not reviewer_text:
                 log.warning("Reviewer produced no response round %d — rejecting",
                             round_num)
@@ -387,46 +365,17 @@ class ReviewEngine:
                 return "blocked"
 
             # ── Developer turn ───────────────────────────────────────
-            dev_prompt = (
-                f"**DEVELOPER — Round {round_num}:** You MUST respond now. "
-                "Go through EVERY concern the reviewer raised, numbered. "
-                "For each one:\n"
-                "- If the reviewer is RIGHT: acknowledge it and propose a "
-                "concrete patch to fix it.\n"
-                "- If the reviewer is WRONG or MISTAKEN: push back firmly. "
-                "Explain exactly why their concern is invalid — cite the "
-                "actual code, the actual behavior, the constraints they "
-                "missed. Do NOT silently accept incorrect criticism.\n"
-                "- If unsure: propose the safer option.\n\n"
+            messages.append({"role": "user", "content": (
+                "**DEVELOPER:** Respond to every concern the reviewer raised. "
+                "For valid concerns, propose a concrete fix as a patch. "
+                "For invalid ones, explain why with technical reasoning. "
                 "End with CHANGES_PROPOSED: YES or CHANGES_PROPOSED: NO."
-            )
-            messages.append({"role": "user", "content": dev_prompt})
+            )})
 
-            developer_text = self._chat(engine, messages, max_tokens=8000)
+            developer_text = self._chat(engine, messages)
             if not developer_text:
-                log.warning("Developer silent round %d attempt 1 — retrying "
-                            "with higher temperature", round_num)
-                developer_text = self._chat(
-                    engine, messages, max_tokens=8000, temperature=0.7
-                )
-            if not developer_text:
-                log.warning("Developer silent round %d attempt 2 — retrying "
-                            "with minimal context", round_num)
-                short_msgs = [
-                    messages[0],
-                    {"role": "user", "content": (
-                        f"A reviewer said:\n\n{reviewer_text[:3000]}\n\n"
-                        "As the DEVELOPER, respond to every concern. "
-                        "Push back on anything incorrect. "
-                        "End with CHANGES_PROPOSED: YES or NO."
-                    )},
-                ]
-                developer_text = self._chat(
-                    engine, short_msgs, max_tokens=8000, temperature=0.5
-                )
-            if not developer_text:
-                log.info("Developer silent round %d after 3 attempts — "
-                         "reviewer concerns stand, rejecting", round_num)
+                log.info("Developer silent round %d — reviewer concerns stand, "
+                         "rejecting", round_num)
                 self.store.set_verdict(pr_id, "rejected",
                     f"Developer could not respond in round {round_num}")
                 return "rejected"
