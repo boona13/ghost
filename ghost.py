@@ -101,6 +101,7 @@ if SHUTDOWN_MARKER.exists():
 
 # Lightweight provider/model normalization self-check (non-fatal)
 try:
+    from ghost_providers import run_provider_model_validation_selfcheck
     _provider_selfcheck = run_provider_model_validation_selfcheck()
     if not _provider_selfcheck.get("passed", False):
         print("[provider-selfcheck] warnings:", _provider_selfcheck.get("checks", []))
