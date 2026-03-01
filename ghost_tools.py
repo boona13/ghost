@@ -276,6 +276,42 @@ def _check_dangerous_command_policy(command: str, cfg: dict, workspace=None):
 
 
 # ═════════════════════════════════════════════════════════════════════
+#  SECURITY AUDIT LOGGING
+# ═════════════════════════════════════════════════════════════════════
+
+SECURITY_AUDIT_LOG = GHOST_HOME / "logs" / "security_audit.jsonl"
+
+
+def _audit_log_interpreter(command: str, workspace: Optional[str], result: str, reason: str = ""):
+    """Write an audit log entry for interpreter command execution.
+    
+    Args:
+        command: The command being executed
+        workspace: Optional workspace context
+        result: "ALLOWED" or "DENIED"
+        reason: Optional reason for denial (policy code)
+    """
+    try:
+        # Ensure logs directory exists
+        SECURITY_AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
+        
+        entry = {
+            "timestamp": datetime.now().isoformat(),
+            "event": "interpreter_exec",
+            "command": command[:500] if command else "",  # Truncate for safety
+            "workspace": workspace,
+            "result": result,
+            "reason": reason,
+        }
+        
+        with open(SECURITY_AUDIT_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception:
+        # Audit logging should never block execution
+        pass
+
+
+# ═════════════════════════════════════════════════════════════════════
 #  TOOL DEFINITIONS
 # ═════════════════════════════════════════════════════════════════════
 

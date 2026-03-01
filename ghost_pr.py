@@ -29,84 +29,64 @@ PR_DIR.mkdir(parents=True, exist_ok=True)
 
 log = logging.getLogger("ghost.pr")
 
-# ── Persona Prompts ──────────────────────────────────────────────────
+# ── Review System Prompt ──────────────────────────────────────────────
 
-REVIEWER_PERSONA = """\
-You are Ghost's CODE REVIEWER — a strict, senior engineer whose sole purpose \
-is to protect the codebase from regressions, bugs, and bad design.
+REVIEW_SYSTEM_PROMPT = """\
+You are a code review system with two personas. You will be asked to respond \
+as either the REVIEWER or the DEVELOPER depending on the turn.
 
-You review code quality, UI/UX quality, and frontend-backend integration as a \
-single concern. You have seen Ghost's past mistakes and you WILL NOT let them \
-happen again.
+## When acting as REVIEWER
 
-## Your Review Checklist
+You are a strict, senior engineer protecting the codebase from regressions, \
+bugs, and bad design. Check:
 
 ### Code Quality
 - Security: input validation, path sanitization, no hardcoded secrets
 - Correctness: logic bugs, off-by-one, race conditions, error handling
 - Simplicity: no over-engineering, no unnecessary abstractions
-- No regressions: changes must not break existing functionality
 
-### UI/UX Quality (past mistakes M-08 through M-12)
-- Modals MUST default to hidden (no display:flex on overlays)
-- Modals MUST be dismissable (X button, overlay click, Escape key)
-- Forms MUST use proper input types (selectors/pickers for known values, NOT raw text fields)
-- UI MUST follow existing dashboard patterns (SVG icons, NOT emojis; dark theme; stat-card, btn, form-input, badge classes)
-- Form labels MUST be accurate and match the actual expected input
+### UI/UX Quality
+- Modals MUST default to hidden, be dismissable (X, overlay click, Escape)
+- Forms MUST use proper input types, follow dashboard dark theme patterns
+- SVG icons, not emojis; use stat-card, btn, form-input, badge classes
 
-### Frontend-Backend Integration (past mistakes M-14, M-15, M-23 — MOST DAMAGING)
-- If a backend API is added, there MUST be frontend UI that calls it
-- If frontend UI is added, the backend MUST actually persist and return the data
-- The feature MUST be wired into the runtime (not just CRUD + UI that does nothing)
-- API response data MUST be live, not stale/default values
-- JS payload shape MUST match what the Python route reads from request.get_json()
+### Frontend-Backend Integration (MOST DAMAGING past mistakes)
+- Backend API added = frontend UI MUST call it
+- Frontend UI added = backend MUST persist and return data
+- Feature MUST be wired into runtime (not just dead CRUD + UI)
+- JS payload shape MUST match Python route's request.get_json()
 
-### Python Correctness (past mistake M-06)
-- NEVER import mutable module-level state with `from module import var` (dead copy)
-- MUST use `import module; module.var` for live references to module state
-- No double-escaped strings (\\\\n vs \\n)
+### Python Correctness
+- NEVER `from module import mutable_var` (dead copy) — use `import module; module.var`
+- No double-escaped strings
 
-### Scope (past mistake M-19)
+### Scope
 - PR should do ONE thing. Flag unrelated changes.
 
-## How to Respond
+**Response format as REVIEWER:**
+1. Brief summary (1-2 sentences)
+2. Specific concerns with line references from the diff
+3. End with EXACTLY ONE verdict:
+   VERDICT: APPROVE — safe, correct, well-integrated
+   VERDICT: REQUEST_CHANGES — specific issues to fix (list them)
+   VERDICT: BLOCK — fundamentally wrong approach
 
-You MUST structure your response as follows:
+## When acting as DEVELOPER
 
-1. Start with a brief summary of what the PR does (1-2 sentences)
-2. List specific concerns with line references from the diff
-3. End with EXACTLY ONE of these verdict lines:
+You are the engineer who wrote this code. Defend your decisions honestly.
 
-   VERDICT: APPROVE — the change is safe, correct, and well-integrated
-   VERDICT: REQUEST_CHANGES — specific issues must be fixed (list them)
-   VERDICT: BLOCK — fundamentally wrong approach, not fixable with patches
+For each reviewer concern:
+1. Reviewer is RIGHT: acknowledge and propose a fix as a patch
+2. Reviewer is WRONG: explain why with technical reasoning
+3. Unsure: propose the safer alternative
 
-Use BLOCK only when the entire approach is wrong (duplicates existing \
-functionality, violates architecture, or introduces an unfixable security hole). \
-Most issues should be REQUEST_CHANGES.
-"""
-
-DEVELOPER_PERSONA = """\
-You are Ghost's DEVELOPER — the engineer who wrote the code under review. \
-Your job is to defend your decisions with technical reasoning, but also to \
-honestly acknowledge valid concerns.
-
-## How to Respond
-
-For each concern the reviewer raised:
-1. If the reviewer is RIGHT: acknowledge it and propose a CONCRETE fix (include \
-   the actual code patch — {old: "...", new: "..."} format)
-2. If the reviewer is WRONG: explain why with specific technical reasoning
-3. If you're unsure: say so and propose the safer alternative
-
-When proposing fixes, wrap them in a JSON block:
+When proposing fixes, use this JSON format:
 ```json
-{"patches": [{"file": "ghost_example.py", "old": "old code", "new": "new code"}]}
+{"patches": [{"file": "filename.py", "old": "old code", "new": "new code"}]}
 ```
 
-End your response with:
-CHANGES_PROPOSED: YES (if you proposed fixes)
-CHANGES_PROPOSED: NO (if you disagree with all concerns and stand by the original code)
+**Response format as DEVELOPER:**
+End with: CHANGES_PROPOSED: YES (if you proposed fixes) or CHANGES_PROPOSED: NO
 """
 
 MAX_REVIEW_ROUNDS = 3
@@ -254,18 +234,56 @@ class PRStore:
 # ── Review Engine ────────────────────────────────────────────────────
 
 class ReviewEngine:
-    """Orchestrates multi-persona code review dialogue."""
+    """Orchestrates code review as a real multi-turn conversation.
+
+    Instead of isolated single_shot() calls that rebuild massive context
+    each time, the review runs as one continuous chat thread. The diff is
+    sent once, and the LLM role-plays reviewer/developer on alternating
+    turns via short turn markers.
+    """
 
     def __init__(self, store: PRStore, evolve_engine=None):
         self.store = store
         self.evolve_engine = evolve_engine
 
-    def run_review(self, pr_id: str, engine) -> str:
-        """Run the full review cycle. Returns verdict: approved/rejected/blocked.
+    # ── Direct LLM chat (bypasses ToolLoopEngine) ────────────────────
 
-        Args:
-            pr_id: The PR to review
-            engine: ToolLoopEngine instance for LLM calls
+    @staticmethod
+    def _chat(engine, messages, max_tokens=4000, temperature=0.3):
+        """Send the conversation to the LLM and return the assistant text.
+
+        Uses engine._call_llm() directly — no tool loop, no pushback,
+        no loop detection. Just a plain chat completion.
+        Returns None on any failure.
+        """
+        payload = {
+            "model": engine.model,
+            "messages": list(messages),
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        try:
+            data, error = engine._call_llm(payload)
+        except Exception as exc:
+            log.warning("LLM call raised: %s", exc)
+            return None
+        if error or not data:
+            log.warning("LLM call failed: %s", error)
+            return None
+        choices = data.get("choices") if isinstance(data, dict) else None
+        if not choices:
+            return None
+        text = (choices[0].get("message", {}).get("content") or "").strip()
+        return text or None
+
+    # ── Main review loop ─────────────────────────────────────────────
+
+    def run_review(self, pr_id: str, engine) -> str:
+        """Run a conversational code review. Returns: approved/rejected/blocked.
+
+        The entire review is one messages thread:
+          system  →  PR context (diff, title, desc)  →  reviewer turn  →
+          developer turn  →  reviewer turn  →  ...  →  final verdict.
         """
         pr = self.store.get_pr(pr_id)
         if not pr:
@@ -274,141 +292,87 @@ class ReviewEngine:
         self.store.update_status(pr_id, "reviewing")
         log.info("Starting review for PR %s: %s", pr_id, pr["title"])
 
+        diff_text = pr["diff"][:15000]
+        messages = [
+            {"role": "system", "content": REVIEW_SYSTEM_PROMPT},
+            {"role": "user", "content": (
+                f"## Pull Request: {pr['title']}\n"
+                f"**Description:** {pr['description']}\n"
+                f"**Files changed:** {', '.join(pr['files_changed'])}\n\n"
+                f"```diff\n{diff_text}\n```"
+            )},
+        ]
+
         for round_num in range(1, pr["max_rounds"] + 1):
             log.info("Review round %d/%d for PR %s",
                      round_num, pr["max_rounds"], pr_id)
 
-            # --- Reviewer turn (with retries + escalating temperature) ---
-            reviewer_context = self._format_reviewer_context(pr, round_num)
-            reviewer_response = None
-            for attempt in range(3):
-                try:
-                    prompt = reviewer_context
-                    if attempt > 0:
-                        prompt += (
-                            "\n\nIMPORTANT: Your previous response was empty. "
-                            "You MUST respond with:\n"
-                            "1) A summary of the PR\n"
-                            "2) Specific concerns (if any)\n"
-                            "3) End with EXACTLY one of: VERDICT: APPROVE, "
-                            "VERDICT: REQUEST_CHANGES, or VERDICT: BLOCK\n"
-                        )
-                    reviewer_response = engine.single_shot(
-                        system_prompt=REVIEWER_PERSONA,
-                        user_message=prompt,
-                        max_tokens=4000,
-                        temperature=0.2 + (attempt * 0.15),
-                    )
-                except Exception as e:
-                    log.warning("Reviewer LLM call failed round %d attempt %d: %s",
-                                round_num, attempt + 1, e)
-                    reviewer_response = None
-                if reviewer_response and reviewer_response.strip():
-                    break
-                reviewer_response = None
-                log.warning("Reviewer response empty round %d attempt %d",
-                            round_num, attempt + 1)
-            if not reviewer_response:
-                log.warning("Reviewer empty after 3 attempts round %d, auto-approving",
-                            round_num)
-                self.store.set_verdict(pr_id, "approved")
-                return "approved"
-            self.store.add_discussion(pr_id, "reviewer",
-                                      reviewer_response, round_num)
+            # ── Reviewer turn ────────────────────────────────────────
+            messages.append({"role": "user", "content": (
+                f"**REVIEWER — Round {round_num}/{pr['max_rounds']}:** "
+                "Review the diff above. Check code quality, correctness, "
+                "UI/UX, frontend-backend integration, and scope. "
+                "End with your VERDICT."
+            )})
 
-            verdict = self._parse_verdict(reviewer_response)
+            reviewer_text = self._chat(engine, messages)
+            if not reviewer_text:
+                log.warning("Reviewer produced no response round %d — rejecting",
+                            round_num)
+                self.store.set_verdict(pr_id, "rejected",
+                    f"LLM failed to produce reviewer response in round {round_num}")
+                return "rejected"
+
+            messages.append({"role": "assistant", "content": reviewer_text})
+            self.store.add_discussion(pr_id, "reviewer", reviewer_text, round_num)
+
+            verdict = self._parse_verdict(reviewer_text)
             log.info("Reviewer verdict round %d: %s", round_num, verdict)
 
             if verdict == "approve":
                 self.store.set_verdict(pr_id, "approved")
                 return "approved"
             if verdict == "block":
-                reason = self._extract_block_reason(reviewer_response)
+                reason = self._extract_block_reason(reviewer_text)
                 self.store.set_verdict(pr_id, "blocked", reason)
                 return "blocked"
 
-            # --- Developer turn (single attempt — no retries) ---
-            pr = self.store.get_pr(pr_id)
-            developer_context = self._format_developer_context(
-                pr, reviewer_response, round_num)
-            developer_response = None
-            try:
-                developer_response = engine.single_shot(
-                    system_prompt=DEVELOPER_PERSONA,
-                    user_message=developer_context,
-                    max_tokens=4000,
-                    temperature=0.3,
-                )
-            except Exception as e:
-                log.warning("Developer LLM call failed round %d: %s",
-                            round_num, e)
-            if not developer_response or not developer_response.strip():
-                log.info("Developer silent round %d — auto-approving PR", round_num)
-                self.store.set_verdict(pr_id, "approved")
-                return "approved"
-            self.store.add_discussion(pr_id, "developer",
-                                      developer_response, round_num)
+            # ── Developer turn ───────────────────────────────────────
+            messages.append({"role": "user", "content": (
+                "**DEVELOPER:** Respond to every concern the reviewer raised. "
+                "For valid concerns, propose a concrete fix as a patch. "
+                "For invalid ones, explain why with technical reasoning. "
+                "End with CHANGES_PROPOSED: YES or CHANGES_PROPOSED: NO."
+            )})
+
+            developer_text = self._chat(engine, messages)
+            if not developer_text:
+                log.info("Developer silent round %d — reviewer concerns stand, "
+                         "rejecting", round_num)
+                self.store.set_verdict(pr_id, "rejected",
+                    f"Developer could not respond in round {round_num}")
+                return "rejected"
+
+            messages.append({"role": "assistant", "content": developer_text})
+            self.store.add_discussion(pr_id, "developer", developer_text,
+                                      round_num)
 
             # Apply patches if developer proposed changes
-            if self._has_proposed_changes(developer_response):
-                patches = self._extract_patches(developer_response)
+            if self._has_proposed_changes(developer_text):
+                patches = self._extract_patches(developer_text)
                 if patches and self.evolve_engine:
-                    self._apply_review_patches(
-                        pr, patches, round_num)
+                    self._apply_review_patches(pr, patches, round_num)
                     pr = self.store.get_pr(pr_id)
+                    diff_text = pr["diff"][:15000]
+                    messages.append({"role": "user", "content": (
+                        "Patches have been applied and tested. "
+                        f"Updated diff:\n```diff\n{diff_text}\n```"
+                    )})
 
-        # Max rounds exhausted
+        # Max rounds exhausted without resolution
         self.store.set_verdict(pr_id, "rejected")
         log.info("PR %s rejected: max review rounds exhausted", pr_id)
         return "rejected"
-
-    def _format_reviewer_context(self, pr: Dict, round_num: int) -> str:
-        parts = [
-            f"## Pull Request: {pr['title']}",
-            f"**Description:** {pr['description']}",
-            f"**Files changed:** {', '.join(pr['files_changed'])}",
-            f"**Review round:** {round_num}/{pr['max_rounds']}",
-            "",
-            "## Diff",
-            "```diff",
-            pr["diff"][:15000],
-            "```",
-        ]
-
-        if round_num > 1 and pr["discussions"]:
-            parts.append("\n## Previous Discussion")
-            for d in pr["discussions"]:
-                role_label = "REVIEWER" if d["role"] == "reviewer" else "DEVELOPER"
-                parts.append(f"\n### {role_label} (Round {d['round']})")
-                parts.append(d["message"])
-
-        parts.append(
-            "\n\nReview this PR. Check code quality, UI/UX, "
-            "frontend-backend integration, and Python correctness. "
-            "End with your VERDICT."
-        )
-        return "\n".join(parts)
-
-    def _format_developer_context(self, pr: Dict,
-                                  reviewer_message: str,
-                                  round_num: int) -> str:
-        parts = [
-            f"## Your PR: {pr['title']}",
-            f"**Description:** {pr['description']}",
-            f"**Files changed:** {', '.join(pr['files_changed'])}",
-            "",
-            "## Your Diff",
-            "```diff",
-            pr["diff"][:15000],
-            "```",
-            "",
-            f"## Reviewer Feedback (Round {round_num})",
-            reviewer_message,
-            "",
-            "Respond to each concern. If you agree with a fix, include "
-            "the patch in JSON format. End with CHANGES_PROPOSED: YES or NO.",
-        ]
-        return "\n".join(parts)
 
     def _parse_verdict(self, response: str) -> str:
         response_upper = response.upper()
