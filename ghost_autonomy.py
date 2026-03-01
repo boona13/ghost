@@ -145,8 +145,11 @@ class GrowthLogger:
             if (existing["routine"] == routine and 
                 existing["summary"] == summary and
                 (now - existing_time) < timedelta(minutes=10)):
-                # Return existing entry with warning
-                existing["_warning"] = "Duplicate entry detected within 10 minutes"
+                existing["_warning"] = (
+                    "DUPLICATE — this was already logged. Do NOT call log_growth_activity again. "
+                    "Continue with your ACTUAL task (evolve_plan, evolve_apply, file_read, etc.). "
+                    "Calling this tool repeatedly is a waste of steps."
+                )
                 return existing
         
         # Also warn if the same summary appears many times recently
@@ -443,7 +446,7 @@ GROWTH_ROUTINES = [
             "   If there IS an in_progress feature: skip to step 2 with THAT feature.\n"
             "   (It was started by the user via Retry/Start — you MUST implement it.)\n"
             "   If NO in_progress: list_future_features(status='pending') — find work.\n"
-            "   If BOTH empty: log_growth_activity('No pending features') → task_complete.\n"
+            "   If BOTH empty: task_complete('No pending features found.').\n"
             "2. get_future_feature(id) — read the full brief.\n"
             "3. start_future_feature(id) — mark in_progress (skip if already in_progress).\n"
             "4. EXPLORE BEFORE BUILDING:\n"
@@ -485,7 +488,7 @@ GROWTH_ROUTINES = [
             "   d) Think: 'If I were a user, would I actually SEE this feature in the UI?'\n"
             "      If no — something is missing. Fix it before deploying.\n"
             "9. complete_future_feature(id, summary) — mark done FIRST.\n"
-            "   log_growth_activity with what you built.\n"
+            "   (Growth activity is logged automatically — do NOT call log_growth_activity.)\n"
             "10. evolve_submit_pr(evolution_id, title, description, feature_id) — submit for code review.\n"
             "    This creates a PR, runs adversarial review (Reviewer vs Developer personas),\n"
             "    and if approved, auto-merges and deploys. NOTHING runs after deploy.\n"
@@ -546,7 +549,7 @@ GROWTH_ROUTINES = [
             "   d) Any feature that already has a 'Wiring fix:' in the pending/in_progress queue.\n"
             "      Check: list_future_features(status='pending') for existing fixes.\n"
             "4. AUDIT each remaining feature through ALL FOUR layers below.\n"
-            "   If NO features remain after filtering, log_growth_activity('No auditable features') → task_complete.\n"
+            "   If NO features remain after filtering, task_complete('No auditable features found.').\n"
             "5. After auditing each feature, IMMEDIATELY call mark_feature_audited(feature_id, result):\n"
             "   - result='pass' if all layers passed.\n"
             "   - result='fail_fix_queued' if you found a bug and queued a wiring fix.\n"

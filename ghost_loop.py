@@ -423,6 +423,8 @@ class LoopDetector:
         self._history: list[dict] = []
         self._warning_buckets: dict[str, int] = {}
         self._call_counter = 0
+        self._global_tool_counts: dict[str, int] = {}
+        self._warning_count = 0
 
     @staticmethod
     def _hash_args(tool_name, args):
@@ -446,16 +448,18 @@ class LoopDetector:
         """Phase 1: record the call BEFORE execution. Returns a call_id for patching result later."""
         call_id = f"lc_{self._call_counter}"
         self._call_counter += 1
+        call_hash = self._hash_args(tool_name, args)
         entry = {
             "id": call_id,
             "tool": tool_name,
-            "call_hash": self._hash_args(tool_name, args),
+            "call_hash": call_hash,
             "result_hash": None,
             "ts": time.time(),
         }
         self._history.append(entry)
         if len(self._history) > self._cfg.history_size:
             self._history.pop(0)
+        self._global_tool_counts[call_hash] = self._global_tool_counts.get(call_hash, 0) + 1
         return call_id
 
     def record_result(self, call_id, result):
@@ -475,6 +479,28 @@ class LoopDetector:
         call_hash = self._hash_args(tool_name, args)
         is_poll = self._is_poll_tool(tool_name, args)
         detectors = self._cfg.detectors
+
+        global_count = self._global_tool_counts.get(call_hash, 0)
+        if global_count >= 5:
+            self._warning_count += 1
+            if global_count >= 8:
+                return LoopDetectionResult(
+                    stuck=True, level="critical", detector="global_total_repeat",
+                    count=global_count,
+                    message=(
+                        f"BLOCKED: {tool_name} called {global_count} times total this session "
+                        "with identical arguments. You are in an infinite loop. "
+                        "STOP calling this tool. Call task_complete NOW."
+                    ),
+                )
+            return LoopDetectionResult(
+                stuck=True, level="warning", detector="global_total_repeat",
+                count=global_count,
+                message=(
+                    f"WARNING: {tool_name} called {global_count} times total this session. "
+                    "Stop calling this tool and make actual progress on the task."
+                ),
+            )
 
         streak = self._get_no_progress_streak(call_hash)
 
@@ -1111,6 +1137,15 @@ class ToolLoopEngine:
                             if loop_detector.should_emit_warning(detection.detector, detection.count):
                                 warning_text = detection.message + "\n\n"
                                 loop_hint = f"WARN:{detection.detector}"
+                            if loop_detector._warning_count >= 6:
+                                final_text = (
+                                    f"(Loop terminated: model stuck calling the same tools "
+                                    f"repeatedly — {loop_detector._warning_count} warnings accumulated.)"
+                                )
+                                exit_reason = "warning_accumulation_break"
+                                _debug_logger.step_error(step,
+                                    f"Force-exit: {loop_detector._warning_count} loop warnings")
+                                break
 
                         exec_args = fn_args
                         if hook_runner:

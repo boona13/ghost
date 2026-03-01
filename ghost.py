@@ -1498,7 +1498,6 @@ class GhostDaemon:
                         "browser_click", "browser_type",
                         # Memory & logging
                         "memory_save", "memory_search",
-                        "log_growth_activity",
                         # Config
                         "config_get", "config_set",
                         # Completion

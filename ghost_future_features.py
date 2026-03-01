@@ -765,6 +765,16 @@ def build_future_features_tools(cfg, on_queue_change=None):
         store.mark_implemented(feature_id, implementation_summary)
         changelog.add(item, implementation_summary)
         _notify_queue()
+        try:
+            from ghost_autonomy import GrowthLog
+            GrowthLog().add(
+                routine="feature_implementer",
+                summary=f"Completed: {item['title']}",
+                details=implementation_summary or "No details",
+                category=item.get("category", "feature"),
+            )
+        except Exception:
+            pass
         return f"Feature completed: [{feature_id}] {item['title']}"
 
     def _fail_future_feature(feature_id: str, error: str = ""):
