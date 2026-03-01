@@ -743,6 +743,13 @@ class EvolutionEngine:
         _log = logging.getLogger("ghost.evolve")
         _log.info("PR %s verdict: %s", pr["pr_id"], verdict)
 
+        def _notify_queue_best_effort():
+            try:
+                from ghost_dashboard.routes.future_features import _notify_queue
+                _notify_queue()
+            except Exception:
+                pass
+
         if verdict == "approved":
             ghost_git.checkout("main")
             ok, msg = ghost_git.merge(branch_name)
@@ -759,29 +766,55 @@ class EvolutionEngine:
             try:
                 from ghost_future_features import FutureFeaturesStore
                 if feature_id:
-                    FutureFeaturesStore().mark_blocked(
+                    # Treat BLOCK as terminal for this feature request.
+                    FutureFeaturesStore().reject(
                         feature_id, f"Blocked by reviewer (PR {pr['pr_id']})")
+                    _notify_queue_best_effort()
             except Exception:
                 pass
             return False, (
                 f"PR {pr['pr_id']} BLOCKED by reviewer. "
-                f"Feature {feature_id} marked as blocked. Call task_complete."
+                f"Feature {feature_id} marked as rejected. Call task_complete."
             )
 
         else:  # rejected
             ghost_git.stash_and_checkout("main")
             ghost_git.delete_branch(branch_name)
+            retry_status = ""
             try:
                 from ghost_future_features import FutureFeaturesStore
                 if feature_id:
-                    FutureFeaturesStore().mark_failed(
-                        feature_id, f"PR rejected after review (PR {pr['pr_id']})")
+                    pr_after = store.get_pr(pr["pr_id"]) or pr
+                    latest_reviewer_feedback = ""
+                    for d in reversed(pr_after.get("discussions", [])):
+                        if d.get("role") == "reviewer" and d.get("message"):
+                            latest_reviewer_feedback = d["message"]
+                            break
+                    reason = f"PR rejected after review (PR {pr['pr_id']})"
+                    if latest_reviewer_feedback:
+                        # Keep this bounded so feature payloads remain manageable.
+                        feedback = latest_reviewer_feedback[:1200]
+                        reason = (
+                            f"{reason}. Latest reviewer feedback:\n{feedback}"
+                        )
+                    ok_retry, retry_status = FutureFeaturesStore().mark_review_rejected(
+                        feature_id, reason,
+                        max_retries=3)
+                    if ok_retry:
+                        _notify_queue_best_effort()
             except Exception:
                 pass
             from ghost_pr import MAX_REVIEW_ROUNDS
+            retry_msg = (
+                "Feature was re-queued to pending for another implementer attempt."
+                if retry_status == "pending" else
+                "Feature was deferred after max retry attempts."
+                if retry_status == "deferred" else
+                "Feature retry status unknown."
+            )
             return False, (
                 f"PR {pr['pr_id']} REJECTED after {MAX_REVIEW_ROUNDS} review rounds. "
-                f"Feature {feature_id} marked as failed. Call task_complete."
+                f"{retry_msg} Call task_complete."
             )
 
     def deploy(self, evolution_id):

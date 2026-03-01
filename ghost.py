@@ -979,6 +979,54 @@ class GhostDaemon:
         for tool_def in build_future_features_tools(cfg, on_queue_change=_on_queue_change):
             self.tool_registry.register(tool_def)
 
+        # Reconcile stale open/reviewing PRs from previous runs.
+        # If a PR is open but its evolution is no longer active, auto-close it
+        # and re-queue the linked feature with reviewer feedback so the
+        # implementer can produce a new PR cycle.
+        try:
+            from ghost_pr import get_pr_store
+            pr_store = get_pr_store()
+            stale_closed = 0
+            requeued = 0
+
+            for pr in pr_store.list_prs():
+                if pr.get("status") not in ("open", "reviewing"):
+                    continue
+                evo_id = pr.get("evolution_id", "")
+                pr_id = pr.get("pr_id", "")
+                feature_id = pr.get("feature_id", "")
+                evo_active = bool(
+                    self.evolve_engine and evo_id in self.evolve_engine._active_evolutions
+                )
+                if evo_active:
+                    continue
+
+                reason = (
+                    "Auto-closed stale PR on startup: evolution context is no longer active. "
+                    "Feature has been re-queued for a new implementation and PR cycle."
+                )
+                pr_store.set_verdict(pr_id, "rejected", reason)
+                stale_closed += 1
+
+                if feature_id:
+                    ok_retry, retry_status = self._features_store.mark_review_rejected(
+                        feature_id, reason, max_retries=3
+                    )
+                    if ok_retry and retry_status == "pending":
+                        requeued += 1
+
+            if stale_closed:
+                print(f"  [PR] Auto-closed {stale_closed} stale open/reviewing PR(s)")
+                if self.cron and self._features_store.is_queue_ready():
+                    self.cron.fire_now(_FEATURE_IMPLEMENTER_JOB)
+                if requeued:
+                    console_bus.emit(
+                        "warning", "system", "stale_pr_requeue",
+                        f"Re-queued {requeued} feature(s) after stale PR cleanup",
+                    )
+        except Exception:
+            pass
+
         # Expose shell-hardening impact assessor for internal policy decisions
         self.assess_command_hardening_impact = assess_command_hardening_impact
 

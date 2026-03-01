@@ -433,6 +433,51 @@ class FutureFeaturesStore:
                 return True
         return False
 
+    def mark_review_rejected(self, feature_id: str, reason: str = "",
+                             max_retries: int = 3) -> tuple[bool, str]:
+        """Handle PR reviewer rejection by re-queuing or deferring.
+
+        Behavior:
+        - If implementation_attempts < max_retries: set back to pending so the
+          Feature Implementer can try again and submit a new PR.
+        - Otherwise: set deferred to stop infinite retry loops.
+
+        Returns:
+            (ok, status) where status is "pending" or "deferred".
+        """
+        features = self._load()
+        now = datetime.now().isoformat()
+        for f in features:
+            if f["id"] != feature_id:
+                continue
+
+            attempts = int(f.get("implementation_attempts", 0))
+            if attempts >= max_retries:
+                f["status"] = STATUS_DEFERRED
+                f["defer_reason"] = (
+                    f"PR reviewer rejected after {attempts} attempts"
+                )
+                final_status = STATUS_DEFERRED
+            else:
+                f["status"] = STATUS_PENDING
+                final_status = STATUS_PENDING
+
+            f["updated_at"] = now
+            f["last_error"] = reason
+            if "implementation_log" not in f:
+                f["implementation_log"] = []
+            f["implementation_log"].append({
+                "timestamp": now,
+                "message": (
+                    f"PR reviewer rejected: {reason}. "
+                    f"{'Deferred after max retries' if final_status == STATUS_DEFERRED else 'Re-queued for another implementation attempt'}."
+                ),
+            })
+            self._save(features)
+            return True, final_status
+
+        return False, ""
+
     def defer(self, feature_id: str, reason: str = "") -> bool:
         """Defer a feature to be reconsidered later."""
         features = self._load()
@@ -670,8 +715,11 @@ def build_future_features_tools(cfg, on_queue_change=None):
             f"Status: {f.get('status', 'unknown')}",
             f"Source: {f.get('source', 'unknown')}",
             f"Effort: {f.get('estimated_effort', 'unknown')}",
+            f"Attempts: {f.get('implementation_attempts', 0)}",
             f"Created: {f.get('created_at', 'unknown')}",
         ]
+        if f.get("last_error"):
+            lines.append(f"Last Error: {f['last_error']}")
         if f.get("description"):
             lines.append(f"\nDescription:\n{f['description']}")
         if f.get("affected_files"):
