@@ -8,6 +8,7 @@ Provides: EvolutionEngine (backup, validate, test, deploy, rollback, history)
 import ast
 import difflib
 import json
+import logging
 import os
 import re
 import shutil
@@ -19,6 +20,8 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
+
+log = logging.getLogger("ghost.evolve")
 
 PROJECT_DIR = Path(__file__).resolve().parent
 GHOST_HOME = Path.home() / ".ghost"

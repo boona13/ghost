@@ -32,6 +32,7 @@ let needsSetup = false;
 let _prevConnected = true;
 
 function navigate(page) {
+  page = page.split('?')[0];
   if (needsSetup && page !== 'setup') page = 'setup';
   if (!pages[page]) page = 'overview';
   currentPage = page;
