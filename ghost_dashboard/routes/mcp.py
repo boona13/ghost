@@ -188,6 +188,18 @@ def update_config():
     if re.search(r'[;&|`$(){}[\]<>]', command):
         return jsonify({"ok": False, "error": "Command contains forbidden characters"}), 400
     
+    # Handle args as either string (from form) or list (from API)
+    args = data.get("args", [])
+    if isinstance(args, str):
+        args = [a for a in args.split() if a]
+    elif not isinstance(args, list):
+        return jsonify({"ok": False, "error": "args must be a string or list"}), 400
+    
+    # Validate env is a dict
+    env = data.get("env", {})
+    if not isinstance(env, dict):
+        return jsonify({"ok": False, "error": "env must be an object"}), 400
+    
     try:
         with _config_lock:
             cfg = daemon.cfg if hasattr(daemon, "cfg") else {}
@@ -196,8 +208,8 @@ def update_config():
             # Build server config
             server_config = {
                 "command": command,
-                "args": data.get("args", []),
-                "env": data.get("env", {}),
+                "args": args,
+                "env": env,
                 "enabled": data.get("enabled", True),
                 "timeout": data.get("timeout", 30.0),
             }
