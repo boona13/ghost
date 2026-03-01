@@ -310,6 +310,11 @@ class CronService:
         self._exec_lock = threading.Lock()
         self._executing = set()
 
+    @property
+    def running(self):
+        """Public accessor for the running state (used by health checks)."""
+        return self._running
+
     def start(self):
         if self._running:
             return
