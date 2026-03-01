@@ -101,24 +101,19 @@ stop the next one. Check EVERY section below.
 ## When acting as DEVELOPER
 
 You are the engineer who wrote this code. You MUST respond to every reviewer \
-concern — silence is not an option.
+concern — silence is not an option. Be thorough and direct.
 
-For each reviewer concern, respond with ONE of these:
+For each reviewer concern, do ONE of:
+1. **Reviewer is RIGHT:** Acknowledge the issue and propose a concrete fix as a patch.
+2. **Reviewer is WRONG:** Push back firmly. Explain with technical evidence why the \
+reviewer's concern is invalid. Cite the actual code, the actual behavior, or the actual \
+constraints that make the reviewer's judgment incorrect. Do NOT just agree to be agreeable — \
+if the code is correct, defend it.
+3. **Unsure:** Propose the safer alternative.
 
-1. **AGREE + FIX**: The reviewer is right. Acknowledge it and propose a concrete \
-patch. Example: "Valid concern. Here's the fix: [patch]"
-2. **DISAGREE + JUSTIFY**: The reviewer is wrong or overly strict. Push back with \
-specific technical reasoning. Cite code, docs, or architecture constraints. \
-Examples of valid pushback:
-   - "This is intentional because [reason]"
-   - "The reviewer misread the code — line X actually does Y because..."
-   - "This pattern is used throughout the codebase (see ghost_X.py line N)"
-   - "The concern is valid in theory but not applicable here because..."
-3. **PARTIAL**: Part of the concern is valid, part is not. Fix what needs fixing, \
-explain what doesn't.
-
-You are NOT a pushover. If you genuinely believe the reviewer is wrong, say so \
-clearly and explain why. A good developer defends correct design decisions.
+You are allowed to convince the reviewer to change their verdict. If you believe the \
+reviewer made a mistake (misread the diff, flagged a non-issue, applied the wrong rule), \
+say so clearly and explain why.
 
 When proposing fixes, use this JSON format:
 ```json
@@ -126,7 +121,7 @@ When proposing fixes, use this JSON format:
 ```
 
 **Response format as DEVELOPER:**
-- Address each numbered concern from the reviewer (1, 2, 3...)
+- Address EVERY concern (numbered, matching the reviewer's list)
 - End with: CHANGES_PROPOSED: YES (if you proposed fixes) or CHANGES_PROPOSED: NO
 """
 
@@ -287,63 +282,16 @@ class ReviewEngine:
         self.store = store
         self.evolve_engine = evolve_engine
 
-    # ── Token estimation ────────────────────────────────────────────
-
-    @staticmethod
-    def _estimate_tokens(text: str) -> int:
-        """Rough token count (~4 chars per token for English + code)."""
-        return max(1, len(text) // 4)
-
-    @staticmethod
-    def _budget_for_turn(messages, role: str = "reviewer",
-                         reviewer_text: str = "") -> int:
-        """Dynamically compute max_tokens for the next turn.
-
-        Reviewer budget: high base (the checklist is large regardless of diff
-        size) plus a scaling factor for bigger diffs.
-        Developer budget: based on reviewer feedback length and concern count
-        (each concern needs explanation + potential patch).
-        """
-        MIN_TOKENS, MAX_TOKENS = 4000, 12000
-
-        total_input_chars = sum(len(m.get("content", "")) for m in messages)
-        input_tokens = total_input_chars // 4
-
-        if role == "developer" and reviewer_text:
-            import re
-            concerns = len(re.findall(
-                r'(?:^|\n)\s*\d+[\.\)]\s', reviewer_text))
-            concerns = max(concerns, 1)
-            per_concern = 600
-            budget = concerns * per_concern + 2000
-            if len(reviewer_text) > 3000:
-                budget = int(budget * 1.3)
-        else:
-            diff_chars = 0
-            for m in messages:
-                if "```diff" in m.get("content", ""):
-                    diff_chars = len(m["content"])
-                    break
-            budget = 5000 + (diff_chars // 8)
-
-        budget = max(MIN_TOKENS, min(MAX_TOKENS, budget))
-        log.info("Token budget for %s: %d (input ~%d tokens, %d msg chars)",
-                 role, budget, input_tokens, total_input_chars)
-        return budget
-
     # ── Direct LLM chat (bypasses ToolLoopEngine) ────────────────────
 
     @staticmethod
-    def _chat(engine, messages, max_tokens=4000, temperature=0.3):
+    def _chat(engine, messages, max_tokens=6000, temperature=0.3):
         """Send the conversation to the LLM and return the assistant text.
 
         Uses engine._call_llm() directly — no tool loop, no pushback,
         no loop detection. Just a plain chat completion.
         Returns None on any failure.
         """
-        total_chars = sum(len(m.get("content", "")) for m in messages)
-        log.info("PR _chat: %d messages, ~%d chars, model=%s, max_tokens=%d",
-                 len(messages), total_chars, engine.model, max_tokens)
         payload = {
             "model": engine.model,
             "messages": list(messages),
@@ -353,21 +301,15 @@ class ReviewEngine:
         try:
             data, error = engine._call_llm(payload)
         except Exception as exc:
-            log.warning("PR _chat LLM exception: %s", exc)
+            log.warning("LLM call raised: %s", exc)
             return None
         if error or not data:
-            log.warning("PR _chat LLM error: %s (data=%s)", error,
-                        type(data).__name__)
+            log.warning("LLM call failed: %s", error)
             return None
         choices = data.get("choices") if isinstance(data, dict) else None
         if not choices:
-            log.warning("PR _chat: no choices in response (keys=%s)",
-                        list(data.keys()) if isinstance(data, dict) else "N/A")
             return None
         text = (choices[0].get("message", {}).get("content") or "").strip()
-        if not text:
-            finish = choices[0].get("finish_reason", "unknown")
-            log.warning("PR _chat: empty content, finish_reason=%s", finish)
         return text or None
 
     # ── Main review loop ─────────────────────────────────────────────
@@ -402,17 +344,27 @@ class ReviewEngine:
                      round_num, pr["max_rounds"], pr_id)
 
             # ── Reviewer turn ────────────────────────────────────────
-            messages.append({"role": "user", "content": (
-                f"**REVIEWER — Round {round_num}/{pr['max_rounds']}:** "
-                "Review the diff above. Check code quality, correctness, "
-                "UI/UX, frontend-backend integration, and scope. "
-                "End with your VERDICT."
-            )})
+            if round_num == 1:
+                reviewer_prompt = (
+                    f"**REVIEWER — Round {round_num}/{pr['max_rounds']}:** "
+                    "Review the diff above. Check code quality, correctness, "
+                    "UI/UX, frontend-backend integration, and scope. "
+                    "End with your VERDICT."
+                )
+            else:
+                reviewer_prompt = (
+                    f"**REVIEWER — Round {round_num}/{pr['max_rounds']}:** "
+                    "The developer has responded to your concerns above. "
+                    "Re-evaluate each concern in light of the developer's "
+                    "arguments and any patches applied. If the developer's "
+                    "pushback is technically valid, drop that concern. "
+                    "If the developer's fix resolves the issue, acknowledge it. "
+                    "Only maintain concerns that remain genuinely unresolved. "
+                    "End with your VERDICT."
+                )
+            messages.append({"role": "user", "content": reviewer_prompt})
 
-            reviewer_budget = self._budget_for_turn(
-                messages, role="reviewer")
-            reviewer_text = self._chat(
-                engine, messages, max_tokens=reviewer_budget)
+            reviewer_text = self._chat(engine, messages, max_tokens=8000)
             if not reviewer_text:
                 log.warning("Reviewer produced no response round %d — rejecting",
                             round_num)
@@ -436,29 +388,45 @@ class ReviewEngine:
 
             # ── Developer turn ───────────────────────────────────────
             dev_prompt = (
-                f"**DEVELOPER — Round {round_num}:** The reviewer raised "
-                f"concerns above. You MUST respond to each one:\n"
-                "- If you AGREE: say so and propose a patch.\n"
-                "- If you DISAGREE: explain WHY with technical reasoning.\n"
-                "- Do NOT stay silent. Address every numbered concern.\n"
+                f"**DEVELOPER — Round {round_num}:** You MUST respond now. "
+                "Go through EVERY concern the reviewer raised, numbered. "
+                "For each one:\n"
+                "- If the reviewer is RIGHT: acknowledge it and propose a "
+                "concrete patch to fix it.\n"
+                "- If the reviewer is WRONG or MISTAKEN: push back firmly. "
+                "Explain exactly why their concern is invalid — cite the "
+                "actual code, the actual behavior, the constraints they "
+                "missed. Do NOT silently accept incorrect criticism.\n"
+                "- If unsure: propose the safer option.\n\n"
                 "End with CHANGES_PROPOSED: YES or CHANGES_PROPOSED: NO."
             )
             messages.append({"role": "user", "content": dev_prompt})
 
-            dev_budget = self._budget_for_turn(
-                messages, role="developer", reviewer_text=reviewer_text)
-            developer_text = self._chat(
-                engine, messages, max_tokens=dev_budget, temperature=0.3)
+            developer_text = self._chat(engine, messages, max_tokens=8000)
             if not developer_text:
-                log.warning("Developer empty on round %d attempt 1, retrying "
+                log.warning("Developer silent round %d attempt 1 — retrying "
                             "with higher temperature", round_num)
-                messages.pop()
-                messages.append({"role": "user", "content": dev_prompt})
                 developer_text = self._chat(
-                    engine, messages, max_tokens=dev_budget, temperature=0.5)
+                    engine, messages, max_tokens=8000, temperature=0.7
+                )
             if not developer_text:
-                log.info("Developer silent round %d — reviewer concerns stand, "
-                         "rejecting", round_num)
+                log.warning("Developer silent round %d attempt 2 — retrying "
+                            "with minimal context", round_num)
+                short_msgs = [
+                    messages[0],
+                    {"role": "user", "content": (
+                        f"A reviewer said:\n\n{reviewer_text[:3000]}\n\n"
+                        "As the DEVELOPER, respond to every concern. "
+                        "Push back on anything incorrect. "
+                        "End with CHANGES_PROPOSED: YES or NO."
+                    )},
+                ]
+                developer_text = self._chat(
+                    engine, short_msgs, max_tokens=8000, temperature=0.5
+                )
+            if not developer_text:
+                log.info("Developer silent round %d after 3 attempts — "
+                         "reviewer concerns stand, rejecting", round_num)
                 self.store.set_verdict(pr_id, "rejected",
                     f"Developer could not respond in round {round_num}")
                 return "rejected"
