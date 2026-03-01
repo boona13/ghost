@@ -30,8 +30,6 @@ from collections import defaultdict
 log = logging.getLogger("ghost.mcp")
 
 GHOST_HOME = Path.home() / ".ghost"
-MCP_SERVERS_FILE = GHOST_HOME / "mcp_servers.json"
-GHOST_HOME.mkdir(parents=True, exist_ok=True)
 
 
 # JSON-RPC 2.0 helpers
@@ -162,18 +160,28 @@ class MCPManager:
         return self._configs
     
     def connect_server(self, server_id: str) -> bool:
+        config = None
         with self._lock:
             if server_id in self._clients:
                 return True
             config = next((c for c in self._configs if c.id == server_id), None)
-            if not config:
-                log.error(f"MCP server '{server_id}' not found in config")
-                return False
-            client = MCPClient(config)
-            if client.connect():
-                self._clients[server_id] = client
-                return True
+        
+        if not config:
+            log.error(f"MCP server '{server_id}' not found in config")
             return False
+        
+        # Don't hold lock during I/O (subprocess spawn + JSON-RPC)
+        client = MCPClient(config)
+        if not client.connect():
+            return False
+        
+        with self._lock:
+            # Double-check: another thread may have connected while we waited
+            if server_id in self._clients:
+                client.disconnect()
+                return True
+            self._clients[server_id] = client
+            return True
     
     def disconnect_server(self, server_id: str):
         with self._lock:
@@ -309,7 +317,11 @@ def build_mcp_tools(mcp_manager: MCPManager, cfg: dict) -> List[dict]:
         "execute": execute_server_status
     })
     
-    return toolsCLIENT (stdio transport)
+    return tools
+
+
+# ═══════════════════════════════════════════════════════════════
+#  MCP CLIENT (stdio transport)
 # ═══════════════════════════════════════════════════════════════
 
 class MCPClient:
@@ -328,6 +340,7 @@ class MCPClient:
         self._pending: Dict[str, threading.Event] = {}
         self._responses: Dict[str, dict] = {}
         self._reader_thread: Optional[threading.Thread] = None
+        self._stderr_thread: Optional[threading.Thread] = None
         self._running = False
         self._connected = False
         self._server_info: Optional[dict] = None
