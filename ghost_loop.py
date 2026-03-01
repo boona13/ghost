@@ -241,11 +241,17 @@ class ToolLoopDebugLogger:
             pass
 
     def _rotate_if_needed(self):
+        """Rotate log files: keep current + up to 5 backups (.1 through .5)."""
         try:
             if DEBUG_LOG_FILE.exists() and DEBUG_LOG_FILE.stat().st_size > MAX_DEBUG_LOG_SIZE:
-                rotated = DEBUG_LOG_DIR / "tool_loop_debug.prev.jsonl"
-                rotated.unlink(missing_ok=True)
-                DEBUG_LOG_FILE.rename(rotated)
+                # Rotate existing backups: .4 -> .5, .3 -> .4, .2 -> .3, .1 -> .2
+                for i in range(4, 0, -1):
+                    old = DEBUG_LOG_DIR / f"tool_loop_debug.jsonl.{i}"
+                    new = DEBUG_LOG_DIR / f"tool_loop_debug.jsonl.{i+1}"
+                    if old.exists():
+                        old.rename(new)
+                # Rotate current file to .1
+                DEBUG_LOG_FILE.rename(DEBUG_LOG_DIR / "tool_loop_debug.jsonl.1")
         except Exception:
             pass
 
