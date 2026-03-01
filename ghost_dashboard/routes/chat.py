@@ -1,0 +1,1095 @@
+"""Chat API — direct messaging between the user and Ghost daemon."""
+
+import base64
+import json
+import os
+import threading
+import time
+import uuid
+from pathlib import Path
+from datetime import datetime
+from flask import Blueprint, jsonify, request, Response, send_from_directory, abort
+
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from ghost_projects import ProjectRegistry, format_project_for_prompt
+
+# File upload configuration
+AUDIO_EXTENSIONS = {'.wav', '.mp3', '.m4a', '.flac', '.ogg', '.webm', '.aac'}
+IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
+UPLOAD_DIR = Path.home() / ".ghost" / "uploads"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+_EXT_TO_MIME = {
+    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+    '.png': 'image/png', '.gif': 'image/gif',
+    '.webp': 'image/webp', '.bmp': 'image/bmp',
+}
+
+
+def _encode_image_for_llm(file_path: str) -> dict | None:
+    """Read an image file and return {"data": base64_str, "mime": mime_type} or None on failure."""
+    try:
+        p = Path(file_path)
+        if not p.exists() or p.stat().st_size > 20 * 1024 * 1024:
+            return None
+        mime = _EXT_TO_MIME.get(p.suffix.lower(), 'image/png')
+        data = base64.b64encode(p.read_bytes()).decode('ascii')
+        return {"data": data, "mime": mime}
+    except Exception:
+        return None
+
+bp = Blueprint("chat", __name__)
+
+PROJECT_DIR = Path(__file__).resolve().parent.parent.parent
+GHOST_HOME = Path.home() / ".ghost"
+AUDIO_DIR = GHOST_HOME / "audio"
+_SAFE_AUDIO_EXT = {".mp3", ".wav", ".ogg", ".m4a"}
+
+
+@bp.route("/api/audio/<filename>")
+def serve_audio(filename):
+    """Serve generated audio files from ~/.ghost/audio/ (TTS, etc.)."""
+    if ".." in filename or "/" in filename or "\\" in filename:
+        abort(404)
+    ext = Path(filename).suffix.lower()
+    if ext not in _SAFE_AUDIO_EXT:
+        abort(403)
+    if not AUDIO_DIR.exists():
+        abort(404)
+    return send_from_directory(str(AUDIO_DIR), filename)
+RESTART_STATE_FILE = GHOST_HOME / "chat_restart_state.json"
+SESSION_BOUNDARY_FILE = GHOST_HOME / "chat_session_boundary.json"
+
+_chat_sessions = {}
+_chat_lock = threading.Lock()
+_restart_recovery = None
+
+CHAT_ERROR_REPORT_FILE = GHOST_HOME / "chat_error_report.json"
+_repair_lock = threading.Lock()
+_repair_in_progress = False
+
+
+def _get_daemon():
+    from ghost_dashboard import get_daemon
+    return get_daemon()
+
+
+import re as _re
+
+_URL_RE = _re.compile(r'https?://[^\s<>"\']+')
+
+
+def _message_contains_url(message: str) -> bool:
+    """Check if a user message contains an HTTP/HTTPS URL."""
+    return bool(_URL_RE.search(message))
+
+
+def _save_restart_state(session, deploy_result=""):
+    """Persist chat state to disk before a deploy restart kills the process."""
+    try:
+        tool_names = [s.get("tool", "") for s in session.steps if s.get("tool")]
+        summary_parts = []
+        if "evolve_plan" in tool_names:
+            summary_parts.append("planned code changes")
+        apply_count = tool_names.count("evolve_apply")
+        if apply_count:
+            summary_parts.append(f"modified {apply_count} file(s)")
+        if "evolve_test" in tool_names:
+            summary_parts.append("ran tests")
+        if "evolve_deploy" in tool_names:
+            summary_parts.append("deployed successfully")
+
+        if summary_parts:
+            result_hint = (
+                f"Task completed. Ghost {', '.join(summary_parts)}, "
+                "and restarted with the new code. The system is now running with your changes."
+            )
+        else:
+            result_hint = deploy_result or (
+                "Ghost deployed code changes and restarted successfully. "
+                "The system is now running with the updated code."
+            )
+
+        state = {
+            "message_id": session.id,
+            "user_message": session.user_message,
+            "steps": session.steps,
+            "tools_used": session.tools_used,
+            "result_hint": result_hint,
+            "timestamp": time.time(),
+        }
+        GHOST_HOME.mkdir(parents=True, exist_ok=True)
+        RESTART_STATE_FILE.write_text(json.dumps(state, indent=2))
+    except Exception:
+        pass
+
+
+def _load_restart_recovery():
+    """On startup, check for a restart state file left by the previous process."""
+    global _restart_recovery
+    if not RESTART_STATE_FILE.exists():
+        return
+    try:
+        state = json.loads(RESTART_STATE_FILE.read_text())
+        _restart_recovery = state
+
+        FEED_FILE = GHOST_HOME / "feed.json"
+        if FEED_FILE.exists():
+            feed = json.loads(FEED_FILE.read_text())
+        else:
+            feed = []
+
+        msg_id = state.get("message_id", "")
+        updated = False
+        for item in feed:
+            if item.get("message_id") == msg_id:
+                item["result"] = state.get("result_hint", "Ghost restarted after deploying changes.")
+                item["status"] = "complete"
+                item["time"] = datetime.now().isoformat()
+                tools = state.get("tools_used", [])
+                if tools:
+                    item["tools_used"] = tools
+                updated = True
+                break
+        if not updated:
+            feed.insert(0, {
+                "time": datetime.now().isoformat(),
+                "type": "ask",
+                "message_id": msg_id,
+                "source": state.get("user_message", "")[:2000],
+                "result": state.get("result_hint", "Ghost restarted after deploying changes."),
+                "status": "complete",
+            })
+        FEED_FILE.write_text(json.dumps(feed, indent=2))
+    except Exception:
+        pass
+    finally:
+        RESTART_STATE_FILE.unlink(missing_ok=True)
+
+
+_load_restart_recovery()
+
+
+class ChatSession:
+    """Tracks a single chat message being processed by Ghost."""
+
+    def __init__(self, message_id, user_message, attachments=None, project_id=None):
+        self.id = message_id
+        self.user_message = user_message
+        self.attachments = attachments or []
+        self.project_id = project_id
+        self.status = "pending"
+        self.steps = []
+        self.result = None
+        self.error = None
+        self.started_at = time.time()
+        self.finished_at = None
+        self.tools_used = []
+        self.pending_approval = None
+        self.cancelled = False
+
+
+def _build_chat_history(daemon, max_turns=10):
+    """Load recent chat exchanges from the feed to give the LLM conversation context.
+    Respects session boundary — only includes entries after the last clear."""
+    try:
+        FEED_FILE = Path.home() / ".ghost" / "feed.json"
+        if not FEED_FILE.exists():
+            return []
+        items = json.loads(FEED_FILE.read_text())
+        boundary = _get_session_boundary()
+        chat_items = [
+            i for i in items
+            if i.get("type") == "ask" and i.get("result") and i.get("status") == "complete"
+        ]
+        if boundary:
+            chat_items = [
+                i for i in chat_items
+                if (i.get("time", "") or "") >= boundary
+            ]
+        chat_items.reverse()
+        chat_items = chat_items[-max_turns:]
+
+        history = []
+        for item in chat_items:
+            user_msg = item.get("source", "").strip()
+            assistant_msg = (item.get("result") or "").strip()
+            if user_msg and assistant_msg:
+                history.append({"role": "user", "content": user_msg})
+                history.append({"role": "assistant", "content": assistant_msg})
+        return history
+    except Exception:
+        return []
+
+
+def _rollback_evolutions(evolution_ids, daemon):
+    """Restore files from backup for any in-progress evolutions after cancellation.
+
+    Uses _restore_backup directly instead of the full rollback() flow
+    to avoid writing a deploy marker (which would trigger an unnecessary restart).
+    """
+    lines = []
+    try:
+        from ghost_evolve import get_engine
+        evolve_engine = get_engine()
+        for evo_id in evolution_ids:
+            evo = evolve_engine._active_evolutions.get(evo_id)
+            if not evo:
+                # Check if evolution was already rolled back via cleanup_incomplete()
+                already_rolled_back = any(
+                    e.get("rolled_back_evolution") == evo_id or 
+                    (e.get("id") == evo_id and e.get("status") == "rolled_back")
+                    for e in evolve_engine._history
+                )
+                if already_rolled_back:
+                    lines.append(f"Evolution `{evo_id}` was already rolled back via auto-cleanup.")
+                else:
+                    lines.append(f"Evolution `{evo_id}` not found — may already be cleaned up.")
+                continue
+            backup_path = evo.get("backup_path")
+            if not backup_path:
+                lines.append(f"No backup for evolution `{evo_id}` — cannot revert.")
+                continue
+            ok, msg = evolve_engine._restore_backup(backup_path)
+            if ok:
+                evolve_engine._active_evolutions.pop(evo_id, None)
+                lines.append(f"Rolled back evolution `{evo_id}` — all code changes reverted.")
+            else:
+                lines.append(f"Could not rollback `{evo_id}`: {msg}")
+    except Exception as e:
+        lines.append(f"Rollback error: {e}")
+    return "\n".join(lines) if lines else ""
+
+
+def _trigger_chat_repair(daemon, phase: str, error: Exception, traceback_str: str):
+    """Log a chat pipeline error and spawn a background self-repair thread.
+
+    Called when a non-critical phase (skill matching, identity context, etc.) fails.
+    The chat continues with degraded functionality while Ghost fixes itself in the background.
+    """
+    global _repair_in_progress
+    error_msg = str(error)
+    print(f"  [CHAT] {phase} failed: {error_msg} — continuing with degraded mode")
+
+    report = {
+        "time": datetime.now().isoformat(),
+        "phase": phase,
+        "error": error_msg,
+        "traceback": traceback_str,
+        "project_dir": str(PROJECT_DIR),
+    }
+    try:
+        CHAT_ERROR_REPORT_FILE.write_text(json.dumps(report, indent=2))
+    except Exception:
+        pass
+
+    with _repair_lock:
+        if _repair_in_progress:
+            return
+        _repair_in_progress = True
+
+    def _background_repair():
+        global _repair_in_progress
+        try:
+            if not daemon or not daemon.engine or not daemon.tool_registry:
+                return
+
+            repair_prompt = (
+                f"A non-fatal error occurred in Ghost's chat pipeline during the '{phase}' phase.\n"
+                f"Ghost is still running (the chat continued with degraded functionality), "
+                f"but this bug needs to be fixed so future messages work fully.\n\n"
+                f"## Error\n```\n{error_msg}\n```\n\n"
+                f"## Full Traceback\n```\n{traceback_str}```\n\n"
+                f"## Your Task\n"
+                f"1. Read the failing file and line shown in the traceback.\n"
+                f"2. Diagnose the root cause (a malformed data structure, wrong type, etc.).\n"
+                f"3. Queue the fix via add_future_feature with:\n"
+                f"   - title: 'Bug fix: <brief description>'\n"
+                f"   - description: Error message and root cause.\n"
+                f"   - affected_files: The failing file path(s).\n"
+                f"   - proposed_approach: The exact fix.\n"
+                f"   - priority='P1', source='bug_hunter', category='bugfix'\n"
+                f"   P1 triggers the Evolution Runner immediately.\n"
+                f"4. Log what you found with log_growth_activity(routine='self_repair', ...).\n\n"
+                f"Ghost project root: {PROJECT_DIR}\n"
+            )
+
+            system_prompt = (
+                "You are Ghost in BACKGROUND SELF-REPAIR mode. A bug was detected in your "
+                "chat pipeline. The chat is still working in degraded mode, but you need to "
+                "fix the root cause so it doesn't recur. Be surgical — fix only the bug.\n"
+            )
+
+            old_auto = daemon.cfg.get("evolve_auto_approve", False)
+            daemon.cfg["evolve_auto_approve"] = True
+
+            _EVOLVE_NAMES = {
+                "evolve_plan", "evolve_apply", "evolve_apply_config",
+                "evolve_delete", "evolve_test", "evolve_deploy", "evolve_rollback",
+            }
+            repair_names = [
+                name for name in daemon.tool_registry.get_all()
+                if name not in _EVOLVE_NAMES
+            ]
+            repair_registry = daemon.tool_registry.subset(repair_names)
+
+            try:
+                result = daemon.engine.run(
+                    system_prompt=system_prompt,
+                    user_message=repair_prompt,
+                    tool_registry=repair_registry,
+                    max_steps=50,
+                    max_tokens=4096,
+                    force_tool=False,
+                )
+                print(f"  [CHAT REPAIR] Completed: {(result.text or '')[:200]}")
+            except Exception as repair_err:
+                print(f"  [CHAT REPAIR] Failed: {repair_err}")
+            finally:
+                daemon.cfg["evolve_auto_approve"] = old_auto
+
+            CHAT_ERROR_REPORT_FILE.unlink(missing_ok=True)
+        except Exception as e:
+            print(f"  [CHAT REPAIR] Unexpected error: {e}")
+        finally:
+            with _repair_lock:
+                _repair_in_progress = False
+
+    repair_thread = threading.Thread(target=_background_repair, daemon=True, name="chat-self-repair")
+    repair_thread.start()
+
+
+def _process_message(session, daemon):
+    """Run the user message through Ghost's tool loop in a background thread."""
+    try:
+        session.status = "processing"
+
+        active_project = None
+        if session.project_id:
+            try:
+                registry = ProjectRegistry()
+                active_project = registry.get(session.project_id)
+            except Exception:
+                pass
+
+        tool_names = daemon.tool_registry.names() if daemon.tool_registry else []
+
+        matched_skills = []
+        if daemon.skill_loader:
+            try:
+                daemon.skill_loader.check_reload()
+                disabled = set(daemon.cfg.get("disabled_skills", []))
+                if active_project:
+                    disabled |= set(active_project.config.get("disabled_skills", []))
+                matched_skills = daemon.skill_loader.match(
+                    session.user_message, None, disabled=disabled
+                )
+                if active_project:
+                    project_enabled = active_project.config.get("skills", [])
+                    if project_enabled:
+                        allowed = set(project_enabled)
+                        matched_skills = [s for s in matched_skills if s.name in allowed]
+            except Exception as e:
+                import traceback as _tb
+                _trigger_chat_repair(daemon, "skill_matching", e, _tb.format_exc())
+                matched_skills = []
+
+        try:
+            identity = daemon._build_identity_context()
+        except Exception as e:
+            import traceback as _tb
+            _trigger_chat_repair(daemon, "identity_context", e, _tb.format_exc())
+            identity = ""
+        # Build attachment context (text for audio/other) and image list (for vision)
+        attachment_context = ""
+        image_attachments = []
+        if session.attachments:
+            for att in session.attachments:
+                if att.get('type') == 'image' and att.get('path'):
+                    encoded = _encode_image_for_llm(att['path'])
+                    if encoded:
+                        image_attachments.append(encoded)
+                    else:
+                        if not attachment_context:
+                            attachment_context = "\n\n## ATTACHED FILES\n"
+                        attachment_context += f"\n**Image ({att['filename']}):** Failed to load image from `{att['path']}`\n"
+                elif att.get('type') == 'audio':
+                    if not attachment_context:
+                        attachment_context = "\n\n## ATTACHED FILES\n"
+                    if att.get('transcript'):
+                        attachment_context += f"\n**Audio ({att['filename']}) — Transcript:**\n{att['transcript']}\n"
+                    else:
+                        attachment_context += (
+                            f"\n**Audio ({att['filename']}):** File saved at `{att.get('path', 'unknown')}`. "
+                            f"Transcription not available (Moonshine STT not installed). "
+                            f"You can try transcribing with shell_exec if another STT tool is available.\n"
+                        )
+                else:
+                    if not attachment_context:
+                        attachment_context = "\n\n## ATTACHED FILES\n"
+                    attachment_context += f"\n**File ({att['filename']}):** {att.get('description', 'Attached file')}\n"
+
+        system_prompt = (
+            identity +
+            "You are Ghost, an AUTONOMOUS AI agent running LOCALLY on the user's computer. "
+            "You have DIRECT ACCESS to the file system, shell, network, and a real web browser.\n\n"
+            f"## PROJECT LOCATION (IMPORTANT)\n"
+            f"Ghost project root: **{PROJECT_DIR}**\n"
+            f"ALL source files live here: ghost.py, ghost_tools.py, ghost_loop.py, ghost_evolve.py, "
+            f"ghost_dashboard/, skills/, SOUL.md, USER.md, etc.\n"
+            f"- `shell_exec` runs from {PROJECT_DIR} by default.\n"
+            f"- `file_read`/`file_write` accept absolute paths — use `{PROJECT_DIR}/filename` for project files.\n"
+            f"- Do NOT search for the project directory. You already know it.\n\n"
+            "## AGENT BEHAVIOR — while(true) AUTONOMY\n"
+            "You run in a persistent loop until the task is FULLY COMPLETE.\n"
+            "- NEVER give up after a failed attempt. Try a different approach, tool, or strategy.\n"
+            "- You have unlimited tool calls. Use as many as needed. There is no step limit.\n"
+            "- If one approach fails (timeout, error, missing package), try another immediately.\n"
+            "- NEVER hallucinate or make up information. Only state facts you have VERIFIED from a primary source.\n"
+            "- **CRITICAL**: When the task is DONE, you MUST call `task_complete(summary='...')` to end your turn. "
+            "Do NOT respond with a plain text message — always use `task_complete`.\n\n"
+            "## AVAILABLE TOOLS\n" + ", ".join(tool_names) + "\n\n"
+            "## TOOL GUIDE\n"
+            "**Memory**: memory_search, memory_save\n"
+            "**System**: shell_exec, file_read, file_write, file_search\n"
+            "**Web Research**: web_search (search the internet for current info, news, docs — multi-provider with fallback)\n"
+            "**Web Content Extraction**: web_fetch — YOUR PRIMARY TOOL for reading any URL. "
+            "Robust 5-tier extraction pipeline (Readability → Smart BeautifulSoup → Firecrawl → fallback) "
+            "with automatic quality gate. Works on news sites, docs, blogs, GitHub, Wikipedia, and most "
+            "public pages. Returns clean markdown with title. ALWAYS prefer web_fetch over browser for "
+            "content extraction — it's faster, cheaper, and returns cleaner text.\n"
+            "**Browser (visible UI)**: browser tool — use ONLY when web_fetch fails, or for JS-rendered "
+            "SPAs, login-required pages, or interactive tasks (clicking, filling forms). Actions: "
+            "navigate, snapshot, click, type, fill, content, evaluate, console, screenshot, wait, press, scroll, hover, select, pdf, tabs, new_tab, close_tab, stop\n"
+            "**Code Changes (Serial Evolution Queue)**: You do NOT have direct access to evolve tools. "
+            "To request code changes, use `add_future_feature(title, description, priority='P0', source='user_request')`. "
+            "P0 = user-requested (processed immediately by the Evolution Runner). "
+            "The Feature Implementer will pick it up and implement it via the serial evolution queue. "
+            "You can check status with `list_future_features` and `get_feature_stats`. "
+            "This serialization prevents concurrent deploys from killing other running work.\n"
+            "**Other**: app_control, notify, uptime\n\n"
+            "## URL & WEB TOOL RULES (CRITICAL — follow exactly)\n"
+            "When the user's message contains a URL (http/https link):\n"
+            "1. **ALWAYS use `web_fetch`** to retrieve the actual page content. NEVER guess or recall from memory.\n"
+            "2. **AUTOMATIC FALLBACK**: If `web_fetch` returns limited content (less than ~500 chars of article text, "
+            "only a title, or mostly boilerplate), you MUST IMMEDIATELY and AUTOMATICALLY use the browser tool "
+            "as fallback: navigate to the URL → wait 2s → use `content` action to extract full text. "
+            "Do NOT ask the user if they want you to try browser. Just do it.\n"
+            "3. After fetching (from either method), summarize or analyze the ACTUAL fetched content.\n\n"
+            "When the user asks for current information, news, research, or facts you don't know:\n"
+            "1. **Use `web_search`** first to find relevant sources and up-to-date information.\n"
+            "2. If you need to read a specific article/page from the results, use `web_fetch` on the URL.\n\n"
+            "Tool selection guide:\n"
+            "- User provides a URL → `web_fetch` first, then browser if content is limited\n"
+            "- User asks 'what is happening with X' / 'latest news about Y' → `web_search`\n"
+            "- User says 'browse/open/go to' → `browser` tool (visible UI)\n\n"
+            "## KEY RULES\n"
+            "1. When user says 'browse/open/go to' → use browser tool (visible UI navigation)\n"
+            "2. When user provides a URL to read/summarize → use web_fetch FIRST, browser as fallback\n"
+            "3. Navigate directly to search URLs (google.com/search?q=..., x.com/search?q=...)\n"
+            "4. ALWAYS snapshot after navigate\n"
+            "5. Use refs from snapshot — NOT CSS selectors\n"
+            "6. NEVER state facts you haven't verified from a primary source.\n"
+            "7. For personal recall → memory_search first, memory_save for new info\n"
+            "8. Be autonomous. Don't ask the user for help mid-task.\n"
+            "9. After completing ALL parts of the task, give a concise summary.\n"
+            "10. For self-modification / code change tasks → use `add_future_feature(title, description, priority='P0', source='user_request')` "
+            "to queue the work. The Evolution Runner will implement it. Check status with `list_future_features`.\n"
+            "11. **COMPLETENESS**: Never do half the work. Every feature must be complete across ALL layers "
+            "(backend + frontend JS + CSS + wiring). Every function you define must be called. Every variable "
+            "you reference must be declared. Every DOM element must have its CSS class defined. Every API "
+            "endpoint must be called by the frontend. Trace the full data flow: user action → event → API → response → DOM.\n"
+            "12. **READ BEFORE WRITE**: Before modifying any file, ALWAYS file_read the ENTIRE "
+            "file first. Your patches must match the ACTUAL current content, not what you assume is there.\n\n"
+            "## DEVELOPMENT STANDARDS (MANDATORY for all code changes)\n"
+            "### Modular Architecture\n"
+            "- New feature = new file. Create `ghost_<feature>.py` for new tools/integrations. "
+            "NEVER dump unrelated code into `ghost.py` or `ghost_tools.py`.\n"
+            "- One module, one responsibility. Each file owns a single domain.\n"
+            "- New dashboard page = new blueprint in `routes/` + new JS module in `static/js/pages/`.\n"
+            "- Function-level tools: every tool is a `make_*()` returning {name, description, parameters, execute}.\n"
+            "- Config-driven: every feature has an `enable_<feature>` toggle. Degrade gracefully when disabled.\n"
+            "- Minimal coupling: modules communicate through function calls, config dicts, and tool registry.\n"
+            "### Security Best Practices\n"
+            "- NEVER hardcode secrets. Keys/tokens go in `~/.ghost/` config files or env vars.\n"
+            "- Validate ALL inputs in tool execute functions. Never trust LLM-provided values blindly.\n"
+            "- Sanitize file paths — resolve and check against `allowed_roots`. Block path traversal.\n"
+            "- Whitelist shell commands. Never bypass `allowed_commands`.\n"
+            "- Scope API tokens to minimum required permissions.\n"
+            "- NEVER log secrets — strip tokens, keys, passwords from logs and memory.\n"
+            "- Protect user data: store summaries only, never verbatim email/file contents in memory.\n"
+            "- Rate limit external calls. Use backoff for retries.\n"
+            "- Fail closed: deny on security check failure, never fall through.\n"
+            "- Pin dependency versions. Never install packages at runtime without user awareness.\n"
+            "### Code Change Rules\n"
+            "You do NOT have direct evolve tools. To request code changes, use "
+            "`add_future_feature(title, description, priority='P0', source='user_request')`. "
+            "The Evolution Runner processes the queue serially — no concurrent deploys.\n"
+            "### SKILL.md Format\n"
+            "When creating or editing SKILL.md files, `triggers:` MUST be a flat YAML list of plain strings.\n"
+            "WRONG: `- keywords: [\"a\",\"b\"]`  WRONG: `- {match: \"x\"}`\n"
+            "RIGHT: `- a`  `- b`  `- x`\n"
+        )
+
+        if matched_skills and daemon.skill_loader:
+            skills_section = daemon.skill_loader.build_skills_prompt(matched_skills)
+            system_prompt += "\n\n" + skills_section + "\n"
+
+        if active_project:
+            project_prompt = format_project_for_prompt(active_project)
+            system_prompt += (
+                "\n\n" + project_prompt + "\n\n"
+                "## PROJECT-SCOPED MEMORY\n"
+                f"You are working within the **{active_project.name}** project.\n"
+                f"- When saving memories related to this project, prefix the text with "
+                f"`[project: {active_project.name}]` so they can be recalled later.\n"
+                f"- When searching memories for this project, include "
+                f"`[project: {active_project.name}]` in your query.\n"
+                f"- The project working directory is: `{active_project.path}`\n"
+                f"- Use this path as the base for any file operations within the project.\n"
+            )
+
+            _WEB_SKILLS = {"browser", "fullstack-development", "ui-development", "web_research"}
+            project_skills = set(active_project.config.get("skills", []))
+            has_web_skills = not project_skills or bool(project_skills & _WEB_SKILLS)
+            if has_web_skills and daemon.tool_registry and "canvas" in (daemon.tool_registry.names() if daemon.tool_registry else []):
+                system_prompt += (
+                    "\n## CANVAS — LIVE PREVIEW\n"
+                    "You have a **Canvas** panel that renders HTML/CSS/JS live beside this chat. "
+                    "Use it when building or debugging any visual/web content for this project.\n"
+                    "**Workflow:**\n"
+                    "1. Use `canvas(action='write', file_path='index.html', content='...')` to write HTML/CSS/JS files\n"
+                    "2. The Canvas auto-opens and renders the content as a live preview\n"
+                    "3. Write additional files (style.css, app.js) and they live in the same session\n"
+                    "4. Use `canvas(action='eval_js', js_code='...')` to run JS in the preview for testing\n"
+                    "5. Use `canvas(action='snapshot')` to capture a screenshot and verify the result visually\n"
+                    "6. Once satisfied, copy the final files to the actual project path using `file_write`\n\n"
+                    "**When to use Canvas:**\n"
+                    "- Prototyping UI components, pages, or layouts\n"
+                    "- Debugging CSS/JS issues with immediate visual feedback\n"
+                    "- Showing the user a live demo before committing to the project\n"
+                    "- Any task where seeing the rendered output helps\n\n"
+                    f"**Project path:** `{active_project.path}` — write final versions here with `file_write`\n"
+                )
+
+        chat_history = _build_chat_history(daemon, max_turns=10)
+
+        active_evolution_ids = []
+
+        def on_step(step_num, tool_name, tool_result):
+            import re
+            result_str = str(tool_result)[:500]
+            session.steps.append({
+                "step": step_num,
+                "tool": tool_name,
+                "result": result_str,
+                "time": datetime.now().isoformat(),
+            })
+            if tool_name == "evolve_plan":
+                evo_match = re.search(r"Evolution planned:\s*(\w+)", result_str)
+                if evo_match:
+                    active_evolution_ids.append(evo_match.group(1))
+                if "WAITING_FOR_APPROVAL" in result_str:
+                    level_match = re.search(r"Level:\s*(\d+)", result_str)
+                    session.pending_approval = {
+                        "evo_id": evo_match.group(1) if evo_match else "",
+                        "level": level_match.group(1) if level_match else "?",
+                        "time": datetime.now().isoformat(),
+                    }
+            elif tool_name == "evolve_deploy" and "deployed" in result_str.lower():
+                evo_match = re.search(r"Evolution\s+(\w+)\s+deployed", result_str)
+                if evo_match and evo_match.group(1) in active_evolution_ids:
+                    active_evolution_ids.remove(evo_match.group(1))
+                _save_restart_state(session, deploy_result=result_str)
+
+        # Include attachment context in user message if present
+        user_message_with_context = session.user_message
+        if attachment_context:
+            user_message_with_context = session.user_message + attachment_context
+
+        # When the user message contains a URL, force the model to call
+        # a tool first (it will naturally pick web_fetch per the system prompt).
+        # This avoids the model answering from memory instead of fetching.
+        has_url = _message_contains_url(session.user_message)
+
+        if daemon.cfg.get("enable_tool_loop", True) and daemon.tool_registry.get_all():
+            _EVOLVE_TOOL_NAMES = {
+                "evolve_plan", "evolve_apply", "evolve_apply_config",
+                "evolve_delete", "evolve_test", "evolve_deploy", "evolve_rollback",
+            }
+            safe_names = [
+                name for name in daemon.tool_registry.get_all()
+                if name not in _EVOLVE_TOOL_NAMES
+            ]
+            chat_registry = daemon.tool_registry.subset(safe_names)
+
+            if active_project and daemon.skill_loader:
+                project_enabled = active_project.config.get("skills", [])
+                if project_enabled:
+                    skill_tools = set()
+                    all_skills = list(daemon.skill_loader.skills.values())
+                    for skill in all_skills:
+                        if skill.name in project_enabled:
+                            skill_tools.update(skill.tools)
+                    _ALWAYS_AVAILABLE = {
+                        "memory_search", "memory_save", "task_complete",
+                        "project_list", "project_get", "project_resolve",
+                        "file_read", "file_write", "file_search",
+                        "shell_exec", "grep", "glob",
+                        "notify", "uptime", "app_control",
+                        "add_future_feature", "list_future_features",
+                        "get_future_feature", "get_feature_stats",
+                    }
+                    allowed = skill_tools | _ALWAYS_AVAILABLE
+                    scoped_names = [n for n in chat_registry.names() if n in allowed]
+                    if scoped_names:
+                        chat_registry = chat_registry.subset(scoped_names)
+
+            loop_result = daemon.engine.run(
+                system_prompt=system_prompt,
+                user_message=user_message_with_context,
+                tool_registry=chat_registry,
+                max_steps=daemon.cfg.get("tool_loop_max_steps", 200),
+                max_tokens=8192,
+                force_tool=True,
+                on_step=on_step,
+                history=chat_history,
+                cancel_check=lambda: session.cancelled,
+                images=image_attachments if image_attachments else None,
+            )
+            session.result = loop_result.text
+            session.tools_used = [tc["tool"] for tc in loop_result.tool_calls]
+        else:
+            result = daemon.engine.single_shot(
+                system_prompt=system_prompt,
+                user_message=user_message_with_context,
+                images=image_attachments if image_attachments else None,
+            )
+            session.result = result
+
+        if session.cancelled:
+            session.status = "cancelled"
+            if active_evolution_ids:
+                rollback_results = _rollback_evolutions(active_evolution_ids, daemon)
+                session.result = (
+                    "(Stopped by user)\n\n"
+                    + rollback_results
+                )
+        else:
+            session.status = "complete"
+        session.finished_at = time.time()
+    except Exception as e:
+        import traceback
+        session.status = "error"
+        tb = traceback.format_exc()
+        session.error = str(e)
+        print(f"  [CHAT ERROR] {e}\n{tb}")
+        _trigger_chat_repair(daemon, "tool_loop", e, tb)
+        session.finished_at = time.time()
+        return
+
+    try:
+        import importlib
+        ghost_mod = importlib.import_module("ghost")
+        read_feed = ghost_mod.read_feed
+        write_feed = ghost_mod.write_feed
+        log_action = ghost_mod.log_action
+
+        feed = read_feed()
+        final_status = session.status if session.status in ("complete", "cancelled") else "complete"
+        updated = False
+        for item in feed:
+            if item.get("message_id") == session.id:
+                item["result"] = session.result
+                item["status"] = final_status
+                item["time"] = datetime.now().isoformat()
+                if session.tools_used:
+                    item["tools_used"] = session.tools_used
+                updated = True
+                break
+        if not updated:
+            entry = {
+                "time": datetime.now().isoformat(),
+                "type": "ask",
+                "message_id": session.id,
+                "source": session.user_message[:2000],
+                "result": session.result,
+                "status": final_status,
+            }
+            if session.tools_used:
+                entry["tools_used"] = session.tools_used
+            feed.insert(0, entry)
+            feed = feed[:daemon.cfg.get("max_feed_items", 50)]
+        write_feed(feed)
+        log_action("ask", session.user_message[:60], session.result or "")
+
+        if daemon.memory_db:
+            daemon.memory_db.save(
+                content=session.result or "",
+                type="ask",
+                source_preview=session.user_message[:60],
+                tools_used=",".join(session.tools_used),
+            )
+
+        daemon.actions_today += 1
+    except Exception:
+        pass
+
+    if not session.result and session.error is None:
+        session.status = "complete"
+        session.finished_at = time.time()
+        session.result = "(No response generated)"
+
+
+def _process_message_safe(session, daemon):
+    """Wrapper that catches all exceptions."""
+    try:
+        _process_message(session, daemon)
+    except Exception as e:
+        session.status = "error"
+        session.error = str(e)
+        session.finished_at = time.time()
+
+
+@bp.route("/api/chat/upload", methods=["POST"])
+def upload_file():
+    """Handle file uploads - audio files get transcribed, images stored for vision."""
+    daemon = _get_daemon()
+    if not daemon:
+        return jsonify({"ok": False, "error": "Ghost daemon not running"}), 503
+
+    if 'file' not in request.files:
+        return jsonify({"ok": False, "error": "No file provided"}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"ok": False, "error": "Empty filename"}), 400
+
+    # Validate file extension
+    ext = Path(file.filename).suffix.lower()
+    if ext not in AUDIO_EXTENSIONS and ext not in IMAGE_EXTENSIONS:
+        return jsonify({"ok": False, "error": f"Unsupported file type: {ext}"}), 400
+
+    # Save file to upload directory
+    upload_id = uuid.uuid4().hex[:16]
+    safe_filename = f"{upload_id}_{file.filename}"
+    file_path = UPLOAD_DIR / safe_filename
+
+    try:
+        file.save(str(file_path))
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Failed to save file: {str(e)}"}), 500
+
+    result = {
+        "ok": True,
+        "filename": file.filename,
+        "path": str(file_path),
+        "type": "audio" if ext in AUDIO_EXTENSIONS else "image",
+    }
+
+    # Auto-transcribe audio if Moonshine is available
+    if ext in AUDIO_EXTENSIONS:
+        try:
+            import numpy as np
+            import moonshine_onnx
+            import soundfile as sf
+
+            audio, sr = sf.read(str(file_path))
+            audio = audio.astype(np.float32)
+            transcript = moonshine_onnx.transcribe(audio, model='moonshine/tiny')
+            result["transcript"] = transcript.strip() if isinstance(transcript, str) else str(transcript[0]).strip()
+        except ImportError:
+            result["transcript"] = None
+            result["transcript_error"] = "Moonshine STT not installed (pip install useful-moonshine-onnx)"
+        except Exception as e:
+            result["transcript"] = None
+            result["transcript_error"] = str(e)
+
+    return jsonify(result)
+
+
+@bp.route("/api/chat/send", methods=["POST"])
+def send_message():
+    daemon = _get_daemon()
+    if not daemon:
+        return jsonify({"ok": False, "error": "Ghost daemon not running"}), 503
+
+    data = request.get_json(force=True)
+    message = data.get("message", "").strip()
+    attachments = data.get("attachments", [])
+    project_id = data.get("project_id") or None
+
+    if not message and not attachments:
+        return jsonify({"ok": False, "error": "Empty message and no attachments"}), 400
+
+    message_id = uuid.uuid4().hex[:12]
+    session = ChatSession(message_id, message, attachments, project_id=project_id)
+
+    with _chat_lock:
+        _chat_sessions[message_id] = session
+        if len(_chat_sessions) > 50:
+            oldest = sorted(_chat_sessions.keys(),
+                            key=lambda k: _chat_sessions[k].started_at)
+            for k in oldest[:10]:
+                _chat_sessions.pop(k, None)
+
+    try:
+        import importlib
+        ghost_mod = importlib.import_module("ghost")
+        ghost_mod.append_feed({
+            "time": datetime.now().isoformat(),
+            "type": "ask",
+            "message_id": message_id,
+            "source": message[:2000],
+            "result": None,
+            "status": "processing",
+        }, daemon.cfg.get("max_feed_items", 50))
+    except Exception:
+        pass
+
+    t = threading.Thread(
+        target=_process_message_safe, args=(session, daemon), daemon=True
+    )
+    t.start()
+
+    return jsonify({
+        "ok": True,
+        "message_id": message_id,
+    })
+
+
+@bp.route("/api/chat/stop/<message_id>", methods=["POST"])
+def stop_message(message_id):
+    with _chat_lock:
+        session = _chat_sessions.get(message_id)
+    if not session:
+        return jsonify({"ok": False, "error": "Message not found"}), 404
+    if session.status != "processing":
+        return jsonify({"ok": False, "error": "Not processing"})
+    session.cancelled = True
+    return jsonify({"ok": True})
+
+
+@bp.route("/api/chat/restart-recovery")
+def restart_recovery():
+    """Return and consume restart recovery data if available."""
+    global _restart_recovery
+    if _restart_recovery:
+        data = _restart_recovery
+        _restart_recovery = None
+        return jsonify({"ok": True, "recovery": data})
+    return jsonify({"ok": True, "recovery": None})
+
+
+@bp.route("/api/chat/status/<message_id>")
+def message_status(message_id):
+    with _chat_lock:
+        session = _chat_sessions.get(message_id)
+
+    if not session:
+        return jsonify({"ok": False, "error": "Message not found"}), 404
+
+    response = {
+        "message_id": session.id,
+        "status": session.status,
+        "steps": session.steps,
+        "tools_used": session.tools_used,
+        "elapsed": round(
+            (session.finished_at or time.time()) - session.started_at, 1
+        ),
+    }
+
+    if session.status in ("complete", "cancelled"):
+        response["result"] = session.result
+    elif session.status == "error":
+        response["error"] = session.error
+
+    return jsonify(response)
+
+
+@bp.route("/api/chat/stream/<message_id>")
+def stream_status(message_id):
+    """SSE endpoint for real-time step updates."""
+    def generate():
+        last_step_count = 0
+        approval_sent = False
+        while True:
+            with _chat_lock:
+                session = _chat_sessions.get(message_id)
+            if not session:
+                yield f"data: {json.dumps({'done': True, 'error': 'not found'})}\n\n"
+                return
+
+            new_steps = session.steps[last_step_count:]
+            if new_steps:
+                for step in new_steps:
+                    yield f"data: {json.dumps({'type': 'step', 'step': step})}\n\n"
+                last_step_count = len(session.steps)
+
+            if session.pending_approval and not approval_sent:
+                yield f"data: {json.dumps({'type': 'approval_needed', 'approval': session.pending_approval})}\n\n"
+                approval_sent = True
+
+            if session.status in ("complete", "cancelled"):
+                yield f"data: {json.dumps({'type': 'done', 'result': session.result, 'tools_used': session.tools_used, 'elapsed': round(session.finished_at - session.started_at, 1)})}\n\n"
+                return
+            elif session.status == "error":
+                yield f"data: {json.dumps({'type': 'error', 'error': session.error})}\n\n"
+                return
+
+            time.sleep(0.5)
+
+    return Response(generate(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+def _get_session_boundary():
+    """Read the session boundary timestamp. Returns ISO string or None."""
+    try:
+        if SESSION_BOUNDARY_FILE.exists():
+            data = json.loads(SESSION_BOUNDARY_FILE.read_text())
+            return data.get("cleared_at")
+    except Exception:
+        pass
+    return None
+
+
+@bp.route("/api/chat/clear", methods=["POST"])
+def chat_clear():
+    """Set a session boundary — LLM history will only include entries after this point."""
+    boundary = datetime.now().isoformat()
+    SESSION_BOUNDARY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    SESSION_BOUNDARY_FILE.write_text(json.dumps({"cleared_at": boundary}))
+    return jsonify({"ok": True, "cleared_at": boundary})
+
+
+@bp.route("/api/chat/history")
+def chat_history():
+    """Return recent chat entries from the feed."""
+    from pathlib import Path
+    GHOST_HOME = Path.home() / ".ghost"
+    FEED_FILE = GHOST_HOME / "feed.json"
+
+    if not FEED_FILE.exists():
+        return jsonify({"messages": []})
+    try:
+        items = json.loads(FEED_FILE.read_text())
+        boundary = _get_session_boundary()
+        chat_items = [
+            i for i in items
+            if i.get("type") == "ask"
+        ]
+        if boundary:
+            chat_items = [
+                i for i in chat_items
+                if (i.get("time", "") or "") >= boundary
+            ]
+        active_ids = set()
+        with _chat_lock:
+            for sid, sess in _chat_sessions.items():
+                if sess.status == "processing":
+                    active_ids.add(sess.id)
+
+        for item in chat_items:
+            if "source" in item:
+                item["user_message"] = item.pop("source")
+            result = item.pop("result", None)
+            if result is not None:
+                item["assistant_message"] = result
+            else:
+                status = item.get("status", "")
+                mid = item.get("message_id", "")
+                if status == "processing" and mid in active_ids:
+                    item["assistant_message"] = ""
+                    item["still_processing"] = True
+                elif status == "processing":
+                    item["assistant_message"] = "(Ghost was interrupted before completing this request)"
+                else:
+                    item["assistant_message"] = ""
+        chat_items.reverse()
+        return jsonify({"messages": chat_items[-50:]})
+    except Exception:
+        return jsonify({"messages": []})
+
+
+# ============================================================================
+# Interrupt and Prompt Injection API Endpoints
+# ============================================================================
+
+from ghost_interrupt import GenerationRegistry
+
+_reg = GenerationRegistry()
+
+
+@bp.route("/api/chat/interrupt", methods=["POST"])
+def interrupt_generation():
+    """Interrupt/cancel an active generation by session_id."""
+    try:
+        data = request.get_json() or {}
+        session_id = data.get("session_id")
+        if not session_id:
+            return jsonify({"ok": False, "error": "session_id is required"}), 400
+        
+        cancelled = _reg.cancel(session_id)
+        if cancelled:
+            return jsonify({"ok": True, "message": f"Generation {session_id} cancelled"})
+        return jsonify({"ok": False, "error": "No active generation found"}), 404
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@bp.route("/api/chat/inject", methods=["POST"])
+def inject_prompt():
+    """Inject a prompt into an active generation."""
+    try:
+        data = request.get_json() or {}
+        session_id = data.get("session_id")
+        text = data.get("text")
+        
+        if not session_id:
+            return jsonify({"ok": False, "error": "session_id is required"}), 400
+        if not text:
+            return jsonify({"ok": False, "error": "text is required"}), 400
+        
+        inject_id = _reg.inject(session_id, text)
+        if inject_id:
+            return jsonify({"ok": True, "inject_id": inject_id})
+        return jsonify({"ok": False, "error": "No active generation found"}), 404
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@bp.route("/api/chat/generations", methods=["POST"])
+def list_generations():
+    """List all active generation session IDs."""
+    try:
+        active_ids = _reg.list_active()
+        return jsonify({"ok": True, "generations": active_ids})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@bp.route("/api/chat/generations/<session_id>", methods=["POST"])
+def get_generation(session_id):
+    """Get the status of a specific generation."""
+    try:
+        gen = _reg.get(session_id)
+        if not gen:
+            return jsonify({"ok": False, "error": "Session not found"}), 404
+        
+        return jsonify({
+            "ok": True,
+            "session_id": gen.session_id,
+            "state": gen.state.value,
+            "model": gen.model,
+            "provider_id": gen.provider_id,
+            "elapsed": gen.get_elapsed(),
+            "text_length": len(gen.accumulated_text),
+            "is_active": gen.is_active,
+            "started_at": gen.started_at,
+            "finished_at": gen.finished_at,
+            "error": gen.error
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500

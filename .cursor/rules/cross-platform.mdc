@@ -1,0 +1,57 @@
+---
+description: All features must work on macOS, Linux, and Windows — no platform-specific system dependencies
+alwaysApply: true
+---
+
+# Cross-Platform Compatibility
+
+Ghost runs on macOS, Linux, and Windows. Every feature must work on all three.
+
+## Rules
+
+- **No system-level dependencies.** Never require `brew install`, `apt install`, `choco install`, or any OS package manager command. If a library needs a system C library (like `libmagic`), provide a pure-Python shim/fallback that works without it.
+- **Use `pathlib.Path`** for all file paths — never hardcode `/` or `\` separators.
+- **Use `platform.system()`** when OS-specific behavior is truly unavoidable (`"Darwin"`, `"Linux"`, `"Windows"`). Gate it with clear if/elif/else so all three are handled.
+- **Dependencies must be pip-installable.** If a PyPI package ships platform wheels (`.whl`), verify it has wheels for macOS (arm64 + x86_64), Linux (x86_64), and Windows (x86_64). If not, find an alternative or provide a fallback.
+- **No shell assumptions.** Don't assume bash, zsh, or any specific shell. Use `subprocess.run()` with argument lists, not shell strings.
+- **Test file paths with spaces.** Windows users commonly have paths like `C:\Users\John Doe\Documents`.
+
+## Pattern: System Library Shimming
+
+When a dependency requires a system C library, provide a pure-Python fallback:
+
+```python
+def _ensure_some_module():
+    """Inject pure-Python fallback if system library is missing."""
+    import sys
+    if "somelib" in sys.modules:
+        return
+    try:
+        import somelib  # real C-backed version
+        return
+    except (ImportError, OSError):
+        pass
+    # Build pure-Python shim and inject into sys.modules
+    import types
+    shim = types.ModuleType("somelib")
+    shim.needed_function = _pure_python_implementation
+    sys.modules["somelib"] = shim
+```
+
+## Examples
+
+```python
+# BAD — breaks on Windows
+config_path = os.path.expanduser("~/.ghost/config.json")
+
+# GOOD — works everywhere
+config_path = Path.home() / ".ghost" / "config.json"
+```
+
+```python
+# BAD — assumes bash
+subprocess.run("echo $HOME && ls -la", shell=True)
+
+# GOOD — portable
+subprocess.run(["ls", "-la"], cwd=Path.home())
+```

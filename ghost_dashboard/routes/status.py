@@ -1,0 +1,150 @@
+"""Status API — daemon state, stats, platform info.
+
+When running embedded in the daemon, reads live in-memory state.
+When running standalone, reads from PID file and log files on disk.
+"""
+
+import os, json, platform
+from datetime import datetime
+from pathlib import Path
+from flask import Blueprint, jsonify
+
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
+from ghost import (
+    GHOST_HOME, PID_FILE, LOG_FILE, FEED_FILE, PAUSE_FILE,
+    SOUL_FILE, USER_FILE, CONFIG_FILE, load_config, DEFAULT_CONFIG,
+)
+
+bp = Blueprint("status", __name__)
+
+
+def _daemon_running():
+    if not PID_FILE.exists():
+        return False, None
+    try:
+        pid = int(PID_FILE.read_text().strip())
+        os.kill(pid, 0)
+        return True, pid
+    except (ValueError, ProcessLookupError, PermissionError):
+        return False, None
+
+
+@bp.route("/api/status")       # Legacy route (backward compat)
+@bp.route("/api/ghost/status")  # Primary route
+def get_status():
+    from ghost_dashboard import get_daemon
+    daemon = get_daemon()
+
+    running, pid = _daemon_running()
+    paused = PAUSE_FILE.exists()
+
+    if daemon:
+        running = daemon.running
+        pid = os.getpid()
+        today_count = daemon.actions_today
+        uptime_secs = int((datetime.now() - daemon.start_time).total_seconds())
+        cfg = daemon.cfg
+        model = cfg.get("model", DEFAULT_CONFIG["model"])
+        if hasattr(daemon, 'engine') and hasattr(daemon.engine, 'fallback_chain'):
+            fc = daemon.engine.fallback_chain
+            model = f"{fc.active_provider}:{fc.active_model}"
+
+        tool_count = len(daemon.tool_registry.names()) if daemon.tool_registry else 0
+        tool_names = list(daemon.tool_registry.names()) if daemon.tool_registry else []
+        skill_count = len(daemon.skill_loader.list_all()) if daemon.skill_loader else 0
+        memory_count = daemon.memory_db.count() if daemon.memory_db else 0
+        cron_jobs = daemon.cron.list_jobs() if daemon.cron else []
+        cron_enabled = sum(1 for j in cron_jobs if j.get("enabled"))
+
+        entries = []
+        if LOG_FILE.exists():
+            try:
+                entries = json.loads(LOG_FILE.read_text())
+            except Exception:
+                pass
+
+        types = {}
+        for e in entries:
+            t = e.get("type", "unknown")
+            types[t] = types.get(t, 0) + 1
+
+        return jsonify({
+            "running": running,
+            "embedded": True,
+            "paused": paused,
+            "pid": pid,
+            "platform": platform.system(),
+            "uptime_seconds": uptime_secs,
+            "total_actions": len(entries),
+            "today_actions": today_count,
+            "type_breakdown": types,
+            "model": model,
+            "features": {
+                "tool_loop": cfg.get("enable_tool_loop", True),
+                "memory": cfg.get("enable_memory_db", True),
+                "skills": cfg.get("enable_skills", True),
+                "plugins": cfg.get("enable_plugins", True),
+                "browser": cfg.get("enable_browser_tools", True),
+                "cron": cfg.get("enable_cron", True),
+                "vision": cfg.get("enable_vision", True),
+                "tts": cfg.get("enable_tts", True),
+                "security_audit": cfg.get("enable_security_audit", True),
+                "session_memory": cfg.get("enable_session_memory", True),
+            },
+            "live": {
+                "tools": tool_count,
+                "tool_names": tool_names,
+                "skills": skill_count,
+                "memory_entries": memory_count,
+                "cron_jobs": len(cron_jobs),
+                "cron_enabled": cron_enabled,
+            },
+            "soul_exists": SOUL_FILE.exists(),
+            "user_exists": USER_FILE.exists(),
+        })
+
+    # Standalone mode — read from files
+    entries = []
+    if LOG_FILE.exists():
+        try:
+            entries = json.loads(LOG_FILE.read_text())
+        except Exception:
+            pass
+
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    today_count = sum(1 for e in entries if e.get("time", "")[:10] == today_str)
+
+    types = {}
+    for e in entries:
+        t = e.get("type", "unknown")
+        types[t] = types.get(t, 0) + 1
+
+    cfg = load_config()
+
+    return jsonify({
+        "running": running,
+        "embedded": False,
+        "paused": paused,
+        "pid": pid,
+        "platform": platform.system(),
+        "total_actions": len(entries),
+        "today_actions": today_count,
+        "type_breakdown": types,
+        "model": cfg.get("model", DEFAULT_CONFIG["model"]),
+        "features": {
+            "tool_loop": cfg.get("enable_tool_loop", True),
+            "memory": cfg.get("enable_memory_db", True),
+            "skills": cfg.get("enable_skills", True),
+            "plugins": cfg.get("enable_plugins", True),
+            "browser": cfg.get("enable_browser_tools", True),
+            "cron": cfg.get("enable_cron", True),
+            "vision": cfg.get("enable_vision", True),
+            "tts": cfg.get("enable_tts", True),
+            "security_audit": cfg.get("enable_security_audit", True),
+            "session_memory": cfg.get("enable_session_memory", True),
+        },
+        "soul_exists": SOUL_FILE.exists(),
+        "user_exists": USER_FILE.exists(),
+    })

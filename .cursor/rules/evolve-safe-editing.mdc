@@ -1,0 +1,38 @@
+---
+description: Check Ghost's evolve status before editing files to avoid race conditions
+alwaysApply: true
+---
+
+# Check Evolve Status Before Editing Files
+
+Ghost is a self-evolving AI agent. It runs autonomous evolution cycles (`evolve_plan` → `evolve_apply` → `evolve_test` → `evolve_deploy`) that modify its own source files. If you edit a file while Ghost is mid-evolve, one of two things happens:
+
+1. **Ghost deploys over your edit** — your changes are lost when `evolve_deploy` restarts the process with Ghost's version
+2. **Your edit breaks Ghost's in-flight changes** — the evolve test/deploy fails because the file changed under it
+
+## Rule
+
+**Before editing ANY file in the Ghost codebase**, read the terminal output (last 20-30 lines) and check for active evolution:
+
+- Look for `evolve_plan`, `evolve_apply`, `evolve_test`, `evolve_deploy` in recent output
+- If you see `evolve_apply` without a subsequent `evolve_deploy` or `evolve_rollback`, Ghost is mid-evolve — **wait**
+- If you see `start_future_feature`, Ghost is about to start an evolve cycle — **wait**
+- If the terminal shows idle cron output or no recent evolve activity, it's safe to edit
+
+## Safe Workflow
+
+```
+1. Read terminal (last 30 lines)
+2. If evolve in progress → wait 30-60s → re-check
+3. If idle → proceed with edits
+4. If you need to edit urgently during evolve → run `bash stop.sh` first
+```
+
+## What "mid-evolve" looks like in the terminal
+
+```
+⚡ Step 10  evolve_apply
+→ Applied change to ghost_tools.py (31964 bytes). [1 file(s) changed]
+```
+
+This means Ghost wrote to `ghost_tools.py` and is about to test/deploy. Do NOT edit any Ghost files until you see either `evolve_deploy` (success) or `evolve_rollback` (failure).

@@ -1,0 +1,852 @@
+"""
+GHOST Built-in Tools
+
+All tools Ghost can use: shell, files, web, apps, memory, notifications.
+Each tool is a dict with {name, description, parameters, execute}.
+Safety: shell commands are whitelisted, file access is root-restricted.
+"""
+
+import os
+import re
+import json
+import glob
+import subprocess
+import platform
+import requests
+import time
+from pathlib import Path
+from datetime import datetime
+
+PLAT = platform.system()
+GHOST_HOME = Path.home() / ".ghost"
+PROJECT_DIR = Path(__file__).resolve().parent
+
+
+def get_user_projects_dir(cfg=None):
+    """Cross-platform default directory for user-created projects.
+
+    Priority: config override > ~/Desktop (if exists) > ~/Projects > ~/projects
+    Works on macOS, Linux, and Windows.
+    """
+    if cfg and cfg.get("user_projects_dir"):
+        p = Path(cfg["user_projects_dir"]).expanduser()
+        if p.is_absolute():
+            return p
+    desktop = Path.home() / "Desktop"
+    if desktop.is_dir():
+        return desktop
+    projects = Path.home() / "Projects"
+    if projects.is_dir():
+        return projects
+    fallback = Path.home() / "projects"
+    fallback.mkdir(exist_ok=True)
+    return fallback
+
+
+def get_workspace(cfg, project_name=None):
+    """Get the workspace root for user-created projects. Creates it if needed.
+
+    Returns the base workspace dir, or workspace/project_name if provided.
+    The workspace is separate from Ghost's own codebase.
+    """
+    base = get_user_projects_dir(cfg)
+    if project_name:
+        p = base / project_name
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+    return base
+
+CORE_COMMANDS = [
+    "python3", "python", "pip", "pip3", "git", "node", "npm",
+]
+
+DEFAULT_ALLOWED_COMMANDS = [
+    # Filesystem
+    "ls", "pwd", "cd", "cat", "head", "tail", "wc", "less", "more",
+    "mv", "cp", "mkdir", "rm", "rmdir", "touch", "chmod", "chown",
+    "ln", "open", "stat", "file", "tree", "realpath", "readlink",
+    "basename", "dirname",
+    # Text processing
+    "grep", "awk", "sed", "tr", "cut", "sort", "uniq", "diff", "patch",
+    "xargs", "tee", "fmt", "column",
+    # Search
+    "find", "which", "whereis", "rg", "fd",
+    # Compression
+    "zip", "unzip", "tar", "gzip", "gunzip", "bzip2", "bunzip2", "xz",
+    # System info
+    "echo", "date", "whoami", "hostname", "uname", "uptime",
+    "df", "du", "free", "id", "groups", "env", "printenv",
+    "sw_vers", "defaults",
+    # Process management
+    "ps", "kill", "top", "htop", "lsof", "pgrep", "pkill",
+    "sleep", "timeout", "watch", "nohup",
+    # Networking
+    "curl", "wget", "ssh", "scp", "rsync", "sftp",
+    "ping", "dig", "nslookup", "host", "ifconfig", "netstat",
+    # Crypto / hashing
+    "md5", "shasum", "base64", "openssl",
+    # Python
+    "python3", "python", "pip", "pip3",
+    # Node.js
+    "node", "npm", "npx",
+    # Package managers
+    "brew",
+    # Version control
+    "git",
+    # Build tools
+    "make", "cmake",
+    # Databases
+    "sqlite3",
+    # JSON / data
+    "jq",
+    # Modern CLI tools
+    "bat", "exa", "eza",
+    # macOS specific
+    "pbcopy", "pbpaste", "say",
+    # Docker (if available)
+    "docker", "docker-compose",
+]
+
+DEFAULT_ALLOWED_ROOTS = [
+    str(Path.home()),
+]
+
+DEFAULT_BLOCKED_COMMANDS = [
+    "rm -rf /", "rm -rf ~", "mkfs", "dd if=", ":(){", "fork",
+    "sudo rm", "chmod -R 777 /", "> /dev/sd",
+    # Prevent autonomy from pausing/stopping/shutting down the daemon via shell
+    "api/ghost/pause", "api/ghost/shutdown",
+    "ghost/pause", "ghost/shutdown",
+]
+
+
+def _check_path_allowed(path_str, allowed_roots):
+    """Verify a path is under one of the allowed roots."""
+    try:
+        resolved = str(Path(path_str).expanduser().resolve())
+    except Exception:
+        return False
+    for root in allowed_roots:
+        root_resolved = str(Path(root).expanduser().resolve())
+        if resolved.startswith(root_resolved):
+            return True
+    return False
+
+
+def _is_ghost_codebase_path(path_str):
+    """Check if a resolved path is inside Ghost's own install directory.
+
+    This prevents non-evolution tool loops from modifying Ghost's source
+    code via file_write. The evolution pipeline (evolve_apply) writes
+    files directly — it does not go through file_write — so this guard
+    only blocks unintended self-modification from chat/cron/webhook/channel
+    dispatch paths.
+    """
+    try:
+        resolved = Path(path_str).expanduser().resolve()
+        codebase = PROJECT_DIR.resolve()
+        return resolved == codebase or codebase in resolved.parents
+    except Exception:
+        return False
+
+
+def _check_command_allowed(command, allowed_commands, blocked_commands):
+    """Verify a shell command is allowed."""
+    for blocked in blocked_commands:
+        if blocked in command:
+            return False, f"Blocked: command matches dangerous pattern '{blocked}'"
+    base_cmd = command.strip().split()[0] if command.strip() else ""
+    base_cmd = base_cmd.split("/")[-1]
+    if base_cmd not in allowed_commands:
+        return False, f"Not allowed: '{base_cmd}' not in allowed_commands list"
+    return True, ""
+
+
+def _is_dangerous_interpreter(cmd: str) -> bool:
+    base = (cmd or "").split("/")[-1]
+    return base in {"python", "python3", "pip", "pip3"}
+
+
+# High-risk shell patterns that indicate command chaining, redirection, or subshell execution
+_HIGH_RISK_SHELL_PATTERNS = [
+    ";",      # Command separator
+    "&&",     # AND chaining
+    "||",     # OR chaining
+    "|",      # Pipe
+    "`",      # Backtick subshell
+    "$(",     # Command substitution
+    ">",      # Output redirection
+    ">>",     # Append redirection
+    "<",      # Input redirection
+    "2>",     # Stderr redirection
+    "&>",     # Combined redirection
+]
+
+# Flag variants that should be matched (exact and long-form)
+_FLAG_VARIANTS = {
+    "-c": ["-c", "--command"],
+    "-m": ["-m", "--module"],
+}
+
+
+def _check_dangerous_command_policy(command: str, cfg: dict, workspace=None):
+    """Check if a dangerous interpreter command complies with security policy.
+    
+    Returns: (allowed: bool, reason: str)
+    Reason uses POLICY_DENY:<code>:<detail> format for machine-parseable audit logs.
+    """
+    import shlex
+    
+    command = command.strip()
+    if not command:
+        return False, "POLICY_DENY:EMPTY:Empty command"
+
+    # Normalize command for analysis
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        # Fallback to simple split if shlex fails (e.g., unclosed quotes)
+        tokens = command.split()
+    
+    if not tokens:
+        return False, "POLICY_DENY:EMPTY:Empty command"
+
+    base_cmd = tokens[0].split("/")[-1]
+    if not _is_dangerous_interpreter(base_cmd):
+        return True, ""
+
+    if not cfg.get("enable_dangerous_interpreters", False):
+        return False, "POLICY_DENY:DISABLED:Dangerous interpreters are disabled (enable_dangerous_interpreters=false)"
+
+    policy = cfg.get("dangerous_command_policy") or {}
+
+    # Check for high-risk shell patterns in the raw command string
+    # This catches metacharacters even if they're inside quoted strings
+    for pattern in _HIGH_RISK_SHELL_PATTERNS:
+        if pattern in command:
+            # Allow safe patterns only if explicitly whitelisted in policy
+            safe_patterns = policy.get("safe_shell_patterns", [])
+            if pattern not in safe_patterns:
+                return False, f"POLICY_DENY:HIGH_RISK_PATTERN:Shell pattern '{pattern}' blocked by policy"
+
+    if base_cmd in {"python", "python3"}:
+        py_policy = policy.get("python") or {}
+        if not py_policy.get("allow", False):
+            return False, "POLICY_DENY:PYTHON_NOT_ALLOWED:Python interpreter usage denied by dangerous_command_policy.python.allow=false"
+        if py_policy.get("require_workspace", True) and not workspace:
+            return False, "POLICY_DENY:PYTHON_NO_WORKSPACE:Python execution requires workspace context"
+        
+        # Check deny_flags with variant matching (exact + long-form)
+        deny_flags = set(py_policy.get("deny_flags", ["-c", "-m"]))
+        for tok in tokens[1:]:
+            for denied_flag in deny_flags:
+                variants = _FLAG_VARIANTS.get(denied_flag, [denied_flag])
+                if tok in variants:
+                    return False, f"POLICY_DENY:PYTHON_DENIED_FLAG:Python flag '{tok}' denied by policy"
+        
+        # Check for script file execution (any non-flag token)
+        for tok in tokens[1:]:
+            if tok.startswith("-"):
+                continue
+            return False, "POLICY_DENY:PYTHON_SCRIPT_EXEC:Python script execution denied by policy (use sandbox_exec)"
+        return True, ""
+
+    if base_cmd in {"pip", "pip3"}:
+        pip_policy = policy.get("pip") or {}
+        if not pip_policy.get("allow", False):
+            return False, "POLICY_DENY:PIP_NOT_ALLOWED:pip usage denied by dangerous_command_policy.pip.allow=false"
+        if pip_policy.get("require_workspace", True) and not workspace:
+            return False, "POLICY_DENY:PIP_NO_WORKSPACE:pip commands require workspace context"
+        
+        # Check deny_flags for pip global flags that could be abused
+        deny_flags = set(pip_policy.get("deny_flags", []))
+        for tok in tokens[1:]:
+            for denied_flag in deny_flags:
+                variants = _FLAG_VARIANTS.get(denied_flag, [denied_flag])
+                if tok in variants:
+                    return False, f"POLICY_DENY:PIP_DENIED_FLAG:pip flag '{tok}' denied by policy"
+        
+        allowed_subcommands = set(pip_policy.get("allow_subcommands", ["install", "show", "freeze", "list"]))
+        subcommand = tokens[1].lower() if len(tokens) > 1 else ""
+        if subcommand not in allowed_subcommands:
+            return False, f"POLICY_DENY:PIP_SUBCOMMAND:pip subcommand '{subcommand}' denied by policy"
+        return True, ""
+
+    return False, "POLICY_DENY:INTERPRETER_DENIED:Interpreter command denied by policy"
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  TOOL DEFINITIONS
+# ═════════════════════════════════════════════════════════════════════
+
+_PROJECT_DIR = Path(__file__).resolve().parent
+_REQUIREMENTS_FILE = _PROJECT_DIR / "requirements.txt"
+_PIP_INSTALL_RE = re.compile(
+    r"pip3?\s+install\s+(?!-e\b)(?!--)",
+    re.IGNORECASE,
+)
+
+
+def _sync_requirements_after_pip(command: str):
+    """After a successful pip install, ensure requirements.txt stays in sync."""
+    if not _PIP_INSTALL_RE.search(command):
+        return
+    tokens = command.split()
+    packages = []
+    skip_next = False
+    for tok in tokens:
+        if skip_next:
+            skip_next = False
+            continue
+        if tok in ("pip", "pip3", "install", "--upgrade", "--quiet", "-q",
+                   "-U", "--no-cache-dir", "--force-reinstall"):
+            continue
+        if tok.startswith("-"):
+            if tok in ("-r", "--requirement", "-t", "--target",
+                       "--prefix", "-i", "--index-url",
+                       "--extra-index-url", "-c", "--constraint"):
+                skip_next = True
+            continue
+        pkg_name = re.split(r"[><=!~\[]", tok)[0].strip()
+        if pkg_name and not pkg_name.startswith("/") and not pkg_name.startswith("."):
+            packages.append(pkg_name)
+
+    if not packages:
+        return
+
+    existing = ""
+    if _REQUIREMENTS_FILE.exists():
+        existing = _REQUIREMENTS_FILE.read_text()
+    existing_lower = {
+        re.split(r"[><=!~\[\s]", line)[0].strip().lower()
+        for line in existing.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    }
+
+    added = []
+    for pkg in packages:
+        if pkg.lower() in existing_lower:
+            continue
+        try:
+            r = subprocess.run(
+                ["pip", "show", pkg],
+                capture_output=True, text=True, timeout=10,
+            )
+            if r.returncode != 0:
+                continue
+            version = ""
+            for line in r.stdout.splitlines():
+                if line.startswith("Version:"):
+                    version = line.split(":", 1)[1].strip()
+                    break
+            entry = f"{pkg}>={version}" if version else pkg
+            added.append(entry)
+        except Exception:
+            added.append(pkg)
+
+    if not added:
+        return
+
+    lines = existing.rstrip("\n")
+    if lines and not lines.endswith("\n"):
+        lines += "\n"
+    lines += "\n# Auto-added by Ghost evolve\n"
+    for entry in added:
+        lines += f"{entry}\n"
+    _REQUIREMENTS_FILE.write_text(lines)
+
+
+def make_shell_exec(cfg):
+    allowed = cfg.get("allowed_commands", DEFAULT_ALLOWED_COMMANDS)
+    for cmd in CORE_COMMANDS:
+        if cmd not in allowed:
+            allowed.append(cmd)
+    blocked = cfg.get("blocked_commands", DEFAULT_BLOCKED_COMMANDS)
+
+    def execute(command, timeout=30, workspace=None):
+        ok, reason = _check_command_allowed(command, allowed, blocked)
+        if not ok:
+            return f"DENIED: {reason}"
+
+        policy_ok, policy_reason = _check_dangerous_command_policy(command, cfg, workspace=workspace)
+        if not policy_ok:
+            # Emit structured security log event for audit telemetry
+            import logging as _logging
+            _sec_log = _logging.getLogger("ghost.security")
+            # Extract denial code from POLICY_DENY:CODE:detail format
+            deny_code = "POLICY_DENY"
+            if policy_reason.startswith("POLICY_DENY:"):
+                parts = policy_reason.split(":", 2)
+                if len(parts) >= 2:
+                    deny_code = parts[1]
+            _sec_log.warning(
+                "POLICY_DENY shell_exec: code=%s workspace=%s cmd_prefix=%s",
+                deny_code,
+                workspace or "(none)",
+                command[:40].replace("\n", " ") if command else "(empty)"
+            )
+            return f"DENIED: {policy_reason}"
+
+        proj_dir = str(PROJECT_DIR)
+        user_dir = str(get_user_projects_dir(cfg))
+
+        import re as _re
+        _redirect_to_codebase = _re.search(
+            r'(?:>\s*|tee\s+(?:-a\s+)?)' + _re.escape(proj_dir) + r'/\S',
+            command,
+        )
+        if _redirect_to_codebase:
+            return (
+                f"BLOCKED: Cannot redirect output into Ghost's codebase ({proj_dir}) "
+                f"via shell_exec. Self-modification must go through the evolution pipeline "
+                f"(evolve_plan/evolve_apply). For user project files, use workspace_write "
+                f"or shell_exec with workspace=<project-name> to run in {user_dir}/<project>/."
+            )
+
+        if workspace:
+            ws_path = get_workspace(cfg, workspace)
+            cwd = str(ws_path)
+        else:
+            cwd = str(Path.home())
+
+        try:
+            r = subprocess.run(
+                command, shell=True,
+                capture_output=True, text=True,
+                timeout=min(timeout, 60),
+                cwd=cwd,
+            )
+            out = ""
+            if r.stdout:
+                out += r.stdout[:3000]
+            if r.stderr:
+                out += f"\n[stderr]\n{r.stderr[:1000]}"
+            if r.returncode != 0:
+                out += f"\n[exit code: {r.returncode}]"
+            else:
+                try:
+                    _sync_requirements_after_pip(command)
+                except Exception:
+                    pass
+            return out.strip() or "(no output)"
+        except subprocess.TimeoutExpired:
+            return f"Command timed out after {timeout}s"
+        except Exception as e:
+            return f"Shell error: {e}"
+
+    ws_base = get_user_projects_dir(cfg)
+    return {
+        "name": "shell_exec",
+        "description": (
+            "Run a shell command. Runs from HOME (~/) by default. "
+            f"For user projects: set workspace='project-name' to run inside {ws_base}/<project-name>/. "
+            "The workspace directory is auto-created. Use workspace for all user project commands."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "The shell command to execute"},
+                "timeout": {"type": "integer", "description": "Timeout in seconds (max 60)", "default": 30},
+                "workspace": {"type": "string", "description": "Project name — runs the command inside the user's workspace directory. Auto-created if missing.", "default": ""},
+            },
+            "required": ["command"],
+        },
+        "execute": execute,
+    }
+
+
+def make_file_read(cfg):
+    allowed_roots = cfg.get("allowed_roots", DEFAULT_ALLOWED_ROOTS)
+
+    def execute(path, max_lines=200, offset=0):
+        if not _check_path_allowed(path, allowed_roots):
+            return f"DENIED: Path '{path}' is outside allowed roots"
+        p = Path(path).expanduser()
+        if not p.exists():
+            proj_p = PROJECT_DIR / Path(path).expanduser().name if "/" not in path else PROJECT_DIR / path
+            if proj_p.exists() and _check_path_allowed(str(proj_p), allowed_roots):
+                p = proj_p
+            else:
+                return f"File not found: {path}  (also tried {proj_p})"
+        if not p.is_file():
+            return f"Not a file: {path}"
+        try:
+            size = p.stat().st_size
+            if size > 500_000:
+                return f"File too large ({size} bytes). Use shell_exec with head/tail instead."
+            text = p.read_text(errors="replace")
+            lines = text.split("\n")
+            total = len(lines)
+            if offset > 0:
+                lines = lines[offset:]
+            if len(lines) > max_lines:
+                shown = lines[:max_lines]
+                remaining = len(lines) - max_lines
+                header = f"[Lines {offset + 1}–{offset + max_lines} of {total}]\n" if offset > 0 else ""
+                return header + "\n".join(shown) + f"\n\n... ({remaining} more lines, use offset={offset + max_lines} to continue)"
+            if offset > 0:
+                return f"[Lines {offset + 1}–{total} of {total}]\n" + "\n".join(lines)
+            return text
+        except Exception as e:
+            return f"Read error: {e}"
+
+    return {
+        "name": "file_read",
+        "description": "Read the contents of a file. Path must be within allowed directories. Use offset to paginate through large files.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Absolute or ~ path to the file"},
+                "max_lines": {"type": "integer", "description": "Max lines to return (default 200)", "default": 200},
+                "offset": {"type": "integer", "description": "Line number to start reading from (0-based, default 0)", "default": 0},
+            },
+            "required": ["path"],
+        },
+        "execute": execute,
+    }
+
+
+def make_file_write(cfg):
+    allowed_roots = cfg.get("allowed_roots", DEFAULT_ALLOWED_ROOTS)
+
+    def execute(path, content, append=False):
+        if not _check_path_allowed(path, allowed_roots):
+            return f"DENIED: Path '{path}' is outside allowed roots"
+        if _is_ghost_codebase_path(path):
+            return (
+                f"BLOCKED: Cannot write to '{path}' — it is inside Ghost's own codebase "
+                f"({PROJECT_DIR}). Self-modification must go through the evolution pipeline: "
+                f"use evolve_plan + evolve_apply to propose changes, then evolve_test + "
+                f"evolve_deploy to apply them safely with backup and rollback. "
+                f"For user project files, use workspace_write instead."
+            )
+        p = Path(path).expanduser()
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            if append:
+                with open(p, "a") as f:
+                    f.write(content)
+            else:
+                p.write_text(content)
+            return f"OK: wrote {len(content)} chars to {path}"
+        except Exception as e:
+            return f"Write error: {e}"
+
+    return {
+        "name": "file_write",
+        "description": "Write content to a file. Path must be within allowed directories. Cannot write to Ghost's own codebase — use the evolution pipeline for self-modification.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Absolute or ~ path"},
+                "content": {"type": "string", "description": "Content to write"},
+                "append": {"type": "boolean", "description": "Append instead of overwrite", "default": False},
+            },
+            "required": ["path", "content"],
+        },
+        "execute": execute,
+    }
+
+
+def make_file_search(cfg):
+    allowed_roots = cfg.get("allowed_roots", DEFAULT_ALLOWED_ROOTS)
+
+    def execute(pattern, directory="", max_results=20):
+        if not directory or directory in ("~", "."):
+            d = PROJECT_DIR
+        else:
+            d = Path(directory).expanduser().resolve()
+        if not _check_path_allowed(str(d), allowed_roots):
+            return f"DENIED: Directory '{directory}' is outside allowed roots"
+        if not d.is_dir():
+            proj_d = PROJECT_DIR / directory
+            if proj_d.is_dir():
+                d = proj_d
+            else:
+                return f"Not a directory: {directory}  (also tried {proj_d})"
+        try:
+            matches = []
+            for p in d.rglob(pattern):
+                if len(matches) >= max_results:
+                    break
+                matches.append(str(p))
+            if not matches:
+                return f"No files matching '{pattern}' in {directory}"
+            return "\n".join(matches)
+        except Exception as e:
+            return f"Search error: {e}"
+
+    return {
+        "name": "file_search",
+        "description": "Search for files matching a glob pattern in a directory.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "pattern": {"type": "string", "description": "Glob pattern (e.g. '*.py', '**/*.json')"},
+                "directory": {"type": "string", "description": "Directory to search in (defaults to Ghost project root)", "default": ""},
+                "max_results": {"type": "integer", "description": "Max results to return", "default": 20},
+            },
+            "required": ["pattern"],
+        },
+        "execute": execute,
+    }
+
+
+
+# web_fetch has been moved to ghost_web_fetch.py (production-grade extraction pipeline).
+# Registered separately in ghost.py via build_web_fetch_tools().
+
+
+
+
+def make_app_control(cfg):
+    allowed_apps = cfg.get("allowed_apps", [
+        "Finder", "Safari", "Notes", "Calendar", "Reminders",
+        "Terminal", "TextEdit", "Preview", "Music", "System Preferences",
+    ])
+
+    def execute(app_name, action="activate", script=None):
+        if PLAT != "Darwin":
+            return "app_control is only available on macOS"
+        if app_name not in allowed_apps and not script:
+            return f"DENIED: '{app_name}' not in allowed apps: {', '.join(allowed_apps)}"
+        try:
+            if action == "activate":
+                cmd = f'tell application "{app_name}" to activate'
+            elif action == "quit":
+                cmd = f'tell application "{app_name}" to quit'
+            elif action == "script" and script:
+                cmd = script
+            else:
+                return f"Unknown action: {action}"
+            r = subprocess.run(
+                ["osascript", "-e", cmd],
+                capture_output=True, text=True, timeout=10,
+            )
+            if r.returncode != 0:
+                return f"AppleScript error: {r.stderr.strip()}"
+            return r.stdout.strip() or f"OK: {action} {app_name}"
+        except Exception as e:
+            return f"App control error: {e}"
+
+    return {
+        "name": "app_control",
+        "description": "Control macOS applications (activate, quit, run AppleScript).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "app_name": {"type": "string", "description": "Name of the application"},
+                "action": {"type": "string", "enum": ["activate", "quit", "script"], "default": "activate"},
+                "script": {"type": "string", "description": "Custom AppleScript to run (for action='script')"},
+            },
+            "required": ["app_name"],
+        },
+        "execute": execute,
+    }
+
+
+def make_notify(cfg, channel_router=None):
+    import hashlib as _hl
+    _recent_sends: list[tuple[float, str]] = []
+    _RATE_WINDOW = 300  # 5-minute sliding window
+    _RATE_LIMIT = 10    # max notifications per window
+    _DEDUP_WINDOW = 60  # suppress identical messages within 60s
+
+    def execute(title, message, sound=True, priority="normal", channel=""):
+        import time as _t
+        text = f"**{title}**\n{message}"
+        now = _t.time()
+        msg_hash = _hl.sha256(text.encode()).hexdigest()[:16]
+
+        # Prune old entries outside the rate window
+        while _recent_sends and now - _recent_sends[0][0] > _RATE_WINDOW:
+            _recent_sends.pop(0)
+
+        # Dedup: reject identical message within dedup window
+        for ts, h in reversed(_recent_sends):
+            if now - ts > _DEDUP_WINDOW:
+                break
+            if h == msg_hash:
+                return (
+                    f"Duplicate notification suppressed — identical message sent "
+                    f"{int(now - ts)}s ago. Do not retry the same notification."
+                )
+
+        # Rate limit: reject if too many sends in window
+        if len(_recent_sends) >= _RATE_LIMIT:
+            return (
+                f"Rate limit reached ({_RATE_LIMIT} notifications in {_RATE_WINDOW}s). "
+                "Wait before sending more notifications."
+            )
+
+        _recent_sends.append((now, msg_hash))
+        results = []
+
+        # Route through multi-channel messaging if available
+        if channel_router:
+            try:
+                r = channel_router.send(text, channel=channel or None,
+                                        priority=priority, title=title)
+                if r.ok:
+                    results.append(f"Sent via {r.channel_id}")
+                else:
+                    results.append(f"Channel send failed: {r.error}")
+            except Exception as e:
+                results.append(f"Channel error: {e}")
+
+        # Always try local OS notification as well (immediate visual feedback)
+        if PLAT == "Darwin":
+            sound_str = 'sound name "default"' if sound else ""
+            cmd = f'display notification "{message}" with title "{title}" {sound_str}'
+            try:
+                subprocess.run(["osascript", "-e", cmd], capture_output=True, timeout=5)
+                results.append("OS notification sent")
+            except Exception as e:
+                results.append(f"OS notification error: {e}")
+
+        if not results:
+            return "No notification channels available"
+        return "OK: " + "; ".join(results)
+
+    return {
+        "name": "notify",
+        "description": (
+            "Send a notification to the user via their preferred messaging channel "
+            "(Telegram, Slack, Discord, ntfy, email, etc.) and/or local OS notification.  "
+            "Use for alerts, reminders, and proactive updates."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Notification title"},
+                "message": {"type": "string", "description": "Notification body"},
+                "sound": {"type": "boolean", "description": "Play OS notification sound", "default": True},
+                "priority": {"type": "string",
+                             "enum": ["low", "normal", "high", "critical"],
+                             "description": "Message priority (critical = broadcast to all channels)",
+                             "default": "normal"},
+                "channel": {"type": "string",
+                            "description": "Specific channel to use (e.g. 'telegram', 'slack'). "
+                                           "Empty = use preferred channel.",
+                            "default": ""},
+            },
+            "required": ["title", "message"],
+        },
+        "execute": execute,
+    }
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  TOOL SET BUILDER
+# ═════════════════════════════════════════════════════════════════════
+
+def make_uptime_tool(cfg):
+    """Create the uptime tool that returns daemon uptime in human-readable format."""
+    # Store start time at module level when daemon initializes
+    start_time = cfg.get("daemon_start_time")
+    
+    def execute():
+        if start_time is None:
+            return "Uptime: unknown (daemon start time not available)"
+        
+        # Calculate elapsed time
+        elapsed = time.time() - start_time
+        
+        # Format as human-readable
+        hours = int(elapsed // 3600)
+        minutes = int((elapsed % 3600) // 60)
+        seconds = int(elapsed % 60)
+        
+        parts = []
+        if hours > 0:
+            parts.append(f"{hours}h")
+        if minutes > 0 or hours > 0:
+            parts.append(f"{minutes}m")
+        parts.append(f"{seconds}s")
+        
+        return f"Uptime: {' '.join(parts)}"
+    
+    return {
+        "name": "uptime",
+        "description": "Returns how long the Ghost daemon has been running in human-readable format (e.g., '2h 15m 30s').",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+        },
+        "execute": execute,
+    }
+
+
+def make_workspace_write(cfg):
+    """Workspace-scoped file write for user projects. Paths are relative to the workspace."""
+
+    def execute(project, file_path, content, append=False):
+        if not project or not project.strip():
+            return "Error: 'project' is required — e.g. 'csv-converter', 'todo-api', 'my-website'"
+        if not file_path or not file_path.strip():
+            return "Error: 'file_path' is required — e.g. 'main.py', 'src/app.ts', 'index.html'"
+        if not content:
+            return "Error: 'content' is required"
+
+        project = project.strip().replace("..", "").replace("~", "")
+        file_path = file_path.strip().lstrip("/")
+
+        ws = get_workspace(cfg, project)
+        target = ws / file_path
+        proj_str = str(PROJECT_DIR)
+        if proj_str in str(target.resolve()):
+            return f"BLOCKED: Cannot write inside Ghost's codebase. Workspace is {ws}"
+
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if append:
+                with open(target, "a") as f:
+                    f.write(content)
+            else:
+                target.write_text(content)
+            return f"OK: wrote {len(content)} chars to {target} (workspace: {ws})"
+        except Exception as e:
+            return f"Write error: {e}"
+
+    ws_base = get_user_projects_dir(cfg)
+    return {
+        "name": "workspace_write",
+        "description": (
+            f"Write a file inside a user project workspace ({ws_base}/<project>/). "
+            "Use this for ALL user-requested projects (websites, scripts, apps). "
+            "Paths are relative to the project root. Directory structure is auto-created."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "project": {
+                    "type": "string",
+                    "description": "Project folder name (e.g. 'csv-converter', 'rest-api', 'portfolio-site'). Auto-created.",
+                },
+                "file_path": {
+                    "type": "string",
+                    "description": "File path relative to project root (e.g. 'main.py', 'src/app.ts', 'index.html', 'README.md')",
+                },
+                "content": {"type": "string", "description": "File content to write"},
+                "append": {"type": "boolean", "description": "Append instead of overwrite", "default": False},
+            },
+            "required": ["project", "file_path", "content"],
+        },
+        "execute": execute,
+    }
+
+
+def build_default_tools(cfg):
+    """Build all built-in tool definitions from config. Returns list of tool defs."""
+    tools = [
+        make_shell_exec(cfg),
+        make_file_read(cfg),
+        make_file_write(cfg),
+        make_workspace_write(cfg),
+        make_file_search(cfg),
+        make_notify(cfg),
+        make_uptime_tool(cfg),
+    ]
+    if PLAT == "Darwin":
+        tools.append(make_app_control(cfg))
+    return tools

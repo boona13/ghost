@@ -1,0 +1,33 @@
+# Ghost — core dependencies
+flask>=3.0,<4.0
+requests>=2.31,<3.0
+pyyaml>=6.0,<7.0
+croniter>=2.0,<7.0
+
+# Web content extraction (used by ghost_web_fetch.py)
+readability-lxml>=0.8,<1.0
+html2text>=2024.2,<2026.0
+beautifulsoup4>=4.12,<5.0
+lxml>=5.0,<6.0
+
+# Schema validation (used by ghost_llm_task.py)
+jsonschema>=4.20,<5.0
+
+# Text-to-speech (used by ghost_tts.py — free, no API key needed)
+edge-tts>=6.1,<8.0
+
+# Voice Wake + Talk Mode (used by ghost_voice.py — mic capture, audio processing)
+sounddevice>=0.4.6,<0.6.0
+numpy>=1.26,<3.0
+soundfile>=0.12,<1.0
+# Optional: vosk>=0.3.45           # Offline speech recognition (no API key needed)
+
+# Optional: browser automation (install separately — requires system browsers)
+# playwright>=1.40
+
+# Optional: channel-specific SDKs (ghost_channels/ — install only what you need)
+neonize>=0.3.14           # WhatsApp Web (QR code linking via whatsmeow)
+# slack_sdk>=3.27         # Slack Socket Mode (bidirectional)
+# discord.py>=2.3         # Discord gateway (bidirectional)
+# matrix-nio>=0.24        # Matrix E2EE support
+# websocket-client>=1.7   # Mattermost/Nostr inbound

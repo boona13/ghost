@@ -1,0 +1,79 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.bak
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment / secrets
+.env
+.env.*
+*.tmp
+
+# Credential and token files (should live in ~/.ghost/, not here)
+google_oauth.json
+integrations.json
+config.json
+*_credentials.json
+*_token.json
+*_secret.json
+
+# Ghost runtime data (lives in ~/.ghost/)
+# These should never appear in the project root, but just in case:
+memory.db
+memory.db-wal
+memory.db-shm
+ghost.pid
+supervisor.pid
+
+# Legacy macOS binaries (no longer used)
+ghost_imgclip
+ghost_panel
+
+# Reference project (external, not part of Ghost)
+openclaw_ref/
+
+# User identity files contain personal data after first run.
+# Templates are generated on first start — the real SOUL.md and USER.md
+# are tracked in git as starter templates. Users will customize them.
+# If you've personalized these, consider not pushing your changes.
+
+# Backup archives (created by evolve system)
+evolve_backups/
+
+# Log files
+*.log
+log.json
+feed.json
+action_items.json
+growth_log.json
+crash_report.json
+
+# Docker test files
+Dockerfile*
+.dockerignore
+
+# Test / coverage
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/

@@ -1,0 +1,61 @@
+---
+description: Use Docker for testing fresh Ghost installations. Covers build, run, verify, and cleanup workflow.
+globs: Dockerfile.test, ghost.py, ghost_dashboard/**
+alwaysApply: false
+---
+
+# Docker Testing for Fresh Installations
+
+Use Docker whenever testing what a **new user** would experience installing Ghost for the first time.
+
+## When to Use Docker
+
+- Testing the setup wizard / API key onboarding flow
+- Verifying `install.sh` or `requirements.txt` changes
+- Confirming the app starts correctly with zero config
+- Testing that `ghost_dashboard` serves properly on first run
+
+## Workflow
+
+```bash
+# 1. Build
+docker build -f Dockerfile.test -t ghost-test .
+
+# 2. Run (port 3333 is the dashboard)
+docker stop ghost-test 2>/dev/null; docker rm ghost-test 2>/dev/null
+docker run -d --name ghost-test -p 3333:3333 ghost-test
+
+# 3. Verify startup
+sleep 4
+curl -s http://localhost:3333/api/setup/status
+# Expected: {"needs_setup":true, "has_api_key":false, ...}
+
+# 4. Test API key submission
+curl -s -X POST http://localhost:3333/api/setup/complete \
+  -H "Content-Type: application/json" \
+  -d '{"api_key":"sk-or-..."}'
+# Expected: {"ok":true, "restarting":false}
+# Container MUST stay alive (check: docker ps | grep ghost)
+
+# 5. Verify chat works
+curl -s -X POST http://localhost:3333/api/chat/send \
+  -H "Content-Type: application/json" \
+  -d '{"message":"say hello"}'
+
+# 6. Cleanup
+docker stop ghost-test; docker rm ghost-test
+```
+
+## Critical Docker Constraints
+
+- **PID 1 problem**: Ghost runs as PID 1 in the container. `os.execv()` or `os._exit()` kills the container.
+- **No process restart in Docker**: Use hot-reload (swap config/keys into the running daemon) instead.
+- **Detection**: Check `Path("/.dockerenv").exists()` or `os.environ.get("GHOST_BIND_HOST") == "0.0.0.0"` to detect Docker.
+- **`GHOST_BIND_HOST=0.0.0.0`** is set in `Dockerfile.test` — this is how the dashboard binds to all interfaces inside the container.
+
+## Never Do in Docker
+
+- `os.execv(...)` — kills PID 1, stops the container
+- `os._exit(0)` — same effect
+- `subprocess.Popen` + `os._exit` — spawns orphan then kills container
+- Any restart strategy that terminates the main process
