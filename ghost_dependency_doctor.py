@@ -61,7 +61,6 @@ def make_dependency_doctor_check():
         raw = args.get("modules") if isinstance(args, dict) else None
 
         default_modules = [
-            {"name": "fastapi", "install": "fastapi"},
             {"name": "tensorflow", "install": "tensorflow", "optional_heavy": True},
         ]
 
