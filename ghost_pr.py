@@ -20,8 +20,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
 
-import ghost_git
-
 PROJECT_DIR = Path(__file__).resolve().parent
 GHOST_HOME = Path.home() / ".ghost"
 PR_DIR = GHOST_HOME / "prs"
@@ -100,20 +98,21 @@ stop the next one. Check EVERY section below.
 
 ## When acting as DEVELOPER
 
-You are the engineer who wrote this code. Defend your decisions honestly.
+You are the engineer who wrote this code. Defend your decisions honestly. \
+Keep responses concise — this is a discussion, NOT a patching session.
 
 For each reviewer concern:
-1. Reviewer is RIGHT: acknowledge and propose a fix as a patch
-2. Reviewer is WRONG: explain why with technical reasoning
-3. Unsure: propose the safer alternative
+1. Reviewer is RIGHT: acknowledge briefly and confirm it will be fixed
+2. Reviewer is WRONG: explain why with technical reasoning (2-3 sentences max)
+3. Unsure: note the safer alternative
 
-When proposing fixes, use this JSON format:
-```json
-{"patches": [{"file": "filename.py", "old": "old code", "new": "new code"}]}
-```
+Do NOT write code patches, diffs, or full implementations in your response. \
+Just describe what you would change in plain English (e.g. "Will add a lock around the file write" \
+or "Will move the mkdir into the constructor"). Fixes are applied separately after review.
 
 **Response format as DEVELOPER:**
-End with: CHANGES_PROPOSED: YES (if you proposed fixes) or CHANGES_PROPOSED: NO
+- One short paragraph per concern (acknowledge + brief plan or rebuttal)
+- End with: ACCEPTED: <number of concerns you agree with> / DISPUTED: <number you disagree with>
 """
 
 MAX_REVIEW_ROUNDS = 3
@@ -367,9 +366,10 @@ class ReviewEngine:
             # ── Developer turn ───────────────────────────────────────
             messages.append({"role": "user", "content": (
                 "**DEVELOPER:** Respond to every concern the reviewer raised. "
-                "For valid concerns, propose a concrete fix as a patch. "
-                "For invalid ones, explain why with technical reasoning. "
-                "End with CHANGES_PROPOSED: YES or CHANGES_PROPOSED: NO."
+                "Keep it concise — acknowledge valid concerns and describe "
+                "what you would fix in plain English (no code patches). "
+                "For invalid concerns, give a brief technical rebuttal. "
+                "End with ACCEPTED: N / DISPUTED: N."
             )})
 
             developer_text = self._chat(engine, messages)
@@ -383,18 +383,6 @@ class ReviewEngine:
             messages.append({"role": "assistant", "content": developer_text})
             self.store.add_discussion(pr_id, "developer", developer_text,
                                       round_num)
-
-            # Apply patches if developer proposed changes
-            if self._has_proposed_changes(developer_text):
-                patches = self._extract_patches(developer_text)
-                if patches and self.evolve_engine:
-                    self._apply_review_patches(pr, patches, round_num)
-                    pr = self.store.get_pr(pr_id)
-                    diff_text = pr["diff"][:15000]
-                    messages.append({"role": "user", "content": (
-                        "Patches have been applied and tested. "
-                        f"Updated diff:\n```diff\n{diff_text}\n```"
-                    )})
 
         # Max rounds exhausted without resolution
         self.store.set_verdict(pr_id, "rejected")
@@ -430,68 +418,6 @@ class ReviewEngine:
 
     def _has_proposed_changes(self, response: str) -> bool:
         return "CHANGES_PROPOSED: YES" in response.upper()
-
-    def _extract_patches(self, response: str) -> list[dict]:
-        """Extract patch JSON blocks from developer response."""
-        patches = []
-        json_pattern = re.compile(
-            r'```json\s*\n(.*?)\n\s*```', re.DOTALL)
-        for match in json_pattern.finditer(response):
-            try:
-                data = json.loads(match.group(1))
-                if isinstance(data, dict) and "patches" in data:
-                    patches.extend(data["patches"])
-                elif isinstance(data, list):
-                    patches.extend(data)
-            except (json.JSONDecodeError, TypeError):
-                continue
-        return patches
-
-    def _apply_review_patches(self, pr: Dict, patches: list[dict],
-                              round_num: int):
-        """Apply developer patches on the feature branch, re-test, update PR.
-
-        Important: saves and restores the evolution status around test() to
-        prevent the review-round test from corrupting the 'tested_pass' status
-        that submit_pr() relies on for deploy().
-        """
-        evolution_id = pr["evolution_id"]
-        branch = pr["branch"]
-
-        ok, msg = ghost_git.checkout(branch)
-        if not ok:
-            log.warning("Cannot checkout branch %s for patches: %s",
-                        branch, msg)
-            return
-
-        try:
-            for patch in patches:
-                file_path = patch.get("file", "")
-                old = patch.get("old", "")
-                new = patch.get("new", "")
-                if not file_path or not old or not new:
-                    continue
-                if self.evolve_engine:
-                    self.evolve_engine.apply_change(
-                        evolution_id, file_path,
-                        patches=[{"old": old, "new": new}])
-
-            ghost_git.commit(f"Address review feedback: round {round_num}")
-
-            if self.evolve_engine:
-                evo = self.evolve_engine._active_evolutions.get(evolution_id)
-                saved_status = evo["status"] if evo else None
-                self.evolve_engine.test(evolution_id)
-                if evo and saved_status:
-                    evo["status"] = saved_status
-
-        except Exception as e:
-            log.warning("Error applying review patches: %s", e)
-        finally:
-            ghost_git.stash_and_checkout("main")
-            diff = ghost_git.get_diff("main", branch)
-            files = ghost_git.get_changed_files("main", branch)
-            self.store.update_diff(pr["pr_id"], diff, files)
 
 
 # ── Singleton ────────────────────────────────────────────────────────
