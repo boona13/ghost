@@ -1,10 +1,14 @@
 """MCP (Model Context Protocol) Dashboard API Routes."""
 
 import json
+import threading
 from flask import Blueprint, jsonify, request
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
+# Lock for config updates to prevent race conditions
+_config_lock = threading.Lock()
 
 bp = Blueprint("mcp", __name__)
 
@@ -185,37 +189,38 @@ def update_config():
         return jsonify({"ok": False, "error": "Command contains forbidden characters"}), 400
     
     try:
-        cfg = daemon.cfg if hasattr(daemon, "cfg") else {}
-        mcp_servers = cfg.get("mcp_servers", {})
-        
-        # Build server config
-        server_config = {
-            "command": command,
-            "args": data.get("args", []),
-            "env": data.get("env", {}),
-            "enabled": data.get("enabled", True),
-            "timeout": data.get("timeout", 30.0),
-        }
-        
-        # Optional fields
-        if "allowed_tools" in data:
-            server_config["allowed_tools"] = data["allowed_tools"]
-        if "blocked_tools" in data:
-            server_config["blocked_tools"] = data["blocked_tools"]
-        
-        # Update config
-        mcp_servers[server_name] = server_config
-        cfg["mcp_servers"] = mcp_servers
-        
-        # Also update manager's internal config if available
-        manager = _get_manager()
-        if manager:
-            from ghost_mcp import MCPServerConfig
-            manager._server_configs[server_name] = MCPServerConfig.from_dict(server_name, server_config)
-        
-        # Persist config
-        if hasattr(daemon, "_save_config"):
-            daemon._save_config()
+        with _config_lock:
+            cfg = daemon.cfg if hasattr(daemon, "cfg") else {}
+            mcp_servers = cfg.get("mcp_servers", {})
+            
+            # Build server config
+            server_config = {
+                "command": command,
+                "args": data.get("args", []),
+                "env": data.get("env", {}),
+                "enabled": data.get("enabled", True),
+                "timeout": data.get("timeout", 30.0),
+            }
+            
+            # Optional fields
+            if "allowed_tools" in data:
+                server_config["allowed_tools"] = data["allowed_tools"]
+            if "blocked_tools" in data:
+                server_config["blocked_tools"] = data["blocked_tools"]
+            
+            # Update config
+            mcp_servers[server_name] = server_config
+            cfg["mcp_servers"] = mcp_servers
+            
+            # Also update manager's internal config if available
+            manager = _get_manager()
+            if manager:
+                from ghost_mcp import MCPServerConfig
+                manager._server_configs[server_name] = MCPServerConfig.from_dict(server_name, server_config)
+            
+            # Persist config
+            if hasattr(daemon, "_save_config"):
+                daemon._save_config()
         
         return jsonify({"ok": True, "server": {"name": server_name, **server_config}})
     except Exception as e:
@@ -231,29 +236,32 @@ def delete_server_config(server_name):
         return jsonify({"ok": False, "error": "Daemon not available"}), 503
     
     try:
-        cfg = daemon.cfg if hasattr(daemon, "cfg") else {}
-        mcp_servers = cfg.get("mcp_servers", {})
-        
-        if server_name not in mcp_servers:
-            return jsonify({"ok": False, "error": "Server not found"}), 404
-        
-        # Disconnect if connected
-        manager = _get_manager()
-        if manager and server_name in manager._servers:
-            future = manager.disconnect(server_name)
-            _result_from_future(future, timeout=10.0)
-        
-        # Remove from manager's internal config
-        if manager and server_name in manager._server_configs:
-            del manager._server_configs[server_name]
-        
-        # Remove from config
-        del mcp_servers[server_name]
-        cfg["mcp_servers"] = mcp_servers
-        
-        # Persist config
-        if hasattr(daemon, "_save_config"):
-            daemon._save_config()
+        with _config_lock:
+            cfg = daemon.cfg if hasattr(daemon, "cfg") else {}
+            mcp_servers = cfg.get("mcp_servers", {})
+            
+            if server_name not in mcp_servers:
+                return jsonify({"ok": False, "error": "Server not found"}), 404
+            
+            # Disconnect if connected
+            manager = _get_manager()
+            if manager and server_name in manager._servers:
+                future = manager.disconnect(server_name)
+                result = _result_from_future(future, timeout=10.0)
+                if not result.get("ok"):
+                    return jsonify({"ok": False, "error": f"Failed to disconnect: {result.get('error')}"}), 400
+            
+            # Remove from manager's internal config
+            if manager and server_name in manager._server_configs:
+                del manager._server_configs[server_name]
+            
+            # Remove from config
+            del mcp_servers[server_name]
+            cfg["mcp_servers"] = mcp_servers
+            
+            # Persist config
+            if hasattr(daemon, "_save_config"):
+                daemon._save_config()
         
         return jsonify({"ok": True})
     except Exception as e:
