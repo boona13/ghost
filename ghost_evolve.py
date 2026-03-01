@@ -1380,7 +1380,7 @@ def build_evolve_tools(cfg):
     """Build tool definitions for the LLM to self-modify Ghost."""
     engine = get_engine()
 
-    def evolve_plan_exec(description, files, level=None, confirmed_not_duplicate: bool = False):
+    def evolve_plan_exec(description, files, level=None, **kwargs):
         evo_id, info = engine.plan(description, files, cfg)
         if evo_id is None:
             return f"Evolution blocked: {info.get('error', 'unknown error')}"

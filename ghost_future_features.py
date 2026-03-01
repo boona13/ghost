@@ -651,7 +651,7 @@ def build_future_features_tools(cfg, on_queue_change=None):
                            category: str = CATEGORY_FEATURE,
                            affected_files: str = "",
                            proposed_approach: str = "",
-                           confirmed_not_duplicate: bool = False):
+                           **kwargs):
         deps = [d.strip() for d in dependencies.split(",") if d.strip()]
         tag_list = [t.strip() for t in tags.split(",") if t.strip()]
         feature = store.add(title, description, priority, source, deps, 
