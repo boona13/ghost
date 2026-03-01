@@ -32,6 +32,7 @@ from urllib.parse import urlparse
 import requests
 
 log = logging.getLogger("ghost.web_fetch")
+logging.getLogger("readability.readability").setLevel(logging.WARNING)
 
 # ═════════════════════════════════════════════════════════════════════
 #  CONSTANTS

@@ -13,7 +13,6 @@ the diff, they discuss back and forth, and the Reviewer renders a verdict
 
 import json
 import logging
-import re
 import threading
 import uuid
 from datetime import datetime
@@ -30,12 +29,7 @@ log = logging.getLogger("ghost.pr")
 # ── Review System Prompt ──────────────────────────────────────────────
 
 REVIEW_SYSTEM_PROMPT = """\
-You are a code review system with two personas. You will be asked to respond \
-as either the REVIEWER or the DEVELOPER depending on the turn.
-
-## When acting as REVIEWER
-
-You are a strict, senior engineer protecting the codebase from regressions, \
+You are a strict, senior code reviewer protecting the codebase from regressions, \
 bugs, and bad design. Ghost has shipped 42+ documented bugs. Your job is to \
 stop the next one. Check EVERY section below.
 
@@ -96,23 +90,6 @@ stop the next one. Check EVERY section below.
    VERDICT: REQUEST_CHANGES — specific issues to fix (list them)
    VERDICT: BLOCK — fundamentally wrong approach
 
-## When acting as DEVELOPER
-
-You are the engineer who wrote this code. Defend your decisions honestly. \
-Keep responses concise — this is a discussion, NOT a patching session.
-
-For each reviewer concern:
-1. Reviewer is RIGHT: acknowledge briefly and confirm it will be fixed
-2. Reviewer is WRONG: explain why with technical reasoning (2-3 sentences max)
-3. Unsure: note the safer alternative
-
-Do NOT write code patches, diffs, or full implementations in your response. \
-Just describe what you would change in plain English (e.g. "Will add a lock around the file write" \
-or "Will move the mkdir into the constructor"). Fixes are applied separately after review.
-
-**Response format as DEVELOPER:**
-- One short paragraph per concern (acknowledge + brief plan or rebuttal)
-- End with: ACCEPTED: <number of concerns you agree with> / DISPUTED: <number you disagree with>
 """
 
 MAX_REVIEW_ROUNDS = 3
@@ -305,11 +282,12 @@ class ReviewEngine:
     # ── Main review loop ─────────────────────────────────────────────
 
     def run_review(self, pr_id: str, engine) -> str:
-        """Run a conversational code review. Returns: approved/rejected/blocked.
+        """Run a single-round code review. Returns: approved/rejected/blocked.
 
-        The entire review is one messages thread:
-          system  →  PR context (diff, title, desc)  →  reviewer turn  →
-          developer turn  →  reviewer turn  →  ...  →  final verdict.
+        The reviewer examines the diff once and renders a final verdict.
+        If the verdict is not APPROVE, the PR is rejected immediately so
+        the feature can be re-queued with the feedback incorporated into
+        the next evolution attempt.
         """
         pr = self.store.get_pr(pr_id)
         if not pr:
@@ -327,66 +305,37 @@ class ReviewEngine:
                 f"**Files changed:** {', '.join(pr['files_changed'])}\n\n"
                 f"```diff\n{diff_text}\n```"
             )},
+            {"role": "user", "content": (
+                "**REVIEWER:** Review the diff above. Check code quality, "
+                "correctness, UI/UX, frontend-backend integration, and scope. "
+                "End with your VERDICT."
+            )},
         ]
 
-        for round_num in range(1, pr["max_rounds"] + 1):
-            log.info("Review round %d/%d for PR %s",
-                     round_num, pr["max_rounds"], pr_id)
+        log.info("Review round 1/1 for PR %s", pr_id)
+        reviewer_text = self._chat(engine, messages)
+        if not reviewer_text:
+            log.warning("Reviewer produced no response — rejecting")
+            self.store.set_verdict(pr_id, "rejected",
+                "LLM failed to produce reviewer response")
+            return "rejected"
 
-            # ── Reviewer turn ────────────────────────────────────────
-            messages.append({"role": "user", "content": (
-                f"**REVIEWER — Round {round_num}/{pr['max_rounds']}:** "
-                "Review the diff above. Check code quality, correctness, "
-                "UI/UX, frontend-backend integration, and scope. "
-                "End with your VERDICT."
-            )})
+        self.store.add_discussion(pr_id, "reviewer", reviewer_text, 1)
+        verdict = self._parse_verdict(reviewer_text)
+        log.info("Reviewer verdict: %s", verdict)
 
-            reviewer_text = self._chat(engine, messages)
-            if not reviewer_text:
-                log.warning("Reviewer produced no response round %d — rejecting",
-                            round_num)
-                self.store.set_verdict(pr_id, "rejected",
-                    f"LLM failed to produce reviewer response in round {round_num}")
-                return "rejected"
+        if verdict == "approve":
+            self.store.set_verdict(pr_id, "approved")
+            return "approved"
 
-            messages.append({"role": "assistant", "content": reviewer_text})
-            self.store.add_discussion(pr_id, "reviewer", reviewer_text, round_num)
+        if verdict == "block":
+            reason = self._extract_block_reason(reviewer_text)
+            self.store.set_verdict(pr_id, "blocked", reason)
+            return "blocked"
 
-            verdict = self._parse_verdict(reviewer_text)
-            log.info("Reviewer verdict round %d: %s", round_num, verdict)
-
-            if verdict == "approve":
-                self.store.set_verdict(pr_id, "approved")
-                return "approved"
-            if verdict == "block":
-                reason = self._extract_block_reason(reviewer_text)
-                self.store.set_verdict(pr_id, "blocked", reason)
-                return "blocked"
-
-            # ── Developer turn ───────────────────────────────────────
-            messages.append({"role": "user", "content": (
-                "**DEVELOPER:** Respond to every concern the reviewer raised. "
-                "Keep it concise — acknowledge valid concerns and describe "
-                "what you would fix in plain English (no code patches). "
-                "For invalid concerns, give a brief technical rebuttal. "
-                "End with ACCEPTED: N / DISPUTED: N."
-            )})
-
-            developer_text = self._chat(engine, messages)
-            if not developer_text:
-                log.info("Developer silent round %d — reviewer concerns stand, "
-                         "rejecting", round_num)
-                self.store.set_verdict(pr_id, "rejected",
-                    f"Developer could not respond in round {round_num}")
-                return "rejected"
-
-            messages.append({"role": "assistant", "content": developer_text})
-            self.store.add_discussion(pr_id, "developer", developer_text,
-                                      round_num)
-
-        # Max rounds exhausted without resolution
-        self.store.set_verdict(pr_id, "rejected")
-        log.info("PR %s rejected: max review rounds exhausted", pr_id)
+        reason = self._extract_change_requests(reviewer_text)
+        self.store.set_verdict(pr_id, "rejected", reason)
+        log.info("PR %s rejected: reviewer requested changes", pr_id)
         return "rejected"
 
     def _parse_verdict(self, response: str) -> str:
@@ -416,8 +365,20 @@ class ReviewEngine:
                     return lines[i + 1].strip()
         return "Blocked by reviewer"
 
-    def _has_proposed_changes(self, response: str) -> bool:
-        return "CHANGES_PROPOSED: YES" in response.upper()
+    def _extract_change_requests(self, response: str) -> str:
+        """Extract the reviewer's concerns as a concise rejection reason."""
+        lines = response.split("\n")
+        concerns = []
+        for line in lines:
+            stripped = line.strip()
+            if stripped and stripped[0:1].isdigit() and "." in stripped[:4]:
+                concerns.append(stripped)
+            elif stripped.startswith("- **") or stripped.startswith("* **"):
+                concerns.append(stripped)
+        if concerns:
+            return "\n".join(concerns[:10])
+        summary_line = lines[0].strip() if lines else ""
+        return summary_line[:500] or "Reviewer requested changes"
 
 
 # ── Singleton ────────────────────────────────────────────────────────

@@ -1011,6 +1011,12 @@ class GhostDaemon:
                 pr_store.set_verdict(pr_id, "rejected", reason)
                 stale_closed += 1
 
+                try:
+                    from ghost_evolve import _log_reviewer_mistakes
+                    _log_reviewer_mistakes(pr, pr_id, pr.get("title", ""))
+                except Exception:
+                    pass
+
                 if feature_id:
                     ok_retry, retry_status = self._features_store.mark_review_rejected(
                         feature_id, reason, max_retries=3
