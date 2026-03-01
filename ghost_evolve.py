@@ -773,12 +773,13 @@ class EvolutionEngine:
             try:
                 from ghost_future_features import FutureFeaturesStore
                 if feature_id:
-                    # Treat BLOCK as terminal for this feature request.
                     FutureFeaturesStore().reject(
                         feature_id, f"Blocked by reviewer (PR {pr['pr_id']})")
                     _notify_queue_best_effort()
             except Exception:
                 pass
+            pr_after = store.get_pr(pr["pr_id"]) or pr
+            _log_reviewer_mistakes(pr_after, pr["pr_id"], title)
             return False, (
                 f"PR {pr['pr_id']} BLOCKED by reviewer. "
                 f"Feature {feature_id} marked as rejected. Call task_complete."
@@ -799,7 +800,6 @@ class EvolutionEngine:
                             break
                     reason = f"PR rejected after review (PR {pr['pr_id']})"
                     if latest_reviewer_feedback:
-                        # Keep this bounded so feature payloads remain manageable.
                         feedback = latest_reviewer_feedback[:1200]
                         reason = (
                             f"{reason}. Latest reviewer feedback:\n{feedback}"
@@ -811,6 +811,8 @@ class EvolutionEngine:
                         _notify_queue_best_effort()
             except Exception:
                 pass
+            pr_after = store.get_pr(pr["pr_id"]) or pr
+            _log_reviewer_mistakes(pr_after, pr["pr_id"], title)
             from ghost_pr import MAX_REVIEW_ROUNDS
             retry_msg = (
                 "Feature was re-queued to pending for another implementer attempt."
@@ -1325,6 +1327,43 @@ class EvolutionEngine:
         return []
 
 
+def _log_reviewer_mistakes(pr_data, pr_id, pr_title):
+    """Store reviewer rejection feedback as mistake entries in the memory DB.
+
+    Each rejected/blocked PR generates one memory entry so Ghost can learn
+    from real review failures via memory_search(type_filter='mistake').
+    Duplicates are prevented via source_hash = pr_id.
+    """
+    try:
+        from ghost_memory import MemoryDB
+        db = MemoryDB()
+        if db.has_source(pr_id):
+            db.close()
+            return
+        reviewer_msgs = [
+            d["message"] for d in pr_data.get("discussions", [])
+            if d.get("role") == "reviewer" and d.get("message")
+        ]
+        if not reviewer_msgs:
+            db.close()
+            return
+        last_feedback = reviewer_msgs[-1][:1500]
+        content = (
+            f"PR REJECTION ({pr_id}): {pr_title}\n"
+            f"Reviewer feedback:\n{last_feedback}"
+        )
+        db.save(
+            content=content,
+            type="mistake",
+            tags="pr_rejection,auto_captured",
+            source_preview=f"PR {pr_id}: {pr_title[:60]}",
+            source_hash=pr_id,
+        )
+        db.close()
+    except Exception:
+        pass
+
+
 _engine = None
 _engine_lock = threading.Lock()
 
@@ -1625,10 +1664,10 @@ def build_evolve_tools(cfg):
                 "The reviewer checks code quality, UI/UX, frontend-backend integration, "
                 "and Python correctness. Possible outcomes:\n"
                 "- APPROVED: PR is merged and Ghost restarts with the new code.\n"
-                "- REJECTED: Reviewer and developer could not agree after review rounds. "
-                "The feature is marked failed automatically. Call task_complete.\n"
+                "- REJECTED: Reviewer found issues. The feature is automatically re-queued "
+                "to pending for another attempt. Call task_complete.\n"
                 "- BLOCKED: The approach is fundamentally wrong. "
-                "The feature is marked blocked automatically. Call task_complete.\n"
+                "The feature is marked rejected automatically. Call task_complete.\n"
                 "Use this INSTEAD of evolve_deploy for normal feature implementation."
             ),
             "parameters": {
@@ -1651,7 +1690,7 @@ def build_evolve_tools(cfg):
                         "description": "The feature ID this PR implements (from start_future_feature)",
                     },
                 },
-                "required": ["evolution_id", "title"],
+                "required": ["evolution_id", "title", "feature_id"],
             },
             "execute": evolve_submit_pr_exec,
         },

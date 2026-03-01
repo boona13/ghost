@@ -1288,10 +1288,15 @@ class GhostDaemon:
                     run_evolution_ids.add(evo_id)
 
         was_rolled_back = any(
-            tc["tool"] == "evolve_rollback" or
-            (tc["tool"] == "evolve_test" and "FAILED" in tc.get("result", ""))
-            for tc in tool_calls
+            tc["tool"] == "evolve_rollback" for tc in tool_calls
         )
+        if not was_rolled_back:
+            last_test = None
+            for tc in tool_calls:
+                if tc["tool"] == "evolve_test":
+                    last_test = tc
+            if last_test and "FAILED" in last_test.get("result", ""):
+                was_rolled_back = True
 
         try:
             in_progress = list(self._features_store.get_all("in_progress"))
