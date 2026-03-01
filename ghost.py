@@ -77,6 +77,7 @@ from ghost_implementation_auditor_filters import build_implementation_auditor_fi
 from ghost_interrupt import make_interrupt_tools
 from ghost_config_payloads import build_config_payload_tools
 from ghost_dependency_doctor import build_dependency_doctor_tools
+from ghost_pr import build_pr_tools
 # responses capabilities wiring marker: dashboard-managed feature flags loaded via config/routes
 
 # ── Paths ────────────────────────────────────────────────────────────
@@ -1126,6 +1127,13 @@ class GhostDaemon:
                 self.tool_registry.register(tool_def)
         except Exception as e:
             print(f"  [webhooks] Failed to initialize: {e}")
+
+        # PR tools
+        try:
+            for tool_def in build_pr_tools(cfg=cfg):
+                self.tool_registry.register(tool_def)
+        except Exception as e:
+            print(f"  [pr] Failed to initialize: {e}")
 
     def _load_soul(self):
         """Load SOUL.md with mtime caching."""
