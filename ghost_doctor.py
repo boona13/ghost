@@ -260,7 +260,7 @@ def build_doctor_tools(config: Dict[str, Any], daemon_refs: Optional[Dict[str, A
                 out.append(item)
         return out
 
-    def _doctor_run() -> Dict[str, Any]:
+    def _doctor_run(_) -> Dict[str, Any]:
         return doctor.run()
 
     def _doctor_fix(args: Dict[str, Any]) -> Dict[str, Any]:
