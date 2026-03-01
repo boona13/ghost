@@ -13,13 +13,14 @@ import sys
 from typing import Any, Dict, List
 
 
-def _check_modules(modules: List[Dict[str, str]]) -> Dict[str, Any]:
-    results: List[Dict[str, str]] = []
-    missing: List[Dict[str, str]] = []
+def _check_modules(modules: List[Dict[str, Any]]) -> Dict[str, Any]:
+    results: List[Dict[str, Any]] = []
+    missing: List[Dict[str, Any]] = []
 
     for item in modules:
         name = str(item.get("name", "")).strip()
         install_name = str(item.get("install", name)).strip() or name
+        optional_heavy = bool(item.get("optional_heavy", False))
         if not name:
             continue
 
@@ -33,6 +34,7 @@ def _check_modules(modules: List[Dict[str, str]]) -> Dict[str, Any]:
                 "status": "missing",
                 "error": message,
                 "install": f"pip install {install_name}",
+                "optional_heavy": optional_heavy,
             }
             results.append(entry)
             missing.append(entry)
@@ -60,21 +62,22 @@ def make_dependency_doctor_check():
 
         default_modules = [
             {"name": "fastapi", "install": "fastapi"},
-            {"name": "tensorflow", "install": "tensorflow"},
+            {"name": "tensorflow", "install": "tensorflow", "optional_heavy": True},
         ]
 
-        modules: List[Dict[str, str]] = []
+        modules: List[Dict[str, Any]] = []
         if isinstance(raw, list):
             for item in raw:
                 if isinstance(item, dict):
                     modules.append({
                         "name": str(item.get("name", "")).strip(),
                         "install": str(item.get("install", item.get("name", ""))).strip(),
+                        "optional_heavy": bool(item.get("optional_heavy", False)),
                     })
                 elif isinstance(item, str):
                     val = item.strip()
                     if val:
-                        modules.append({"name": val, "install": val})
+                        modules.append({"name": val, "install": val, "optional_heavy": False})
 
         if not modules:
             modules = default_modules
@@ -118,18 +121,19 @@ def make_dependency_doctor_install():
         modules = args.get("modules") if isinstance(args, dict) else None
         auto_install = args.get("auto_install", False) if isinstance(args, dict) else False
 
-        modules_to_check: List[Dict[str, str]] = []
+        modules_to_check: List[Dict[str, Any]] = []
         if isinstance(modules, list):
             for item in modules:
                 if isinstance(item, dict):
                     modules_to_check.append({
                         "name": str(item.get("name", "")).strip(),
                         "install": str(item.get("install", item.get("name", ""))).strip(),
+                        "optional_heavy": bool(item.get("optional_heavy", False)),
                     })
                 elif isinstance(item, str):
                     val = item.strip()
                     if val:
-                        modules_to_check.append({"name": val, "install": val})
+                        modules_to_check.append({"name": val, "install": val, "optional_heavy": False})
 
         if not modules_to_check:
             return {
@@ -161,11 +165,20 @@ def make_dependency_doctor_install():
         # Actually install missing modules
         installed = []
         failed = []
+        skipped_heavy = []
         
         # Get timeout from args or use default
         timeout = args.get("timeout", 300) if isinstance(args, dict) else 300
 
         for item in missing:
+            # Skip auto-install for heavy optional dependencies (e.g., tensorflow ~500MB)
+            if item.get("optional_heavy", False):
+                skipped_heavy.append({
+                    "module": item["module"],
+                    "reason": "Large optional dependency - manual install recommended",
+                    "install": item.get("install", f"pip install {item['module']}"),
+                })
+                continue
             module_name = item["module"]
             # install field is the package spec (e.g., "tensorflow", "package[extra]==1.0")
             pkg_spec = item.get("install", module_name)
@@ -203,25 +216,30 @@ def make_dependency_doctor_install():
                     "error": f"Installation error: {exc}",
                 })
 
-        if installed and not failed:
+        # Build response based on results
+        if skipped_heavy and not installed and not failed:
             return {
-                "status": "success",
-                "message": f"Successfully installed {len(installed)} module(s): {', '.join(installed)}",
-                "installed": installed,
+                "status": "skipped_heavy",
+                "message": f"Skipped {len(skipped_heavy)} heavy optional dependency/ies (manual install recommended)",
+                "skipped": skipped_heavy,
             }
-        elif installed and failed:
-            return {
-                "status": "partial",
-                "message": f"Installed {len(installed)} module(s), {len(failed)} failed",
-                "installed": installed,
-                "failed": failed,
-            }
-        else:
-            return {
-                "status": "error",
-                "message": f"Failed to install {len(failed)} module(s)",
-                "failed": failed,
-            }
+        
+        response = {
+            "status": "success" if installed and not failed else ("partial" if installed else "error"),
+            "message": "",
+        }
+        
+        if installed:
+            response["message"] = f"Successfully installed {len(installed)} module(s): {', '.join(installed)}"
+            response["installed"] = installed
+        if failed:
+            response["message"] = (response.get("message", "") + f" Failed to install {len(failed)} module(s).").strip()
+            response["failed"] = failed
+        if skipped_heavy:
+            response["message"] = (response.get("message", "") + f" Skipped {len(skipped_heavy)} heavy optional dependency/ies.").strip()
+            response["skipped_heavy"] = skipped_heavy
+            
+        return response
 
     return {
         "name": "dependency_doctor_install",
@@ -231,7 +249,7 @@ def make_dependency_doctor_install():
             "properties": {
                 "modules": {
                     "type": "array",
-                    "description": "Modules to check/install. Items may be strings or {name, install} objects.",
+                    "description": "Modules to check/install. Items may be strings or {name, install, optional_heavy} objects. optional_heavy=true skips auto-install (for large packages like tensorflow).",
                     "items": {
                         "oneOf": [
                             {"type": "string"},
@@ -240,6 +258,7 @@ def make_dependency_doctor_install():
                                 "properties": {
                                     "name": {"type": "string"},
                                     "install": {"type": "string", "description": "Package spec (e.g., 'tensorflow==2.0', 'package[extra]'). Not a shell command."},
+                                    "optional_heavy": {"type": "boolean", "description": "If true, skip auto-install for this large dependency. Manual install recommended.", "default": False},
                                 },
                                 "required": ["name"],
                             },
