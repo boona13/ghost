@@ -17,7 +17,9 @@ def _get_daemon():
     try:
         from ghost_dashboard import get_daemon
         return get_daemon()
-    except Exception:
+    except (ImportError, AttributeError, RuntimeError) as e:
+        import logging
+        logging.getLogger(__name__).debug(f"Daemon not available in doctor routes: {e}")
         return None
 
 
@@ -29,7 +31,7 @@ def _call_doctor_tool(tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         tool = daemon.tool_registry.get(tool_name)
         if tool and callable(tool.get("execute")):
             try:
-                result = tool["execute"](args)
+                result = tool["execute"](**args)
                 if isinstance(result, dict):
                     return {"ok": True, **result}
                 return {"ok": True, "result": result}
@@ -44,6 +46,9 @@ def _call_doctor_tool(tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         if daemon:
             daemon_refs = {
                 "cron": getattr(daemon, 'cron', None),
+                "memory": getattr(daemon, 'memory', None),
+                "skills": getattr(daemon, 'skills', None),
+                "identity": getattr(daemon, 'identity', None),
             }
         doctor = GhostDoctor(config=cfg, daemon_refs=daemon_refs)
         
@@ -106,9 +111,15 @@ def doctor_fix():
     if check_ids is not None:
         if not isinstance(check_ids, list):
             return jsonify({"ok": False, "error": "check_ids must be a list"}), 400
+        if len(check_ids) > 100:
+            return jsonify({"ok": False, "error": "check_ids exceeds maximum of 100 items"}), 400
         for item in check_ids:
             if not isinstance(item, str):
                 return jsonify({"ok": False, "error": "check_ids must contain only strings"}), 400
+            if len(item) > 128:
+                return jsonify({"ok": False, "error": f"check_id exceeds 128 chars: {item[:20]}..."}), 400
+            if not all(c.isalnum() or c in '.-_' for c in item):
+                return jsonify({"ok": False, "error": f"check_id contains invalid characters: {item}"}), 400
     
     dry_run = bool(data.get("dry_run", True))
     
