@@ -706,37 +706,44 @@ class EvolutionEngine:
                 files_changed=changed_files,
             )
 
-        # Run the adversarial review
+        # Run the adversarial review with a DEDICATED engine instance.
+        # Using daemon.engine caused contention: concurrent cron jobs share
+        # the same engine/fallback chain, amplifying 429s and causing empty
+        # responses when the provider is rate-limited.
         review_engine = get_review_engine(evolve_engine=self)
         loop_engine = None
         try:
-            # Prefer the daemon's already-initialized engine.
-            from ghost_dashboard import get_daemon
-            daemon = get_daemon()
-            if daemon and getattr(daemon, "engine", None):
-                loop_engine = daemon.engine
-        except Exception:
-            loop_engine = None
+            from ghost import load_config
+            from ghost_loop import ToolLoopEngine
+            from ghost_auth_profiles import get_auth_store
+            _cfg = cfg or load_config()
+            api_key = _cfg.get("api_key", "")
+            model = _cfg.get("model", "openrouter/auto")
+            fallback_models = _cfg.get("fallback_models", [])
+            auth_store = get_auth_store()
 
-        if loop_engine is None:
-            # Fallback for non-daemon contexts.
+            provider_chain = None
             try:
-                from ghost import load_config
-                from ghost_loop import ToolLoopEngine
-                _cfg = load_config()
-                api_key = _cfg.get("api_key", "")
-                model = _cfg.get("model", "openrouter/auto")
-                fallback_models = _cfg.get("fallback_models", [])
-                loop_engine = ToolLoopEngine(
-                    api_key=api_key,
-                    model=model,
-                    fallback_models=fallback_models,
-                )
-            except Exception as e:
-                _log = logging.getLogger("ghost.evolve")
-                _log.warning("Could not create LLM engine for review: %s", e)
-                ghost_git.stash_and_checkout("main")
-                return False, f"Cannot start review: LLM init failed: {e}"
+                from ghost_dashboard import get_daemon
+                daemon = get_daemon()
+                if daemon and hasattr(daemon, "_build_provider_chain"):
+                    provider_chain = daemon._build_provider_chain(
+                        model, fallback_models)
+            except Exception:
+                pass
+
+            loop_engine = ToolLoopEngine(
+                api_key=api_key,
+                model=model,
+                fallback_models=fallback_models,
+                auth_store=auth_store,
+                provider_chain=provider_chain,
+            )
+        except Exception as e:
+            _log = logging.getLogger("ghost.evolve")
+            _log.warning("Could not create LLM engine for review: %s", e)
+            ghost_git.stash_and_checkout("main")
+            return False, f"Cannot start review: LLM init failed: {e}"
 
         verdict = review_engine.run_review(pr["pr_id"], loop_engine)
         import logging
