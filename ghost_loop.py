@@ -960,6 +960,8 @@ class ToolLoopEngine:
         final_text = ""
         consecutive_errors = 0
         loop_detector = LoopDetector()
+        critical_blocks = 0
+        MAX_CRITICAL_BLOCKS = 3
         exit_reason = "max_steps"
 
         _debug_logger.session_start(
@@ -1090,9 +1092,19 @@ class ToolLoopEngine:
                     tool_duration_ms = 0
 
                     if detection.stuck and detection.level == "critical":
+                        critical_blocks += 1
                         tool_result = detection.message
                         loop_detector.record_result(call_id, tool_result)
                         loop_hint = f"BLOCKED:{detection.detector}"
+                        if critical_blocks >= MAX_CRITICAL_BLOCKS:
+                            final_text = (
+                                f"(Loop terminated: {critical_blocks} critical blocks hit. "
+                                "The model was stuck repeating the same tool calls.)"
+                            )
+                            exit_reason = "critical_loop_break"
+                            _debug_logger.step_error(step,
+                                f"Force-exit: {critical_blocks} critical blocks reached")
+                            break
                     else:
                         warning_text = ""
                         if detection.stuck and detection.level == "warning":
