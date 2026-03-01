@@ -113,7 +113,9 @@ class EvolutionEngine:
             except Exception:
                 pass
         if cleaned:
-            log.info("Cleaned up %d orphaned pending evolution(s) on startup", cleaned)
+            import logging
+            _log = logging.getLogger("ghost.evolve")
+            _log.info("Cleaned up %d orphaned pending evolution(s) on startup", cleaned)
 
     def set_active_jobs_fn(self, fn):
         """Register a callable that returns the count of active cron jobs
@@ -264,10 +266,14 @@ class EvolutionEngine:
                 if ok:
                     git_branch = branch_name
                 else:
-                    log.warning("Could not create git branch %s: %s",
+                    import logging
+                    _log = logging.getLogger("ghost.evolve")
+                    _log.warning("Could not create git branch %s: %s",
                                 branch_name, msg)
             except Exception as e:
-                log.warning("Git branch creation failed: %s", e)
+                import logging
+                _log = logging.getLogger("ghost.evolve")
+                _log.warning("Git branch creation failed: %s", e)
 
             evo = {
                 "id": evolution_id,
@@ -663,7 +669,9 @@ class EvolutionEngine:
                     "or use evolve_deploy for direct deploy."
                 )
             evo["git_branch"] = branch_name
-            log.info("Recovered git branch %s for evolution %s", branch_name, evolution_id)
+            import logging
+            _log = logging.getLogger("ghost.evolve")
+            _log.info("Recovered git branch %s for evolution %s", branch_name, evolution_id)
 
         # Commit changes on the feature branch
         ok, msg = ghost_git.checkout(branch_name)
@@ -674,35 +682,66 @@ class EvolutionEngine:
         diff = ghost_git.get_diff("main", branch_name)
         changed_files = ghost_git.get_changed_files("main", branch_name)
 
-        # Create the PR record
+        # Reuse existing open/reviewing PR for this evolution+branch to
+        # prevent duplicate records if submit_pr is retried after an error.
         store = get_pr_store()
-        pr = store.create_pr(
-            evolution_id=evolution_id,
-            feature_id=feature_id,
-            title=title,
-            description=description,
-            branch=branch_name,
-            diff=diff,
-            files_changed=changed_files,
-        )
+        pr = None
+        for existing in store.list_prs():
+            if (
+                existing.get("evolution_id") == evolution_id
+                and existing.get("branch") == branch_name
+                and existing.get("status") in {"open", "reviewing", "approved"}
+            ):
+                pr = existing
+                store.update_diff(pr["pr_id"], diff, changed_files)
+                break
+        if pr is None:
+            pr = store.create_pr(
+                evolution_id=evolution_id,
+                feature_id=feature_id,
+                title=title,
+                description=description,
+                branch=branch_name,
+                diff=diff,
+                files_changed=changed_files,
+            )
 
         # Run the adversarial review
         review_engine = get_review_engine(evolve_engine=self)
-        from ghost_loop import ToolLoopEngine
-        loop_engine = ToolLoopEngine.__new__(ToolLoopEngine)
-        loop_engine.llm = None
+        loop_engine = None
         try:
-            from ghost import load_config
-            from ghost_llm import GhostLLM
-            _cfg = load_config()
-            loop_engine.llm = GhostLLM(_cfg)
-        except Exception as e:
-            log.warning("Could not create LLM for review: %s", e)
-            ghost_git.stash_and_checkout("main")
-            return False, f"Cannot start review: LLM init failed: {e}"
+            # Prefer the daemon's already-initialized engine.
+            from ghost_dashboard import get_daemon
+            daemon = get_daemon()
+            if daemon and getattr(daemon, "engine", None):
+                loop_engine = daemon.engine
+        except Exception:
+            loop_engine = None
+
+        if loop_engine is None:
+            # Fallback for non-daemon contexts.
+            try:
+                from ghost import load_config
+                from ghost_loop import ToolLoopEngine
+                _cfg = load_config()
+                api_key = _cfg.get("api_key", "")
+                model = _cfg.get("model", "openrouter/auto")
+                fallback_models = _cfg.get("fallback_models", [])
+                loop_engine = ToolLoopEngine(
+                    api_key=api_key,
+                    model=model,
+                    fallback_models=fallback_models,
+                )
+            except Exception as e:
+                _log = logging.getLogger("ghost.evolve")
+                _log.warning("Could not create LLM engine for review: %s", e)
+                ghost_git.stash_and_checkout("main")
+                return False, f"Cannot start review: LLM init failed: {e}"
 
         verdict = review_engine.run_review(pr["pr_id"], loop_engine)
-        log.info("PR %s verdict: %s", pr["pr_id"], verdict)
+        import logging
+        _log = logging.getLogger("ghost.evolve")
+        _log.info("PR %s verdict: %s", pr["pr_id"], verdict)
 
         if verdict == "approved":
             ghost_git.checkout("main")

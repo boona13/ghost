@@ -76,6 +76,7 @@ from ghost_responses_capabilities import get_responses_capabilities, get_respons
 from ghost_implementation_auditor_filters import build_implementation_auditor_filter_tools
 from ghost_interrupt import make_interrupt_tools
 from ghost_config_payloads import build_config_payload_tools
+from ghost_dependency_doctor import build_dependency_doctor_tools
 # responses capabilities wiring marker: dashboard-managed feature flags loaded via config/routes
 
 # ── Paths ────────────────────────────────────────────────────────────
@@ -910,6 +911,11 @@ class GhostDaemon:
             self.tool_registry.register(tool_def)
         if not dry_run:
             run_full_repair()
+
+        # Dependency doctor (surface missing optional Python modules with remediations)
+        if cfg.get("enable_dependency_doctor", True):
+            for tool_def in build_dependency_doctor_tools(cfg):
+                self.tool_registry.register(tool_def)
 
         # Uptime/status tools
         for td in build_uptime_tools(self):
