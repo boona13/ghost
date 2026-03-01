@@ -1447,8 +1447,11 @@ class ToolRegistry:
                     f"Tool error ({name}): Your tool call arguments were malformed JSON "
                     f"(parse error: {args['__parse_error']}, raw length: {raw_len} chars). "
                     f"This usually happens when the content is too large for a single tool call. "
-                    f"SOLUTION: For large files, use shell_exec with a heredoc or echo command instead. "
-                    f"Example: shell_exec(command=\"mkdir -p ~/Desktop/project && cat > ~/Desktop/project/index.html << 'HTMLEOF'\\n<html>...</html>\\nHTMLEOF\")"
+                    f"SOLUTION: Use evolve_apply with append=true to write the file in smaller chunks. "
+                    f"Call evolve_apply(evolution_id, file_path, content='<first part>', append=false) "
+                    f"for the first chunk, then evolve_apply(evolution_id, file_path, content='<next part>', append=true) "
+                    f"for each subsequent chunk. Keep each chunk under 4000 characters. "
+                    f"NEVER use shell_exec to write files as a workaround."
                 )
 
             params = tool.get("parameters", {})

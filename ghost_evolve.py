@@ -354,8 +354,15 @@ class EvolutionEngine:
         self.reject(evolution_id)
         return False, "Timed out waiting for approval (5 minutes). Evolution cancelled."
 
-    def apply_change(self, evolution_id, file_path, content=None, patches=None):
-        """Apply a code change to a file."""
+    def apply_change(self, evolution_id, file_path, content=None, patches=None,
+                     append=False):
+        """Apply a code change to a file.
+
+        append=True lets the LLM build a new file incrementally across
+        multiple calls when the content is too large for a single JSON
+        tool-call output.  Each call appends to the file; the diff is
+        recorded on every call so rollback stays correct.
+        """
         evo = self._active_evolutions.get(evolution_id)
         if not evo:
             return False, "Evolution not found. Call evolve_plan first."
@@ -384,7 +391,7 @@ class EvolutionEngine:
 
         PATCH_ONLY_EXTENSIONS = {".css", ".js", ".html", ".py"}
         PATCH_ONLY_MIN_SIZE = 200
-        if (content is not None and old_content
+        if (content is not None and not append and old_content
                 and Path(rel_path).suffix.lower() in PATCH_ONLY_EXTENSIONS
                 and len(old_content) > PATCH_ONLY_MIN_SIZE):
             return False, (
@@ -395,7 +402,9 @@ class EvolutionEngine:
                 "lines of the file and 'new' is those same lines plus your additions."
             )
 
-        if content is not None:
+        if append and content is not None:
+            new_content = old_content + content
+        elif content is not None:
             new_content = content
         elif patches:
             new_content = old_content
@@ -1400,8 +1409,10 @@ def build_evolve_tools(cfg):
             parts.append("Auto-approved. You can now call evolve_apply to make changes.")
         return "\n".join(parts)
 
-    def evolve_apply_exec(evolution_id, file_path, content=None, patches=None):
-        ok, msg = engine.apply_change(evolution_id, file_path, content=content, patches=patches)
+    def evolve_apply_exec(evolution_id, file_path, content=None, patches=None,
+                          append=False):
+        ok, msg = engine.apply_change(evolution_id, file_path, content=content,
+                                      patches=patches, append=append)
         return msg
 
     def evolve_apply_config_exec(evolution_id=None, updates=None, **kwargs):
@@ -1546,6 +1557,11 @@ def build_evolve_tools(cfg):
                 "To APPEND code, use a patch where 'old' is the last few lines and 'new' is those lines "
                 "plus your additions. "
                 "For NEW files: use 'content' with the full file body. "
+                "If the file is too large for a single call (malformed JSON / truncation), "
+                "set append=true and split the content across multiple calls — each call appends "
+                "to the file. Example: call 1 with content='import...\\nclass Foo:...' then "
+                "call 2 with content='\\ndef bar():...' and append=true. "
+                "NEVER use shell_exec to write files as a workaround — always use evolve_apply. "
                 f"LIMIT: Max {MAX_NEW_FILE_SIZE} bytes for new files. "
                 "CRITICAL: After your last evolve_apply, you MUST call evolve_test then evolve_deploy. "
                 "If you skip test/deploy, ALL changes will be automatically rolled back when the loop ends."
@@ -1563,7 +1579,7 @@ def build_evolve_tools(cfg):
                     },
                     "content": {
                         "type": "string",
-                        "description": "Full new content for the file (use this for new files or complete rewrites)",
+                        "description": "Full new content for the file (new files) or a chunk to append (with append=true)",
                     },
                     "patches": {
                         "type": "array",
@@ -1575,6 +1591,10 @@ def build_evolve_tools(cfg):
                             },
                         },
                         "description": "Search/replace pairs for targeted edits",
+                    },
+                    "append": {
+                        "type": "boolean",
+                        "description": "If true, append content to the file instead of replacing. Use this to write large new files in multiple calls.",
                     },
                 },
                 "required": ["evolution_id", "file_path"],
