@@ -299,11 +299,12 @@ class ReviewEngine:
                          reviewer_text: str = "") -> int:
         """Dynamically compute max_tokens for the next turn.
 
-        Reviewer budget: based on diff size (more diff = more to review).
+        Reviewer budget: high base (the checklist is large regardless of diff
+        size) plus a scaling factor for bigger diffs.
         Developer budget: based on reviewer feedback length and concern count
         (each concern needs explanation + potential patch).
         """
-        MIN_TOKENS, MAX_TOKENS = 2000, 8000
+        MIN_TOKENS, MAX_TOKENS = 4000, 12000
 
         total_input_chars = sum(len(m.get("content", "")) for m in messages)
         input_tokens = total_input_chars // 4
@@ -314,7 +315,7 @@ class ReviewEngine:
                 r'(?:^|\n)\s*\d+[\.\)]\s', reviewer_text))
             concerns = max(concerns, 1)
             per_concern = 600
-            budget = concerns * per_concern + 1500
+            budget = concerns * per_concern + 2000
             if len(reviewer_text) > 3000:
                 budget = int(budget * 1.3)
         else:
@@ -323,7 +324,7 @@ class ReviewEngine:
                 if "```diff" in m.get("content", ""):
                     diff_chars = len(m["content"])
                     break
-            budget = 3000 + (diff_chars // 10)
+            budget = 5000 + (diff_chars // 8)
 
         budget = max(MIN_TOKENS, min(MAX_TOKENS, budget))
         log.info("Token budget for %s: %d (input ~%d tokens, %d msg chars)",
