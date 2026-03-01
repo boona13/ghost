@@ -78,6 +78,7 @@ from ghost_interrupt import make_interrupt_tools
 from ghost_config_payloads import build_config_payload_tools
 from ghost_dependency_doctor import build_dependency_doctor_tools
 from ghost_pr import build_pr_tools
+from ghost_mcp import build_mcp_tools
 # responses capabilities wiring marker: dashboard-managed feature flags loaded via config/routes
 
 # ── Paths ────────────────────────────────────────────────────────────
@@ -353,6 +354,9 @@ DEFAULT_CONFIG = {
     # Webhook Triggers (auto-generated on startup if empty for security)
     "webhook_secret": "",
     "webhook_max_concurrent": 3,
+    # MCP (Model Context Protocol)
+    "enable_mcp": True,
+    "mcp_servers": {},
 }
 
 def load_config():
@@ -1183,6 +1187,17 @@ class GhostDaemon:
         except Exception as e:
             print(f"  [pr] Failed to initialize: {e}")
 
+        # MCP (Model Context Protocol)
+        self.mcp_manager = None
+        if cfg.get("enable_mcp", True):
+            try:
+                from ghost_mcp import MCPClientManager
+                self.mcp_manager = MCPClientManager(cfg)
+                for tool_def in build_mcp_tools(cfg):
+                    self.tool_registry.register(tool_def)
+            except Exception as e:
+                print(f"  [mcp] Failed to initialize: {e}")
+
     def _load_soul(self):
         """Load SOUL.md with mtime caching."""
         try:
@@ -1623,6 +1638,11 @@ class GhostDaemon:
         if self.shell_sessions:
             try:
                 self.shell_sessions.cleanup_all()
+            except Exception:
+                pass
+        if self.mcp_manager:
+            try:
+                self.mcp_manager.shutdown()
             except Exception:
                 pass
         if self.hooks:
