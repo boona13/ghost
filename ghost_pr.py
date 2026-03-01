@@ -276,7 +276,7 @@ class ReviewEngine:
     # ── Direct LLM chat (bypasses ToolLoopEngine) ────────────────────
 
     @staticmethod
-    def _chat(engine, messages, max_tokens=4000, temperature=0.3):
+    def _chat(engine, messages, max_tokens=8192, temperature=0.3):
         """Send the conversation to the LLM and return the assistant text.
 
         Uses engine._call_llm() directly — no tool loop, no pushback,
