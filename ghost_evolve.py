@@ -635,6 +635,9 @@ class EvolutionEngine:
         Creates a git commit on the feature branch, builds a PR, runs the
         adversarial review loop, and handles the verdict (merge+deploy,
         reject, or block).
+
+        The review ALWAYS runs. Self-repair uses evolve_deploy directly —
+        it never calls submit_pr, so there is no auto-approve bypass here.
         """
         import ghost_git
         from ghost_pr import get_pr_store, get_review_engine
@@ -645,27 +648,19 @@ class EvolutionEngine:
         if evo.get("status") != "tested_pass":
             return False, "Cannot submit PR: tests have not passed. Run evolve_test first."
 
+        # Ensure git branch exists — recover if plan() failed to create it
         branch_name = evo.get("git_branch")
         if not branch_name or not ghost_git.branch_exists(branch_name):
-            log.warning("No git branch for evolution %s — falling back to direct deploy", evolution_id)
-            return self.deploy(evolution_id)
-
-        # Auto-approve path (self-repair): merge to main and deploy directly
-        if cfg and cfg.get("evolve_auto_approve", False):
-            ok, msg = ghost_git.checkout(branch_name)
+            branch_name = f"evolve/{evolution_id}"
+            ok, msg = ghost_git.create_branch(branch_name)
             if not ok:
-                return False, f"Cannot switch to feature branch for auto-approve: {msg}"
-            ok, msg = ghost_git.commit(f"fix: {title}")
-            if not ok and "Nothing to commit" not in msg:
-                return False, f"Git commit failed in auto-approve flow: {msg}"
-            ok, msg = ghost_git.checkout("main")
-            if not ok:
-                return False, f"Cannot switch to main in auto-approve flow: {msg}"
-            ok, msg = ghost_git.merge(branch_name)
-            if not ok:
-                return False, f"Auto-approve merge failed: {msg}"
-            ghost_git.delete_branch(branch_name)
-            return self.deploy(evolution_id)
+                return False, (
+                    f"Cannot create git branch for PR: {msg}. "
+                    "Git may not be initialized. Run 'git init' in the project directory, "
+                    "or use evolve_deploy for direct deploy."
+                )
+            evo["git_branch"] = branch_name
+            log.info("Recovered git branch %s for evolution %s", branch_name, evolution_id)
 
         # Commit changes on the feature branch
         ok, msg = ghost_git.checkout(branch_name)
