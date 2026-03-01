@@ -78,6 +78,7 @@ from ghost_interrupt import make_interrupt_tools
 from ghost_config_payloads import build_config_payload_tools
 from ghost_dependency_doctor import build_dependency_doctor_tools
 from ghost_pr import build_pr_tools
+from ghost_mcp import MCPManager, build_mcp_tools
 
 # responses capabilities wiring marker: dashboard-managed feature flags loaded via config/routes
 
@@ -1184,6 +1185,18 @@ class GhostDaemon:
                 self.tool_registry.register(tool_def)
         except Exception as e:
             print(f"  [pr] Failed to initialize: {e}")
+
+        # MCP (Model Context Protocol) tools
+        self.mcp_manager = None
+        if cfg.get("enable_mcp", True):
+            try:
+                self.mcp_manager = MCPManager(cfg)
+                self.mcp_manager.start()
+                for tool_def in build_mcp_tools(mcp_manager=self.mcp_manager, cfg=cfg):
+                    self.tool_registry.register(tool_def)
+                print(f"  [mcp] Initialized with {len(self.mcp_manager.get_server_configs())} server(s)")
+            except Exception as e:
+                print(f"  [mcp] Failed to initialize: {e}")
 
 
     def _load_soul(self):
