@@ -240,7 +240,8 @@ class MemoryDB:
             c.execute("SELECT COUNT(*) FROM memories WHERE type = ?", (type_filter,))
         else:
             c.execute("SELECT COUNT(*) FROM memories")
-        return c.fetchone()[0]
+        row = c.fetchone()
+        return row[0] if row else 0
 
     def has_source(self, source_hash):
         """Check if we already have an analysis for this source content."""
