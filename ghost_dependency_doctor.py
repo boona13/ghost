@@ -118,11 +118,6 @@ def make_dependency_doctor_install():
         modules = args.get("modules") if isinstance(args, dict) else None
         auto_install = args.get("auto_install", False) if isinstance(args, dict) else False
 
-        default_modules = [
-            {"name": "fastapi", "install": "fastapi"},
-            {"name": "tensorflow", "install": "tensorflow"},
-        ]
-
         modules_to_check: List[Dict[str, str]] = []
         if isinstance(modules, list):
             for item in modules:
@@ -137,14 +132,21 @@ def make_dependency_doctor_install():
                         modules_to_check.append({"name": val, "install": val})
 
         if not modules_to_check:
-            modules_to_check = default_modules
+            return {
+                "status": "error",
+                "message": "No modules specified. Provide a modules list to check/install.",
+            }
 
         # Check which modules are missing
         check_result = _check_modules(modules_to_check)
         missing = check_result.get("missing", [])
 
         if not missing:
-            return "All requested modules are already installed."
+            return {
+                "status": "already_installed",
+                "message": "All requested modules are already installed.",
+                "modules": [m["name"] for m in modules_to_check],
+            }
 
         if not auto_install:
             # Just return the install commands without installing
@@ -159,22 +161,29 @@ def make_dependency_doctor_install():
         # Actually install missing modules
         installed = []
         failed = []
+        
+        # Get timeout from args or use default
+        timeout = args.get("timeout", 300) if isinstance(args, dict) else 300
 
         for item in missing:
             module_name = item["module"]
-            install_cmd = item.get("install", f"pip install {module_name}")
-            # Extract package name from install command
-            pkg_name = install_cmd.replace("pip install ", "").strip()
+            # install field is the package spec (e.g., "tensorflow", "package[extra]==1.0")
+            pkg_spec = item.get("install", module_name)
 
             try:
                 result = subprocess.run(
-                    [sys.executable, "-m", "pip", "install", pkg_name],
+                    [sys.executable, "-m", "pip", "install", pkg_spec],
                     capture_output=True,
                     text=True,
-                    timeout=300,  # 5 minute timeout for large packages like tensorflow
+                    timeout=timeout,
                 )
                 if result.returncode == 0:
                     # Verify the import works now
+                    # Clear import caches to recognize newly installed packages
+                    importlib.invalidate_caches()
+                    # Remove cached failed import attempts if any
+                    if module_name in sys.modules and sys.modules[module_name] is None:
+                        del sys.modules[module_name]
                     try:
                         importlib.import_module(module_name)
                         installed.append(module_name)
@@ -222,7 +231,7 @@ def make_dependency_doctor_install():
             "properties": {
                 "modules": {
                     "type": "array",
-                    "description": "Optional modules to check/install. Items may be strings or {name, install} objects.",
+                    "description": "Modules to check/install. Items may be strings or {name, install} objects.",
                     "items": {
                         "oneOf": [
                             {"type": "string"},
@@ -230,7 +239,7 @@ def make_dependency_doctor_install():
                                 "type": "object",
                                 "properties": {
                                     "name": {"type": "string"},
-                                    "install": {"type": "string"},
+                                    "install": {"type": "string", "description": "Package spec (e.g., 'tensorflow==2.0', 'package[extra]'). Not a shell command."},
                                 },
                                 "required": ["name"],
                             },
@@ -241,6 +250,11 @@ def make_dependency_doctor_install():
                     "type": "boolean",
                     "description": "If true, actually install missing packages via pip. If false, just return install commands.",
                     "default": False,
+                },
+                "timeout": {
+                    "type": "integer",
+                    "description": "Timeout in seconds for pip install operations. Default 300 (5 minutes).",
+                    "default": 300,
                 },
             },
             "additionalProperties": False,
