@@ -75,6 +75,7 @@ from ghost_tool_intent_security import ToolIntentSecurity
 from ghost_responses_capabilities import get_responses_capabilities, get_responses_capabilities_scope
 from ghost_implementation_auditor_filters import build_implementation_auditor_filter_tools
 from ghost_interrupt import make_interrupt_tools
+from ghost_config_payloads import build_config_payload_tools
 # responses capabilities wiring marker: dashboard-managed feature flags loaded via config/routes
 
 # ── Paths ────────────────────────────────────────────────────────────
@@ -1036,6 +1037,10 @@ class GhostDaemon:
 
         # Runtime Config Management tools (read/patch config, schema)
         for tool_def in build_config_tools(cfg=cfg):
+            self.tool_registry.register(tool_def)
+
+        # Config payload normalization tools (dashboard/config UX wiring helpers)
+        for tool_def in build_config_payload_tools(cfg):
             self.tool_registry.register(tool_def)
 
         # Projects tools (first-class workspace/project scoping)
