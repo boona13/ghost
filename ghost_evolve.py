@@ -1624,7 +1624,10 @@ def build_evolve_tools(cfg):
                 "PR APPROVED AND MERGED — deploy triggered. "
                 "You may now log this as a successful evolution."
             )
-        if feature_id:
+        # Only set cooldown after an actual reviewer rejection, not pre-submit failures
+        # like "tests not passed" or "pre-submit validation failed"
+        is_reviewer_rejection = "REJECTED" in msg or "BLOCKED" in msg
+        if feature_id and is_reviewer_rejection:
             _feature_cooldowns[feature_id] = time.time()
         return msg
 

@@ -386,20 +386,28 @@ def _check_incomplete_workflows(tool_calls_log: list) -> str | None:
 
 
 def _check_verification_before_submit(tool_calls_log: list) -> str | None:
-    """Block evolve_submit_pr if no file_read/grep happened after evolve_test.
+    """Block evolve_submit_pr if tests haven't passed or verification is missing.
 
-    Returns an error message if verification is missing, None if OK.
+    Returns an error message if blocked, None if OK.
     """
-    last_test_step = -1
-    for tc in tool_calls_log:
+    last_test_idx = -1
+    last_test_result = ""
+    for i, tc in enumerate(tool_calls_log):
         if tc["tool"] == "evolve_test":
-            s = tc.get("step", 0)
-            if s > last_test_step:
-                last_test_step = s
+            last_test_idx = i
+            last_test_result = tc.get("result", "")
 
-    if last_test_step < 0:
+    if last_test_idx < 0:
         return None
 
+    if "Tests FAILED" in last_test_result:
+        return (
+            "BLOCKED: Your last evolve_test FAILED. You cannot submit a PR until "
+            "tests pass. Fix the issues with evolve_apply, then re-run evolve_test. "
+            "Do NOT call evolve_submit_pr until evolve_test returns 'Tests PASSED'."
+        )
+
+    last_test_step = tool_calls_log[last_test_idx].get("step", 0)
     verification_tools = {"file_read", "grep"}
     verified = any(
         tc["tool"] in verification_tools and tc.get("step", 0) > last_test_step
@@ -412,6 +420,21 @@ def _check_verification_before_submit(tool_calls_log: list) -> str | None:
             "and confirm they are correct. Then call evolve_submit_pr again."
         )
     return None
+
+
+_MAX_CONSECUTIVE_TEST_FAILURES = 5
+
+
+def _count_consecutive_test_failures(tool_calls_log: list) -> int:
+    """Count consecutive evolve_test failures from the end of the log."""
+    count = 0
+    for tc in reversed(tool_calls_log):
+        if tc["tool"] == "evolve_test":
+            if "Tests FAILED" in tc.get("result", ""):
+                count += 1
+            else:
+                break
+    return count
 
 
 @dataclass
@@ -1263,6 +1286,16 @@ class ToolLoopEngine:
                         "args": fn_args,
                         "result": tool_result[:3000],
                     })
+
+                    if fn_name == "evolve_test" and "Tests FAILED" in tool_result:
+                        consec = _count_consecutive_test_failures(tool_calls_log)
+                        if consec >= _MAX_CONSECUTIVE_TEST_FAILURES:
+                            tool_result += (
+                                f"\n\n⛔ HARD LIMIT: {consec} consecutive test failures. "
+                                "You MUST stop trying to fix this feature. Call "
+                                "fail_future_feature(feature_id, 'Exceeded max test failures') "
+                                "then task_complete immediately. Do NOT attempt more fixes."
+                            )
 
                     if on_step:
                         try:
