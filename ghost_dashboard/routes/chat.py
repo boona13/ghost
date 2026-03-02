@@ -11,6 +11,13 @@ from pathlib import Path
 from datetime import datetime
 from flask import Blueprint, jsonify, request, Response, send_from_directory, abort
 
+# Import reasoning module for /think directive support
+try:
+    from ghost_reasoning import detect_think_directive, get_reasoning_state
+    _reasoning_available = True
+except ImportError:
+    _reasoning_available = False
+
 log = logging.getLogger(__name__)
 
 import sys
@@ -178,7 +185,7 @@ _load_restart_recovery()
 class ChatSession:
     """Tracks a single chat message being processed by Ghost."""
 
-    def __init__(self, message_id, user_message, attachments=None, project_id=None):
+    def __init__(self, message_id, user_message, attachments=None, project_id=None, enable_reasoning=False):
         self.id = message_id
         self.user_message = user_message
         self.attachments = attachments or []
@@ -192,6 +199,7 @@ class ChatSession:
         self.tools_used = []
         self.pending_approval = None
         self.cancelled = False
+        self.enable_reasoning = enable_reasoning
 
 
 def _build_chat_history(daemon, max_turns=10):
@@ -369,6 +377,14 @@ def _process_message(session, daemon):
     """Run the user message through Ghost's tool loop in a background thread."""
     try:
         session.status = "processing"
+        
+        # Check for /think directive and reasoning mode
+        enable_reasoning = session.enable_reasoning
+        if _reasoning_available:
+            has_directive, cleaned_message = detect_think_directive(session.user_message)
+            if has_directive:
+                enable_reasoning = True
+                session.user_message = cleaned_message
 
         active_project = None
         if session.project_id:
@@ -662,6 +678,7 @@ def _process_message(session, daemon):
                 history=chat_history,
                 cancel_check=lambda: session.cancelled,
                 images=image_attachments if image_attachments else None,
+                enable_reasoning=enable_reasoning,
             )
             session.result = loop_result.text
             session.tools_used = [tc["tool"] for tc in loop_result.tool_calls]
@@ -824,12 +841,13 @@ def send_message():
     message = data.get("message", "").strip()
     attachments = data.get("attachments", [])
     project_id = data.get("project_id") or None
+    enable_reasoning = data.get("enable_reasoning", False)
 
     if not message and not attachments:
         return jsonify({"ok": False, "error": "Empty message and no attachments"}), 400
 
     message_id = uuid.uuid4().hex[:12]
-    session = ChatSession(message_id, message, attachments, project_id=project_id)
+    session = ChatSession(message_id, message, attachments, project_id=project_id, enable_reasoning=enable_reasoning)
 
     with _chat_lock:
         _chat_sessions[message_id] = session
@@ -862,6 +880,44 @@ def send_message():
         "ok": True,
         "message_id": message_id,
     })
+
+
+@bp.route("/api/chat/reasoning", methods=["POST"])
+def toggle_reasoning():
+    """Toggle reasoning mode for the current session."""
+    if not _reasoning_available:
+        return jsonify({"ok": False, "error": "Reasoning module not available"}), 503
+    
+    data = request.get_json(force=True) or {}
+    session_id = data.get("session_id", "default")
+    enabled = data.get("enabled")
+    
+    try:
+        state = get_reasoning_state()
+        if enabled is not None:
+            state.set_enabled(session_id, enabled)
+            new_state = enabled
+        else:
+            new_state = state.toggle(session_id)
+        return jsonify({"ok": True, "enabled": new_state})
+    except Exception as e:
+        log.warning("Failed to toggle reasoning mode: %s", e, exc_info=True)
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@bp.route("/api/chat/reasoning/<session_id>", methods=["GET"])
+def get_reasoning_status(session_id):
+    """Get reasoning mode status for a session."""
+    if not _reasoning_available:
+        return jsonify({"ok": False, "error": "Reasoning module not available"}), 503
+    
+    try:
+        state = get_reasoning_state()
+        enabled = state.is_enabled(session_id)
+        return jsonify({"ok": True, "enabled": enabled})
+    except Exception as e:
+        log.warning("Failed to get reasoning status: %s", e, exc_info=True)
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @bp.route("/api/chat/stop/<message_id>", methods=["POST"])

@@ -4,6 +4,8 @@ let eventSource = null;
 let voicePollTimer = null;
 let _lastMessageFromVoice = false;
 let _activeProjectId = null;
+let _reasoningMode = false;
+let _currentSessionId = 'default';
 
 window.addEventListener('hashchange', () => {
   if (voicePollTimer) { clearInterval(voicePollTimer); voicePollTimer = null; }
@@ -125,6 +127,12 @@ export async function render(container) {
                 d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/>
             </svg>
           </button>
+          <button id="chat-reasoning-toggle" class="chat-reasoning-btn" title="Toggle reasoning mode (/think)">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+            </svg>
+          </button>
           <button id="chat-send" class="chat-send-btn" title="Send (Enter)">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -185,6 +193,7 @@ export async function render(container) {
   const fileInput = container.querySelector('#chat-file-input');
   const dropZone = container.querySelector('#chat-drop-zone');
   const attachmentsEl = container.querySelector('#chat-attachments');
+  const reasoningBtn = container.querySelector('#chat-reasoning-toggle');
   let processing = false;
   let activeMessageId = null;
   let attachments = [];
@@ -415,6 +424,49 @@ export async function render(container) {
     }, 1500);
   }
 
+  // ── Reasoning mode toggle ───────────────────────────────────
+  function updateReasoningButton() {
+    if (_reasoningMode) {
+      reasoningBtn.classList.add('active');
+      reasoningBtn.style.color = '#a78bfa';
+      reasoningBtn.title = 'Reasoning mode ON (click to toggle)';
+    } else {
+      reasoningBtn.classList.remove('active');
+      reasoningBtn.style.color = '';
+      reasoningBtn.title = 'Toggle reasoning mode (/think)';
+    }
+  }
+  
+  async function toggleReasoningMode() {
+    try {
+      const res = await api.post('/api/chat/reasoning', { session_id: _currentSessionId });
+      if (res.ok) {
+        _reasoningMode = res.enabled;
+        updateReasoningButton();
+        showToast(_reasoningMode ? 'Reasoning mode ON' : 'Reasoning mode OFF');
+      }
+    } catch (e) {
+      console.error('Failed to toggle reasoning mode:', e);
+    }
+  }
+  
+  // Load reasoning mode status on init
+  async function loadReasoningStatus() {
+    try {
+      const res = await api.get(`/api/chat/reasoning/${_currentSessionId}`);
+      if (res.ok) {
+        _reasoningMode = res.enabled;
+        updateReasoningButton();
+      }
+    } catch (e) {
+      // Reasoning module may not be available
+      console.log('Reasoning mode not available');
+    }
+  }
+  loadReasoningStatus();
+  
+  reasoningBtn.addEventListener('click', toggleReasoningMode);
+  
   // ── Attachment handling ──────────────────────────────────────
   attachBtn.addEventListener('click', () => fileInput.click());
 
@@ -591,7 +643,7 @@ export async function render(container) {
     statusEl.className = 'text-xs text-amber-400 animate-pulse';
 
     try {
-      const payload = { message: text };
+      const payload = { message: text, enable_reasoning: _reasoningMode };
       if (_activeProjectId) {
         payload.project_id = _activeProjectId;
       }
@@ -847,6 +899,20 @@ export async function render(container) {
       resetInput();
     } catch { /* recovery handled by fallbackPoll / _waitForRestart */ }
   });
+
+  // Show toast helper
+  function showToast(msg, type='info') {
+    if (window.GhostUtils?.toast) {
+      window.GhostUtils.toast(msg, type);
+    } else {
+      // Fallback toast
+      const toast = document.createElement('div');
+      toast.className = `toast toast-${type}`;
+      toast.textContent = msg;
+      document.body.appendChild(toast);
+      setTimeout(() => toast.remove(), 3000);
+    }
+  }
 
   // ── Canvas panel ──────────────────────────────────────────────
   const canvasPanel = container.querySelector('#canvas-panel');

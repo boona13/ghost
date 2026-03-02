@@ -962,7 +962,8 @@ class ToolLoopEngine:
     def run(self, system_prompt, user_message, tool_registry=None,
             max_steps=DEFAULT_MAX_STEPS, temperature=0.3, max_tokens=DEFAULT_MAX_TOKENS,
             image_b64=None, images=None, on_step=None, force_tool=False, history=None,
-            cancel_check=None, hook_runner=None, tool_intent_security=None, model_override=None):
+            cancel_check=None, hook_runner=None, tool_intent_security=None, model_override=None,
+            enable_reasoning=False):
         """
         Run the autonomous tool loop.
 
@@ -987,7 +988,19 @@ class ToolLoopEngine:
             ToolLoopResult with final text, tool calls made, and token usage.
         """
         date_context = _build_date_context()
-        messages = [{"role": "system", "content": date_context + system_prompt}]
+        
+        # Apply reasoning mode instruction if enabled
+        if enable_reasoning:
+            try:
+                from ghost_reasoning import build_reasoning_prompt
+                effective_system_prompt = build_reasoning_prompt(system_prompt, enable_reasoning=True)
+            except Exception as import_err:
+                log.warning("Failed to apply reasoning prompt: %s", import_err)
+                effective_system_prompt = system_prompt
+        else:
+            effective_system_prompt = system_prompt
+        
+        messages = [{"role": "system", "content": date_context + effective_system_prompt}]
 
         if history:
             messages.extend(history)

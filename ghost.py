@@ -934,6 +934,15 @@ class GhostDaemon:
             self.tool_registry.register(tool_def)
         if not dry_run:
             run_full_repair()
+        
+        # Reasoning mode support (/think directive)
+        if cfg.get("enable_reasoning", True):
+            try:
+                from ghost_reasoning import get_reasoning_state
+                self.reasoning_state = get_reasoning_state()
+                log.info("Reasoning mode enabled")
+            except Exception as e:
+                log.warning("Reasoning module failed: %s", e)
 
         # Dependency doctor (surface missing optional Python modules with remediations)
         if cfg.get("enable_dependency_doctor", True):

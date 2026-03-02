@@ -1399,6 +1399,31 @@ select.form-input option {
   animation: voiceMicPulse 2s ease-in-out infinite;
 }
 
+.chat-reasoning-btn {
+  width: 2rem;
+  height: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  border: none;
+  cursor: pointer;
+  transition: all 150ms ease;
+  background: transparent;
+  color: #71717a;
+  flex-shrink: 0;
+}
+
+.chat-reasoning-btn:hover {
+  color: #a1a1aa;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.chat-reasoning-btn.active {
+  color: #a78bfa;
+  background: rgba(139, 92, 246, 0.12);
+}
+
 @keyframes voiceMicPulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.3); }
   50% { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
