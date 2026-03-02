@@ -824,7 +824,8 @@ class GhostDaemon:
         from ghost_auth_profiles import get_auth_store
         self.auth_store = get_auth_store()
         self.auth_store.sync_codex_cli()
-        provider_chain = self._build_provider_chain(model, fallback_models)
+        self.provider_chain = self._build_provider_chain(model, fallback_models)
+        provider_chain = self.provider_chain
 
         # Legacy single-shot client (fallback)
         self.llm = LLMClient(api_key, model)

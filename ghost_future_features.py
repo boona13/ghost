@@ -888,10 +888,23 @@ def build_future_features_tools(cfg, on_queue_change=None):
         return f"Feature started: {feature_id}"
 
     def _complete_future_feature(feature_id: str, implementation_summary: str = ""):
-        """Mark a feature as completed and add to changelog (used by feature_implementer)."""
+        """Mark a feature as completed. Requires an approved+merged PR."""
         item = store.get_by_id(feature_id)
         if not item:
             return f"Feature not found: {feature_id}"
+        pr_id = item.get("current_pr_id", "")
+        if pr_id:
+            try:
+                from ghost_pr import get_pr_store
+                pr = get_pr_store().get_pr(pr_id)
+                if pr and pr.get("verdict") != "approved" and pr.get("status") != "merged":
+                    return (
+                        f"BLOCKED: Cannot complete feature {feature_id} — "
+                        f"PR {pr_id} verdict is '{pr.get('verdict', 'none')}', not 'approved'. "
+                        f"Call task_complete instead. The feature will be retried."
+                    )
+            except Exception:
+                pass
         store.mark_implemented(feature_id, implementation_summary)
         changelog.add(item, implementation_summary)
         _notify_queue()
