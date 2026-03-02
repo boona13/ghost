@@ -125,6 +125,24 @@ CONFIG_SCHEMA = {
     "enable_security_audit": {"type": "boolean", "description": "Enable security audit tools"},
     "enable_session_memory": {"type": "boolean", "description": "Enable auto-save session memory"},
     "strict_tool_registration": {"type": "boolean", "description": "Security: True prevents tool shadowing by plugins (CVE-2025-59536/21852 defense)"},
+    "enable_mcp": {"type": "boolean", "description": "Enable MCP (Model Context Protocol) client for external tool servers"},
+    "mcp_servers": {
+        "type": "object",
+        "description": "MCP server configurations. Keys are server names, values are server config objects with command, args, env, enabled, timeout, allowed_tools, blocked_tools.",
+        "additionalProperties": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "Command to start the MCP server (e.g. 'npx', 'node', 'python')"},
+                "args": {"type": "array", "items": {"type": "string"}, "description": "Command arguments"},
+                "env": {"type": "object", "description": "Environment variables for the server process"},
+                "enabled": {"type": "boolean", "description": "Whether the server is enabled"},
+                "timeout": {"type": "number", "description": "Request timeout in seconds"},
+                "allowed_tools": {"type": "array", "items": {"type": "string"}, "description": "Tool names to allow (empty = allow all)"},
+                "blocked_tools": {"type": "array", "items": {"type": "string"}, "description": "Tool names to block"}
+            },
+            "required": ["command"]
+        }
+    },
     "max_feed_items": {"type": "integer", "description": "Max items in feed (10-500)"},
     "rate_limit_seconds": {"type": "number", "description": "Rate limit between actions"},
     "growth_schedules": {"type": "object", "description": "Override cron schedules for growth routines"},

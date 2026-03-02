@@ -360,6 +360,9 @@ DEFAULT_CONFIG = {
     # Persistent Shell Sessions
     "max_shell_sessions": 5,
     "max_background_processes": 10,
+    # MCP (Model Context Protocol) - disabled by default for security
+    "enable_mcp": False,
+    "mcp_servers": {},
     # Webhook Triggers (auto-generated on startup if empty for security)
     "webhook_secret": "",
     "webhook_max_concurrent": 3,
