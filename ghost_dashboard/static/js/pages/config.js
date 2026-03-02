@@ -244,6 +244,18 @@ export async function render(container) {
             </div>
           </div>
         </div>
+
+        <!-- Tool Registration Security -->
+        <div class="stat-card md:col-span-2">
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="text-sm font-semibold text-white">Tool Registration Security</h3>
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-zinc-400">Strict tool registration</span>
+              <div class="toggle ${cfg.strict_tool_registration !== false ? 'on' : ''}" data-toggle="strict_tool_registration"><span class="toggle-dot"></span></div>
+            </div>
+          </div>
+          <div class="text-[10px] text-zinc-600">When enabled, prevents tools from being shadowed or replaced by malicious registrations. Disable only for debugging.</div>
+        </div>
       </div>
     </div>
 
