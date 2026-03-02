@@ -19,23 +19,14 @@ log = logging.getLogger(__name__)
 # Reasoning instruction added to system prompt when /think mode is active
 REASONING_INSTRUCTION = """
 
-## REASONING MODE (/think)
-The user has requested that you show your reasoning process before giving your final answer.
-You MUST:
-1. First, provide your step-by-step thinking inside <thinking>...</thinking> tags
-2. Then, provide your final response after the thinking tags
-3. Be thorough in your reasoning - explain your approach, considerations, and why you chose specific tools or strategies
-4. The content inside <thinking> tags is for the user's benefit to understand your thought process
+## REASONING MODE
+The user wants to see your thought process. Structure your response in two parts:
 
-Example format:
-<thinking>
-Let me break this down:
-1. The user wants to understand X
-2. I should first check Y using tool Z
-3. Based on the result, I'll determine the best approach...
-</thinking>
+**Thinking:** Start with a section labeled "**Thinking:**" where you explain your step-by-step reasoning — your approach, what you're considering, trade-offs, and why you chose a specific path.
 
-[Your final response here]
+**Answer:** Then give your final answer after a blank line.
+
+Keep the thinking section concise but insightful. The user wants to understand *how* you arrived at the answer, not just the answer itself.
 """.strip()
 
 # Regex to detect /think directive at start of message
@@ -84,29 +75,44 @@ def build_reasoning_prompt(base_system_prompt: str, enable_reasoning: bool = Fal
 
 def parse_reasoning_response(response: str) -> tuple[Optional[str], str]:
     """
-    Parse a response that may contain <thinking>...</thinking> tags.
-    
-    Args:
-        response: The full response text
-    
-    Returns:
-        (reasoning, final_response): Tuple of (Optional[str], str)
-        - reasoning: Content inside <thinking> tags, or None if not present
-        - final_response: Content after </thinking> tag, or full response if no tags
+    Parse a response that may contain a Thinking section.
+
+    Supports multiple formats:
+    - **Thinking:** ... **Answer:** ...
+    - <thinking>...</thinking>
+    - Thinking:\n... Answer:\n...
+
+    Returns (reasoning, final_response). If no thinking found, reasoning is None.
     """
     if not response or not isinstance(response, str):
         return None, response or ""
-    
-    # Match <thinking>...</thinking> with any content including newlines
-    pattern = re.compile(r'<thinking>(.*?)</thinking>', re.DOTALL | re.IGNORECASE)
-    match = pattern.search(response)
-    
-    if match:
-        reasoning = match.group(1).strip()
-        # Remove the thinking block from response to get final response
-        final_response = pattern.sub('', response, count=1).strip()
-        return reasoning, final_response
-    
+
+    # Format 1: <thinking>...</thinking> XML tags
+    xml_pat = re.compile(r'<thinking>(.*?)</thinking>', re.DOTALL | re.IGNORECASE)
+    m = xml_pat.search(response)
+    if m:
+        reasoning = m.group(1).strip()
+        final = xml_pat.sub('', response, count=1).strip()
+        return reasoning, final
+
+    # Format 2: **Thinking:** ... **Answer:** ...
+    md_pat = re.compile(
+        r'\*\*Thinking:\*\*\s*(.*?)\s*\*\*Answer:\*\*\s*(.*)',
+        re.DOTALL | re.IGNORECASE,
+    )
+    m = md_pat.search(response)
+    if m:
+        return m.group(1).strip(), m.group(2).strip()
+
+    # Format 3: Thinking:\n... Answer:\n... (plain text headers)
+    plain_pat = re.compile(
+        r'^Thinking:\s*\n(.*?)\n\s*Answer:\s*\n(.*)',
+        re.DOTALL | re.IGNORECASE | re.MULTILINE,
+    )
+    m = plain_pat.search(response)
+    if m:
+        return m.group(1).strip(), m.group(2).strip()
+
     return None, response.strip()
 
 

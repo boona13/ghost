@@ -77,8 +77,6 @@ _chat_lock = threading.Lock()
 _restart_recovery = None
 
 CHAT_ERROR_REPORT_FILE = GHOST_HOME / "chat_error_report.json"
-_repair_lock = threading.Lock()
-_repair_in_progress = False
 
 
 def _get_daemon():
@@ -276,12 +274,13 @@ def _rollback_evolutions(evolution_ids, daemon):
 
 
 def _trigger_chat_repair(daemon, phase: str, error: Exception, traceback_str: str):
-    """Log a chat pipeline error and spawn a background self-repair thread.
+    """Log a chat pipeline error for later diagnosis.
 
-    Called when a non-critical phase (skill matching, identity context, etc.) fails.
-    The chat continues with degraded functionality while Ghost fixes itself in the background.
+    IMPORTANT: This function ONLY logs the error. It does NOT spawn background
+    repair threads, evolution cycles, or any process that could interfere with
+    autonomous daemon operations (feature implementation, PR review, etc.).
+    Bug fixes are picked up by the normal maintenance/self-repair cron cycle.
     """
-    global _repair_in_progress
     error_msg = str(error)
     print(f"  [CHAT] {phase} failed: {error_msg} — continuing with degraded mode")
 
@@ -296,81 +295,6 @@ def _trigger_chat_repair(daemon, phase: str, error: Exception, traceback_str: st
         CHAT_ERROR_REPORT_FILE.write_text(json.dumps(report, indent=2))
     except Exception:
         log.warning("Failed to write chat error report", exc_info=True)
-
-    with _repair_lock:
-        if _repair_in_progress:
-            return
-        _repair_in_progress = True
-
-    def _background_repair():
-        global _repair_in_progress
-        try:
-            if not daemon or not daemon.engine or not daemon.tool_registry:
-                return
-
-            repair_prompt = (
-                f"A non-fatal error occurred in Ghost's chat pipeline during the '{phase}' phase.\n"
-                f"Ghost is still running (the chat continued with degraded functionality), "
-                f"but this bug needs to be fixed so future messages work fully.\n\n"
-                f"## Error\n```\n{error_msg}\n```\n\n"
-                f"## Full Traceback\n```\n{traceback_str}```\n\n"
-                f"## Your Task\n"
-                f"1. Read the failing file and line shown in the traceback.\n"
-                f"2. Diagnose the root cause (a malformed data structure, wrong type, etc.).\n"
-                f"3. Queue the fix via add_future_feature with:\n"
-                f"   - title: 'Bug fix: <brief description>'\n"
-                f"   - description: Error message and root cause.\n"
-                f"   - affected_files: The failing file path(s).\n"
-                f"   - proposed_approach: The exact fix.\n"
-                f"   - priority='P1', source='bug_hunter', category='bugfix'\n"
-                f"   P1 triggers the Evolution Runner immediately.\n"
-                f"4. Log what you found with log_growth_activity(routine='self_repair', ...).\n\n"
-                f"Ghost project root: {PROJECT_DIR}\n"
-            )
-
-            system_prompt = (
-                "You are Ghost in BACKGROUND SELF-REPAIR mode. A bug was detected in your "
-                "chat pipeline. The chat is still working in degraded mode, but you need to "
-                "fix the root cause so it doesn't recur. Be surgical — fix only the bug.\n"
-            )
-
-            old_auto = daemon.cfg.get("evolve_auto_approve", False)
-            daemon.cfg["evolve_auto_approve"] = True
-
-            _EVOLVE_NAMES = {
-                "evolve_plan", "evolve_apply", "evolve_apply_config",
-                "evolve_delete", "evolve_test", "evolve_deploy", "evolve_rollback",
-            }
-            repair_names = [
-                name for name in daemon.tool_registry.get_all()
-                if name not in _EVOLVE_NAMES
-            ]
-            repair_registry = daemon.tool_registry.subset(repair_names)
-
-            try:
-                result = daemon.engine.run(
-                    system_prompt=system_prompt,
-                    user_message=repair_prompt,
-                    tool_registry=repair_registry,
-                    max_steps=50,
-                    max_tokens=4096,
-                    force_tool=False,
-                )
-                print(f"  [CHAT REPAIR] Completed: {(result.text or '')[:200]}")
-            except Exception as repair_err:
-                print(f"  [CHAT REPAIR] Failed: {repair_err}")
-            finally:
-                daemon.cfg["evolve_auto_approve"] = old_auto
-
-            CHAT_ERROR_REPORT_FILE.unlink(missing_ok=True)
-        except Exception as e:
-            print(f"  [CHAT REPAIR] Unexpected error: {e}")
-        finally:
-            with _repair_lock:
-                _repair_in_progress = False
-
-    repair_thread = threading.Thread(target=_background_repair, daemon=True, name="chat-self-repair")
-    repair_thread.start()
 
 
 def _process_message(session, daemon):

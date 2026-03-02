@@ -774,7 +774,7 @@ class ToolLoopEngine:
             return self._summarize_from_logs(messages)
         choices = data.get("choices", [])
         if choices:
-            text = choices[0].get("message", {}).get("content", "").strip()
+            text = (choices[0].get("message", {}).get("content") or "").strip()
             if text:
                 return text
         return self._summarize_from_logs(messages)
@@ -783,7 +783,7 @@ class ToolLoopEngine:
         """Last-resort: extract the last meaningful tool result as the response."""
         for msg in reversed(messages):
             if msg.get("role") == "tool":
-                content = msg.get("content", "").strip()
+                content = (msg.get("content") or "").strip()
                 if content and len(content) > 20 and not content.startswith("OK, continuing"):
                     return content
             if msg.get("role") == "assistant":
@@ -1350,12 +1350,12 @@ class ToolLoopEngine:
                     user_msg = messages[1]
                     keep = messages[2:-20]
                     for i, m in enumerate(keep):
-                        if m.get("role") == "tool" and len(m.get("content", "")) > 500:
-                            keep[i] = {**m, "content": m["content"][:300] + "\n...(trimmed)"}
+                        if m.get("role") == "tool" and len(m.get("content") or "") > 500:
+                            keep[i] = {**m, "content": (m.get("content") or "")[:300] + "\n...(trimmed)"}
                     recent = messages[-20:]
                     messages = [system_msg, user_msg] + keep + recent
             else:
-                text_content = msg.get("content", "").strip()
+                text_content = (msg.get("content") or "").strip()
                 if not tool_calls_log:
                     if tools_schema and step == 0 and step < max_steps - 2:
                         pushback = (

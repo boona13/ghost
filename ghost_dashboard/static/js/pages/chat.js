@@ -1023,7 +1023,25 @@ function appendMessage(container, role, content) {
     `;
   } else if (role === 'assistant') {
     div.className = 'chat-msg chat-msg-assistant';
-    const formatted = formatMarkdown(content);
+    const { thinking, answer } = _parseThinking(content);
+    let bodyHtml;
+    if (thinking) {
+      bodyHtml = `
+        <details class="chat-thinking-block">
+          <summary class="chat-thinking-summary">
+            <svg class="w-3.5 h-3.5 inline-block mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+            </svg>
+            Thinking
+          </summary>
+          <div class="chat-thinking-content prose-ghost">${formatMarkdown(thinking)}</div>
+        </details>
+        <div class="prose-ghost">${formatMarkdown(answer)}</div>
+      `;
+    } else {
+      bodyHtml = `<div class="prose-ghost">${formatMarkdown(content)}</div>`;
+    }
     div.innerHTML = `
       <div class="chat-avatar">
         <svg class="w-4 h-4 text-ghost-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1032,7 +1050,7 @@ function appendMessage(container, role, content) {
         </svg>
       </div>
       <div class="chat-bubble chat-bubble-assistant">
-        <div class="prose-ghost">${formatted}</div>
+        ${bodyHtml}
       </div>
     `;
   } else if (role === 'error') {
@@ -1260,6 +1278,17 @@ function collapseSteps(container, count) {
     steps.forEach(s => s.style.display = hidden ? '' : 'none');
     summary.querySelector('svg').style.transform = hidden ? 'rotate(90deg)' : '';
   });
+}
+
+function _parseThinking(text) {
+  if (!text) return { thinking: null, answer: text || '' };
+  const xmlMatch = text.match(/<thinking>([\s\S]*?)<\/thinking>\s*([\s\S]*)/i);
+  if (xmlMatch) return { thinking: xmlMatch[1].trim(), answer: xmlMatch[2].trim() };
+  const mdMatch = text.match(/\*\*Thinking:\*\*\s*([\s\S]*?)\s*\*\*Answer:\*\*\s*([\s\S]*)/i);
+  if (mdMatch) return { thinking: mdMatch[1].trim(), answer: mdMatch[2].trim() };
+  const plainMatch = text.match(/^Thinking:\s*\n([\s\S]*?)\n\s*Answer:\s*\n([\s\S]*)/im);
+  if (plainMatch) return { thinking: plainMatch[1].trim(), answer: plainMatch[2].trim() };
+  return { thinking: null, answer: text };
 }
 
 function formatMarkdown(text) {
