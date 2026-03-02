@@ -13,7 +13,7 @@ The feature_implementer routine picks highest-priority items and implements them
 
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
@@ -215,8 +215,16 @@ class FutureFeaturesStore:
         
         # Find first feature with all dependencies satisfied
         implemented_ids = {f["id"] for f in features if f.get("status") in [STATUS_IMPLEMENTED, STATUS_COMPLETED]}
+        now = datetime.now()
         
         for feature in pending:
+            retry_after = feature.get("retry_after")
+            if retry_after:
+                try:
+                    if datetime.fromisoformat(retry_after) > now:
+                        continue
+                except (ValueError, TypeError):
+                    pass
             deps = feature.get("dependencies", [])
             if all(dep_id in implemented_ids for dep_id in deps):
                 return feature
@@ -434,7 +442,7 @@ class FutureFeaturesStore:
         return False
 
     def mark_review_rejected(self, feature_id: str, reason: str = "",
-                             max_retries: int = 3,
+                             max_retries: int = 5,
                              reviewer_feedback: str = "") -> tuple[bool, str]:
         """Handle PR reviewer rejection by re-queuing or deferring.
 
@@ -463,6 +471,9 @@ class FutureFeaturesStore:
                 final_status = STATUS_DEFERRED
             else:
                 f["status"] = STATUS_PENDING
+                f["retry_after"] = (
+                    datetime.now() + timedelta(minutes=15)
+                ).isoformat()
                 final_status = STATUS_PENDING
 
             f["updated_at"] = now
@@ -656,6 +667,14 @@ def build_future_features_tools(cfg, on_queue_change=None):
             except Exception:
                 pass
 
+    # On startup, if cooled-down features are ready, fire the implementer.
+    # Delay slightly so the daemon is fully initialized before cron fires.
+    if store.get_next_implementable() and on_queue_change:
+        import threading as _th
+        _startup_timer = _th.Timer(10.0, _notify_queue)
+        _startup_timer.daemon = True
+        _startup_timer.start()
+
     def _add_future_feature(title: str, description: str, priority: str = "P2",
                            source: str = SOURCE_MANUAL, dependencies: str = "",
                            estimated_effort: str = "medium", auto_implement: bool = True,
@@ -713,7 +732,14 @@ def build_future_features_tools(cfg, on_queue_change=None):
             cat = f.get("category", "")
             cat_str = f" ({cat})" if cat else ""
             audited_str = " [AUDITED]" if f.get("audited_at") else ""
-            lines.append(f"  {status_emoji} [{f['id']}] {f['title']} [{f.get('priority', '?')}]{cat_str}{dep_str}{audited_str}")
+            cooldown_str = ""
+            if f.get("retry_after"):
+                try:
+                    if datetime.fromisoformat(f["retry_after"]) > datetime.now():
+                        cooldown_str = " ⏳cooldown"
+                except (ValueError, TypeError):
+                    pass
+            lines.append(f"  {status_emoji} [{f['id']}] {f['title']} [{f.get('priority', '?')}]{cat_str}{dep_str}{audited_str}{cooldown_str}")
         return "\n".join(lines)
 
     def _get_future_feature(feature_id: str):
@@ -732,6 +758,8 @@ def build_future_features_tools(cfg, on_queue_change=None):
             f"Attempts: {f.get('implementation_attempts', 0)}",
             f"Created: {f.get('created_at', 'unknown')}",
         ]
+        if f.get("retry_after"):
+            lines.append(f"Retry After: {f['retry_after']}")
         if f.get("last_error"):
             lines.append(f"Last Error: {f['last_error']}")
         if f.get("description"):

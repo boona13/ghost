@@ -815,10 +815,12 @@ class EvolutionEngine:
                         )
                     ok_retry, retry_status = FutureFeaturesStore().mark_review_rejected(
                         feature_id, reason,
-                        max_retries=3,
+                        max_retries=5,
                         reviewer_feedback=latest_reviewer_feedback)
-                    if ok_retry:
-                        _notify_queue_best_effort()
+                    if ok_retry and retry_status == "pending":
+                        _delay = threading.Timer(905.0, _notify_queue_best_effort)
+                        _delay.daemon = True
+                        _delay.start()
             except Exception:
                 pass
             pr_after = store.get_pr(pr["pr_id"]) or pr
@@ -1464,17 +1466,22 @@ def build_evolve_tools(cfg):
             )
         return "\n".join(lines)
 
-    _session_rejected_features = set()
+    _feature_cooldowns = {}
+    _RETRY_COOLDOWN_S = 900  # 15 min between submit attempts for same feature
 
     def evolve_submit_pr_exec(evolution_id, title, description="",
                               feature_id=""):
-        if feature_id and feature_id in _session_rejected_features:
-            return (
-                f"BLOCKED: Feature {feature_id} was already rejected in this session. "
-                "Do NOT retry — call task_complete NOW. "
-                "The feature has been re-queued with all reviewer feedback accumulated. "
-                "A future run will attempt it with full context."
-            )
+        if feature_id and feature_id in _feature_cooldowns:
+            elapsed = time.time() - _feature_cooldowns[feature_id]
+            if elapsed < _RETRY_COOLDOWN_S:
+                remaining_min = max(1, int((_RETRY_COOLDOWN_S - elapsed) / 60))
+                return (
+                    f"COOLDOWN: Feature {feature_id} was rejected {int(elapsed)}s ago. "
+                    f"~{remaining_min} min remaining before retry is allowed. "
+                    "Call task_complete NOW. The feature will be automatically "
+                    "re-attempted after cooldown with all rejection feedback accumulated."
+                )
+            del _feature_cooldowns[feature_id]
         ok, msg = engine.submit_pr(
             evolution_id, title, description,
             feature_id=feature_id, cfg=cfg)
@@ -1485,7 +1492,7 @@ def build_evolve_tools(cfg):
                 "You may now log this as a successful evolution."
             )
         if feature_id:
-            _session_rejected_features.add(feature_id)
+            _feature_cooldowns[feature_id] = time.time()
         return msg
 
     def evolve_deploy_exec(evolution_id):
