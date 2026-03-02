@@ -93,8 +93,10 @@ PAUSE_FILE   = GHOST_HOME / "paused"
 PROJECT_DIR  = Path(__file__).resolve().parent
 SOUL_FILE    = PROJECT_DIR / "SOUL.md"
 USER_FILE    = PROJECT_DIR / "USER.md"
+STATE_BACKUPS_DIR = GHOST_HOME / "state_backups"
 GHOST_HOME.mkdir(parents=True, exist_ok=True)
 SCREEN_DIR.mkdir(parents=True, exist_ok=True)
+STATE_BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
 SHUTDOWN_MARKER = GHOST_HOME / "shutdown_requested"
 if SHUTDOWN_MARKER.exists():
     SHUTDOWN_MARKER.unlink(missing_ok=True)
