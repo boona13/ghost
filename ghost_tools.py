@@ -495,6 +495,8 @@ def make_file_read(cfg):
     allowed_roots = cfg.get("allowed_roots", DEFAULT_ALLOWED_ROOTS)
 
     def execute(path, max_lines=200, offset=0):
+        if not path or not path.strip() or path.strip() in (".", ".py", ".js", ".json", ".html", ".css"):
+            return f"ERROR: Invalid path '{path}'. Provide a full filename like 'ghost.py' or '/path/to/file.py'."
         if not _check_path_allowed(path, allowed_roots):
             return f"DENIED: Path '{path}' is outside allowed roots"
         p = Path(path).expanduser()
