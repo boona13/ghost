@@ -6,6 +6,7 @@ The agent keeps going until it decides the task is DONE — like while(true).
 Loop detection mirrored from OpenClaw's tool-loop-detection architecture.
 """
 
+import concurrent.futures
 import json
 import logging
 import os
@@ -45,6 +46,7 @@ RETRY_DELAY = 1.5
 DEFAULT_MAX_TOKENS = 4096
 DEFAULT_TOOL_RESULT_LIMIT = 6000
 DEFAULT_TIMEOUT = 90
+MAX_LLM_WALL_CLOCK = 300  # 5-minute hard deadline per LLM call (handles drip-feed keepalive)
 DEFAULT_MAX_STEPS = 200
 FALLBACK_COOLDOWN_SEC = 300   # 5 min before probing failed model again
 FALLBACK_PROBE_INTERVAL = 60  # seconds between probes of a cooled-down model
@@ -1030,7 +1032,13 @@ class ToolLoopEngine:
                 else:
                     payload["tool_choice"] = "auto"
 
-            data, error = self._call_llm(payload)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(self._call_llm, payload)
+                try:
+                    data, error = future.result(timeout=MAX_LLM_WALL_CLOCK)
+                except concurrent.futures.TimeoutError:
+                    data, error = None, f"Wall-clock timeout ({MAX_LLM_WALL_CLOCK}s) — model too slow"
+                    log.warning("LLM call exceeded %ds wall clock at step %d", MAX_LLM_WALL_CLOCK, step)
 
             if cancel_check and cancel_check():
                 final_text = "(Stopped by user)"

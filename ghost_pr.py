@@ -279,6 +279,52 @@ class ReviewEngine:
         text = (choices[0].get("message", {}).get("content") or "").strip()
         return text or None
 
+    # ── Diff preparation ─────────────────────────────────────────────
+
+    @staticmethod
+    def _prepare_diff(raw_diff: str, max_chars: int = 40000) -> str:
+        """Prepare diff for reviewer, prioritizing new files over patches.
+
+        New files are shown in full (reviewer needs complete code to verify
+        tool signatures, imports, etc.). Patches to existing files are
+        truncated if the total exceeds max_chars.
+        """
+        if len(raw_diff) <= max_chars:
+            return raw_diff
+
+        new_file_parts = []
+        patch_parts = []
+        current_part = []
+        is_new_file = False
+
+        for line in raw_diff.split("\n"):
+            if line.startswith("diff --git"):
+                if current_part:
+                    target = new_file_parts if is_new_file else patch_parts
+                    target.append("\n".join(current_part))
+                current_part = [line]
+                is_new_file = False
+            elif line.startswith("new file mode"):
+                is_new_file = True
+                current_part.append(line)
+            else:
+                current_part.append(line)
+
+        if current_part:
+            target = new_file_parts if is_new_file else patch_parts
+            target.append("\n".join(current_part))
+
+        new_text = "\n".join(new_file_parts)
+        remaining = max_chars - len(new_text)
+
+        if remaining > 2000:
+            patch_text = "\n".join(patch_parts)
+            if len(patch_text) > remaining:
+                patch_text = patch_text[:remaining] + "\n\n[... patches truncated for length, new files shown in full above ...]"
+            return new_text + "\n" + patch_text if new_text else patch_text
+        else:
+            return new_text[:max_chars] + "\n\n[... truncated ...]"
+
     # ── Main review loop ─────────────────────────────────────────────
 
     def run_review(self, pr_id: str, engine) -> str:
@@ -296,7 +342,7 @@ class ReviewEngine:
         self.store.update_status(pr_id, "reviewing")
         log.info("Starting review for PR %s: %s", pr_id, pr["title"])
 
-        diff_text = pr["diff"][:15000]
+        diff_text = self._prepare_diff(pr["diff"])
         messages = [
             {"role": "system", "content": REVIEW_SYSTEM_PROMPT},
             {"role": "user", "content": (
