@@ -1043,9 +1043,11 @@ class EvolutionEngine:
                 ghost_git.stash_and_checkout("main")
                 return False, f"Merge failed after approval: {msg}"
             ghost_git.delete_branch(branch_name)
-            self._active_evolutions.pop(evolution_id, None)
             store.mark_merged(pr["pr_id"])
-            return self.deploy(evolution_id, feature_id=feature_id)
+            evo["status"] = "tested_pass"
+            deploy_result = self.deploy(evolution_id, feature_id=feature_id)
+            self._active_evolutions.pop(evolution_id, None)
+            return deploy_result
 
         elif verdict == "blocked":
             ghost_git.stash_and_checkout("main")
