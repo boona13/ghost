@@ -841,11 +841,51 @@ def build_future_features_tools(cfg, on_queue_change=None):
         return f"Could not approve feature (may not exist or not require approval): {feature_id}"
 
     def _start_future_feature(feature_id: str):
-        """Mark a feature as in_progress (used by feature_implementer routine)."""
+        """Mark a feature as in_progress. Auto-resumes if branch exists."""
+        item = store.get_by_id(feature_id)
+        resume_evo = None
+        resume_branch = None
+        if item:
+            resume_evo = item.get("current_evolution_id")
+            resume_branch = item.get("current_branch")
         ok, error = store.mark_in_progress(feature_id)
-        if ok:
-            return f"Feature implementation started: {feature_id}"
-        return f"Cannot start feature: {error}"
+        if not ok:
+            return f"Cannot start feature: {error}"
+        if resume_evo and resume_branch:
+            try:
+                from ghost_evolve import get_engine
+                evo_engine = get_engine()
+                rok, result = evo_engine.resume_evolution(resume_evo)
+                if rok:
+                    ctx = result
+                    lines = [
+                        f"Feature started: {feature_id}",
+                        f"\n🔀 AUTO-RESUMED evolution {ctx['evolution_id']} on branch {ctx['branch']}.",
+                        f"Review round: {ctx['review_round']}",
+                        f"Previous files: {', '.join(ctx['files_changed'])}",
+                        f"PR ID: {ctx['pr_id']}",
+                    ]
+                    if ctx.get("last_reviewer_feedback"):
+                        feedback = ctx["last_reviewer_feedback"][:3000]
+                        lines.append(f"\nLAST REVIEWER FEEDBACK:\n{feedback}")
+                    lines.append(
+                        "\nYou are NOW on the feature branch. The code from the previous "
+                        "attempt is already here. Do NOT call evolve_plan. Do NOT start fresh.\n"
+                        "Apply TARGETED fixes via evolve_apply patches, then evolve_test, "
+                        "then evolve_submit_pr."
+                    )
+                    return "\n".join(lines)
+                else:
+                    return (
+                        f"Feature started: {feature_id}\n"
+                        f"Resume failed ({result}). Proceed with a fresh implementation."
+                    )
+            except Exception as exc:
+                return (
+                    f"Feature started: {feature_id}\n"
+                    f"Resume error ({exc}). Proceed with a fresh implementation."
+                )
+        return f"Feature started: {feature_id}"
 
     def _complete_future_feature(feature_id: str, implementation_summary: str = ""):
         """Mark a feature as completed and add to changelog (used by feature_implementer)."""

@@ -843,7 +843,7 @@ class EvolutionEngine:
 
         evo["old_head_sha"] = ghost_git.get_head_sha(branch)
 
-        ok, msg = ghost_git.checkout(branch)
+        ok, msg = ghost_git.stash_and_checkout(branch)
         if not ok:
             return False, f"Cannot checkout branch '{branch}': {msg}"
 

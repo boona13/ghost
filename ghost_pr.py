@@ -369,7 +369,9 @@ class ReviewEngine:
                 return f"File '{file}' not found in this PR. Available: {', '.join(diff_index.keys())}"
             return f"Diff for {fd['file']}:\n```diff\n{fd['diff']}\n```"
 
-        def read_pr_file(file: str, offset: int = 1, limit: int = 200, **kwargs) -> str:
+        def read_pr_file(file: str = "", offset: int = 1, limit: int = 200, **kwargs) -> str:
+            if not file:
+                return "Error: file parameter is required."
             abs_path = PROJECT_DIR / file
             if not abs_path.exists():
                 return f"File not found: {file}"
@@ -388,7 +390,9 @@ class ReviewEngine:
             except Exception as e:
                 return f"Error reading {file}: {e}"
 
-        def grep_codebase(pattern: str, include: str = "*.py", **kwargs) -> str:
+        def grep_codebase(pattern: str = "", include: str = "*.py", **kwargs) -> str:
+            if not pattern:
+                return "Error: pattern parameter is required."
             import subprocess
             try:
                 args = ["grep", "-rn", pattern, f"--include={include}", str(PROJECT_DIR)]
@@ -405,9 +409,13 @@ class ReviewEngine:
             except Exception as e:
                 return f"grep error: {e}"
 
-        def leave_comment(file: str, line: int, message: str,
+        def leave_comment(file: str = "", line: int = 0, message: str = "",
                          severity: str = "warning", **kwargs) -> str:
-            if severity not in ("critical", "warning", "suggestion", "note"):
+            file = file or ""
+            message = message or ""
+            if not file or not message:
+                return "Error: file and message are required."
+            if severity not in ("critical", "high", "warning", "suggestion", "note"):
                 severity = "warning"
             with self.store._lock:
                 current_pr = self.store._read_pr_unlocked(pr_id)
@@ -425,8 +433,13 @@ class ReviewEngine:
                 self.store._write_pr_unlocked(current_pr)
             return f"Comment added: [{severity}] {file}:{line} — {message[:80]}"
 
-        def suggest_change(file: str, old_code: str, new_code: str,
+        def suggest_change(file: str = "", old_code: str = "", new_code: str = "",
                           explanation: str = "", **kwargs) -> str:
+            file = file or ""
+            old_code = old_code or ""
+            new_code = new_code or ""
+            if not file or not old_code or not new_code:
+                return "Error: file, old_code, and new_code are required."
             with self.store._lock:
                 current_pr = self.store._read_pr_unlocked(pr_id)
                 if not current_pr:
@@ -446,7 +459,9 @@ class ReviewEngine:
 
         _review_submitted = {"done": False}
 
-        def submit_review(verdict: str, summary: str, **kwargs) -> str:
+        def submit_review(verdict: str = "REQUEST_CHANGES", summary: str = "", **kwargs) -> str:
+            verdict = verdict or "REQUEST_CHANGES"
+            summary = summary or ""
             verdict_upper = verdict.upper().strip()
             if verdict_upper in ("APPROVE", "APPROVED"):
                 verdict_key = "approved"
