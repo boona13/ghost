@@ -962,7 +962,7 @@ class ToolLoopEngine:
     def run(self, system_prompt, user_message, tool_registry=None,
             max_steps=DEFAULT_MAX_STEPS, temperature=0.3, max_tokens=DEFAULT_MAX_TOKENS,
             image_b64=None, images=None, on_step=None, force_tool=False, history=None,
-            cancel_check=None, hook_runner=None, tool_intent_security=None):
+            cancel_check=None, hook_runner=None, tool_intent_security=None, model_override=None):
         """
         Run the autonomous tool loop.
 
@@ -1008,6 +1008,9 @@ class ToolLoopEngine:
         else:
             messages.append({"role": "user", "content": user_message})
 
+        # Use model_override if provided, otherwise fall back to default model
+        effective_model = model_override if model_override else self.model
+
         tools_schema = None
         if tool_registry and tool_registry.get_all():
             tools_schema = tool_registry.to_openai_schema()
@@ -1047,9 +1050,12 @@ class ToolLoopEngine:
         MAX_CRITICAL_BLOCKS = 3
         exit_reason = "max_steps"
 
+        # Use model_override if provided, otherwise fall back to default model
+        effective_model = model_override if model_override else self.model
+        
         _debug_logger.session_start(
             user_message=user_message[:500] if isinstance(user_message, str) else str(user_message)[:500],
-            model=self.model,
+            model=effective_model,
             max_steps=max_steps,
             caller=traceback.extract_stack()[-2].name if len(traceback.extract_stack()) >= 2 else "",
         )
@@ -1072,7 +1078,7 @@ class ToolLoopEngine:
                 break
 
             payload = {
-                "model": self.model,
+                "model": effective_model,
                 "messages": messages,
                 "temperature": temperature,
                 "max_tokens": max_tokens,
