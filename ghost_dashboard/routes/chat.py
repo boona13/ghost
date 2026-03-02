@@ -2,6 +2,7 @@
 
 import base64
 import json
+import logging
 import os
 import threading
 import time
@@ -9,6 +10,8 @@ import uuid
 from pathlib import Path
 from datetime import datetime
 from flask import Blueprint, jsonify, request, Response, send_from_directory, abort
+
+log = logging.getLogger(__name__)
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -122,7 +125,7 @@ def _save_restart_state(session, deploy_result=""):
         GHOST_HOME.mkdir(parents=True, exist_ok=True)
         RESTART_STATE_FILE.write_text(json.dumps(state, indent=2))
     except Exception:
-        pass
+        log.warning("Failed to save restart state", exc_info=True)
 
 
 def _load_restart_recovery():
@@ -163,7 +166,7 @@ def _load_restart_recovery():
             })
         FEED_FILE.write_text(json.dumps(feed, indent=2))
     except Exception:
-        pass
+        log.warning("Failed to load restart recovery state", exc_info=True)
     finally:
         RESTART_STATE_FILE.unlink(missing_ok=True)
 
@@ -220,6 +223,7 @@ def _build_chat_history(daemon, max_turns=10):
                 history.append({"role": "assistant", "content": assistant_msg})
         return history
     except Exception:
+        log.warning("Failed to get history from feed", exc_info=True)
         return []
 
 
@@ -734,7 +738,7 @@ def _process_message(session, daemon):
 
         daemon.actions_today += 1
     except Exception:
-        pass
+        log.warning("Failed to log chat action", exc_info=True)
 
     if not session.result and session.error is None:
         session.status = "complete"
@@ -846,7 +850,7 @@ def send_message():
             "status": "processing",
         }, daemon.cfg.get("max_feed_items", 50))
     except Exception:
-        pass
+        log.warning("Failed to append feed entry", exc_info=True)
 
     t = threading.Thread(
         target=_process_message_safe, args=(session, daemon), daemon=True
@@ -951,7 +955,7 @@ def _get_session_boundary():
             data = json.loads(SESSION_BOUNDARY_FILE.read_text())
             return data.get("cleared_at")
     except Exception:
-        pass
+        log.warning("Failed to get session boundary", exc_info=True)
     return None
 
 
@@ -1010,6 +1014,7 @@ def chat_history():
         chat_items.reverse()
         return jsonify({"messages": chat_items[-50:]})
     except Exception:
+        log.warning("Failed to load chat history", exc_info=True)
         return jsonify({"messages": []})
 
 

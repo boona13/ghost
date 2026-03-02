@@ -1,5 +1,6 @@
 """Models API — multi-provider model browser, selection, and fallback chain management."""
 
+import logging
 import time
 import urllib.request
 import json
@@ -7,6 +8,8 @@ from flask import Blueprint, jsonify, request
 
 import sys
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from ghost import load_config, save_config, DEFAULT_CONFIG
@@ -83,6 +86,7 @@ def _fetch_openrouter_models():
         return models
 
     except Exception:
+        log.warning("Failed to fetch models from OpenRouter", exc_info=True)
         return _cache["models"] if _cache["models"] else []
 
 

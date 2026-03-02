@@ -1,8 +1,11 @@
 """Future Features API — backlog management for autonomous feature implementation."""
 
+import logging
 from flask import Blueprint, jsonify, request
 import sys
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from ghost_future_features import FutureFeaturesStore, FeatureChangelog, FEATURE_STATUSES, FEATURE_SOURCES
@@ -32,7 +35,7 @@ def _notify_queue():
         try:
             _on_queue_trigger()
         except Exception:
-            pass
+            log.warning("_notify_queue callback failed", exc_info=True)
 
 def _force_fire_implementer():
     """Fire the implementer directly, bypassing the queue guard."""
@@ -40,7 +43,7 @@ def _force_fire_implementer():
         try:
             _on_force_fire()
         except Exception:
-            pass
+            log.warning("_force_fire_implementer callback failed", exc_info=True)
 
 
 @bp.route("/list")

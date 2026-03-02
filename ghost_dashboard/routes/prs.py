@@ -1,8 +1,11 @@
 """Pull Requests API — PR management for the Git-backed review system."""
 
+import logging
 from flask import Blueprint, jsonify, request
 import sys
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from ghost_pr import get_pr_store
@@ -123,7 +126,7 @@ def force_block(pr_id):
             ghost_git.checkout("main")
             ghost_git.delete_branch(branch)
     except Exception:
-        pass
+        log.warning("Failed to delete branch on force_block", exc_info=True)
 
     feature_id = pr.get("feature_id")
     if feature_id:
@@ -135,9 +138,9 @@ def force_block(pr_id):
                 from ghost_dashboard.routes.future_features import _notify_queue
                 _notify_queue()
             except Exception:
-                pass
+                log.warning("Failed to notify queue on force_block", exc_info=True)
         except Exception:
-            pass
+            log.warning("Failed to mark feature as blocked", exc_info=True)
 
     return jsonify({"ok": True, "message": "PR blocked and feature marked as blocked."})
 
@@ -173,7 +176,7 @@ def force_merge(pr_id):
                 FutureFeaturesStore().mark_implemented(
                     feature_id, f"Force-merged via dashboard (PR {pr_id})")
             except Exception:
-                pass
+                log.warning("Failed to mark feature as implemented", exc_info=True)
 
         from ghost_evolve import DEPLOY_MARKER, get_engine
         import json, time

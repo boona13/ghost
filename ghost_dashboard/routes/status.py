@@ -4,10 +4,13 @@ When running embedded in the daemon, reads live in-memory state.
 When running standalone, reads from PID file and log files on disk.
 """
 
+import logging
 import os, json, platform
 from datetime import datetime
 from pathlib import Path
 from flask import Blueprint, jsonify
+
+log = logging.getLogger(__name__)
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -63,7 +66,7 @@ def get_status():
             try:
                 entries = json.loads(LOG_FILE.read_text())
             except Exception:
-                pass
+                log.warning("Failed to load log entries", exc_info=True)
 
         types = {}
         for e in entries:
@@ -111,7 +114,7 @@ def get_status():
         try:
             entries = json.loads(LOG_FILE.read_text())
         except Exception:
-            pass
+            log.warning("Failed to load log entries (standalone)", exc_info=True)
 
     today_str = datetime.now().strftime("%Y-%m-%d")
     today_count = sum(1 for e in entries if e.get("time", "")[:10] == today_str)
