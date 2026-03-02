@@ -660,9 +660,16 @@ class EvolutionEngine:
         import ghost_git
         from ghost_pr import get_pr_store, get_review_engine
 
+        if not evolution_id or not isinstance(evolution_id, str) or len(evolution_id) < 8:
+            active_ids = list(self._active_evolutions.keys())
+            hint = f" Active evolutions: {active_ids}" if active_ids else ""
+            return False, f"Invalid evolution_id: '{evolution_id}'.{hint}"
+
         evo = self._active_evolutions.get(evolution_id)
         if not evo:
-            return False, "Evolution not found"
+            active_ids = list(self._active_evolutions.keys())
+            hint = f" Active evolutions: {active_ids}" if active_ids else ""
+            return False, f"Evolution '{evolution_id}' not found.{hint}"
         if evo.get("status") != "tested_pass":
             return False, "Cannot submit PR: tests have not passed. Run evolve_test first."
 

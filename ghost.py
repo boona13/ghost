@@ -2478,6 +2478,21 @@ class GhostDaemon:
         except Exception:
             pass
 
+        console_bus.emit(
+            "success", "system", "daemon_start",
+            f"Ghost started — {len(self.tool_registry.names())} tools, "
+            f"model: {_display_model}",
+        )
+
+        # Self-repair MUST complete before firing the feature implementer
+        # to prevent concurrent evolve operations that corrupt each other.
+        try:
+            repaired = run_self_repair(self)
+            if repaired:
+                print(f"  {GRN}Self-repair completed successfully{RST}")
+        except Exception as e:
+            print(f"  {RED}Self-repair error: {e}{RST}")
+
         # Startup trigger: if there's pending work in the feature queue and nothing
         # is in progress, fire the implementer. This handles continuation after
         # evolve_deploy restarts Ghost.
@@ -2499,20 +2514,6 @@ class GhostDaemon:
                 30.0,
                 lambda: self.cron.fire_now(_IMPLEMENTATION_AUDITOR_JOB) if self.cron else None,
             ).start()
-
-        console_bus.emit(
-            "success", "system", "daemon_start",
-            f"Ghost started — {len(self.tool_registry.names())} tools, "
-            f"model: {_display_model}",
-        )
-
-        # Self-repair: if Ghost crashed, diagnose and fix before entering main loop
-        try:
-            repaired = run_self_repair(self)
-            if repaired:
-                print(f"  {GRN}Self-repair completed successfully{RST}")
-        except Exception as e:
-            print(f"  {RED}Self-repair error: {e}{RST}")
 
         # Start web dashboard as background thread
         self._dashboard_port = None
