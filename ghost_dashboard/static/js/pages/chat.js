@@ -242,10 +242,17 @@ export async function render(container) {
   stopBtn.addEventListener('click', async () => {
     if (!activeMessageId) return;
     stopBtn.disabled = true;
+    statusEl.textContent = 'Stopping...';
     try {
       await api.post(`/api/chat/stop/${activeMessageId}`);
-      statusEl.textContent = 'Stopping...';
-    } catch { /* will resolve when loop ends */ }
+    } catch (err) {
+      console.warn('Failed to stop chat session:', err);
+    }
+    try {
+      await api.post('/api/chat/interrupt', { session_id: activeMessageId });
+    } catch (err) {
+      console.warn('Failed to interrupt generation:', err);
+    }
   });
 
   clearBtn.addEventListener('click', async () => {
