@@ -407,7 +407,7 @@ class SubAgentRegistry:
                 try:
                     self._cleanup_finished()
                     time.sleep(30)  # Check every 30 seconds
-                except Exception as e:
+                except (OSError, ValueError) as e:
                     log.warning("SubAgent cleanup error: %s", e)
         
         self._cleanup_thread = threading.Thread(
@@ -601,9 +601,12 @@ def build_subagent_tools(cfg: Dict[str, Any], tool_registry: ToolRegistry, skill
                 "message": f"Sub-agent {agent.agent_id} spawned successfully",
             }
             
-        except Exception as e:
+        except (ValueError, TypeError) as e:
+            log.warning("Invalid spawn_subagent params: %s", e)
+            return {"error": "Invalid parameters for sub-agent spawn"}
+        except Exception:
             log.exception("Failed to spawn sub-agent")
-            return {"error": f"Failed to spawn sub-agent: {str(e)}"}
+            return {"error": "Failed to spawn sub-agent due to internal error"}
     
     def list_subagents(status: Optional[str] = None, **kwargs):
         """
@@ -625,9 +628,12 @@ def build_subagent_tools(cfg: Dict[str, Any], tool_registry: ToolRegistry, skill
                 "count": len(agents),
             }
             
-        except Exception as e:
+        except (ValueError, TypeError) as e:
+            log.warning("Invalid list_subagents status: %s", e)
+            return {"error": "Invalid status filter"}
+        except Exception:
             log.exception("Failed to list sub-agents")
-            return {"error": f"Failed to list sub-agents: {str(e)}"}
+            return {"error": "Failed to list sub-agents due to internal error"}
     
     def get_subagent(agent_id: str, **kwargs):
         """
@@ -649,9 +655,12 @@ def build_subagent_tools(cfg: Dict[str, Any], tool_registry: ToolRegistry, skill
                 "agent": agent.to_dict(),
             }
             
-        except Exception as e:
+        except (ValueError, TypeError) as e:
+            log.warning("Invalid get_subagent params: %s", e)
+            return {"error": "Invalid parameters for get sub-agent"}
+        except Exception:
             log.exception("Failed to get sub-agent")
-            return {"error": f"Failed to get sub-agent: {str(e)}"}
+            return {"error": "Failed to get sub-agent due to internal error"}
     
     def cancel_subagent(agent_id: str, **kwargs):
         """
@@ -673,9 +682,9 @@ def build_subagent_tools(cfg: Dict[str, Any], tool_registry: ToolRegistry, skill
                 "message": f"Sub-agent {agent_id} cancelled",
             }
             
-        except Exception as e:
+        except Exception:
             log.exception("Failed to cancel sub-agent")
-            return {"error": f"Failed to cancel sub-agent: {str(e)}"}
+            return {"error": "Failed to cancel sub-agent due to internal error"}
     
     def wait_for_subagent(agent_id: str, timeout: int = 60, **kwargs):
         """
@@ -701,9 +710,12 @@ def build_subagent_tools(cfg: Dict[str, Any], tool_registry: ToolRegistry, skill
                 "agent": agent.to_dict(),
             }
             
-        except Exception as e:
+        except (ValueError, TypeError) as e:
+            log.warning("Invalid wait_for_subagent params: %s", e)
+            return {"error": "Invalid parameters for wait sub-agent"}
+        except Exception:
             log.exception("Failed to wait for sub-agent")
-            return {"error": f"Failed to wait for sub-agent: {str(e)}"}
+            return {"error": "Failed to wait for sub-agent due to internal error"}
     
     return [
         {

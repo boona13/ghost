@@ -29,9 +29,12 @@ def list_subagents():
             "count": len(agents),
         })
         
-    except Exception as e:
+    except (ValueError, TypeError) as e:
+        log.warning("Invalid status filter: %s", e)
+        return jsonify({"error": "Invalid status filter"}), 400
+    except Exception:
         log.exception("Failed to list sub-agents")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/<agent_id>", methods=["GET"])
@@ -49,9 +52,9 @@ def get_subagent(agent_id):
             "agent": agent.to_dict(),
         })
         
-    except Exception as e:
+    except Exception:
         log.exception("Failed to get sub-agent")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/<agent_id>/cancel", methods=["POST"])
@@ -69,9 +72,9 @@ def cancel_subagent(agent_id):
             "message": f"Sub-agent {agent_id} cancelled",
         })
         
-    except Exception as e:
+    except Exception:
         log.exception("Failed to cancel sub-agent")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @bp.route("/<agent_id>", methods=["DELETE"])
@@ -89,6 +92,6 @@ def delete_subagent(agent_id):
             "message": f"Sub-agent {agent_id} removed",
         })
         
-    except Exception as e:
+    except Exception:
         log.exception("Failed to delete sub-agent")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
