@@ -18,7 +18,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from ghost_loop import ToolLoopEngine, ToolRegistry
 from ghost_skills import SkillLoader
@@ -474,11 +474,12 @@ class SubAgentRegistry:
             )
             
             self._agents[agent_id] = agent
-        
-        # Start execution (outside lock to avoid deadlock)
-        agent.start()
-        
-        log.info("Spawned SubAgent %s (task: %s...)", agent_id, config.task[:50])
+            
+            # Start execution while holding lock to prevent race condition
+            # where other threads see PENDING before agent.start() sets RUNNING
+            agent.start()
+            
+            log.info("Spawned SubAgent %s (task: %s...)", agent_id, config.task[:50])
         return agent
     
     def get(self, agent_id: str) -> Optional[SubAgent]:
@@ -551,7 +552,7 @@ def build_subagent_tools(cfg: Dict[str, Any], tool_registry: ToolRegistry, skill
     
     def spawn_subagent(
         task: str,
-        skills: Optional[List[str]] = None,
+        skills: Tuple[str, ...] = (),
         max_steps: int = 50,
         timeout_seconds: int = 300,
         model: Optional[str] = None,
@@ -577,7 +578,7 @@ def build_subagent_tools(cfg: Dict[str, Any], tool_registry: ToolRegistry, skill
         try:
             config = SubAgentConfig(
                 task=task,
-                skills=skills or [],
+                skills=list(skills) if skills else [],
                 max_steps=max_steps,
                 timeout_seconds=timeout_seconds,
                 model=model,
