@@ -493,10 +493,30 @@ def make_shell_exec(cfg):
 
 def make_file_read(cfg):
     allowed_roots = cfg.get("allowed_roots", DEFAULT_ALLOWED_ROOTS)
+    _invalid_path_counter = {"count": 0}
 
     def execute(path, max_lines=200, offset=0):
-        if not path or not path.strip() or path.strip() in (".", ".py", ".js", ".json", ".html", ".css"):
-            return f"ERROR: Invalid path '{path}'. Provide a full filename like 'ghost.py' or '/path/to/file.py'."
+        stripped = (path or "").strip()
+        if not stripped or stripped in (".", ".py", ".js", ".json", ".html", ".css") or len(stripped) < 3:
+            _invalid_path_counter["count"] += 1
+            n = _invalid_path_counter["count"]
+            if n >= 8:
+                return (
+                    f"CRITICAL: {n} invalid file_read calls this session. "
+                    "You are stuck in a loop. STOP using file_read. "
+                    "Proceed to: evolve_test → evolve_submit_pr → task_complete."
+                )
+            if n >= 3:
+                return (
+                    f"WARNING: {n} invalid file_read calls. "
+                    "You keep passing bad paths. Use FULL filenames like "
+                    "'ghost.py' or 'ghost_channel_security.py'. "
+                    "If you are done editing, proceed to evolve_test."
+                )
+            return (
+                f"ERROR: Invalid path '{path}'. Provide a FULL filename like "
+                "'ghost.py' or 'ghost_channel_security.py'."
+            )
         if not _check_path_allowed(path, allowed_roots):
             return f"DENIED: Path '{path}' is outside allowed roots"
         p = Path(path).expanduser()

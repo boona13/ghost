@@ -18,6 +18,7 @@ Set OPENROUTER_API_KEY env var or pass --api-key.
 """
 
 import os, sys, json, re, time, subprocess, threading, signal, base64, platform, secrets
+import logging
 import requests
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -80,6 +81,9 @@ from ghost_pr import build_pr_tools
 from ghost_mcp import MCPClientManager, build_mcp_tools
 
 # responses capabilities wiring marker: dashboard-managed feature flags loaded via config/routes
+
+# ── Logging ──────────────────────────────────────────────────────────
+log = logging.getLogger("ghost")
 
 # ── Paths ────────────────────────────────────────────────────────────
 GHOST_HOME   = Path.home() / ".ghost"
@@ -364,7 +368,8 @@ def load_config():
     if CONFIG_FILE.exists():
         try:
             cfg.update(json.loads(CONFIG_FILE.read_text()))
-        except: pass
+        except json.JSONDecodeError as e:
+            log.warning(f"Failed to load config: {e}")
     return cfg
 
 def save_config(cfg):
@@ -382,8 +387,9 @@ def read_feed():
         if FEED_FILE.exists():
             try:
                 return json.loads(FEED_FILE.read_text())
-            except:
-                pass
+            except json.JSONDecodeError as e:
+                log.warning(f"Failed to read feed: {e}")
+                return []
         return []
 
 def write_feed(entries):
@@ -405,8 +411,10 @@ def append_feed(entry, max_items=50):
 def log_action(action_type, preview, result):
     entries = []
     if LOG_FILE.exists():
-        try: entries = json.loads(LOG_FILE.read_text())
-        except: pass
+        try:
+            entries = json.loads(LOG_FILE.read_text())
+        except json.JSONDecodeError as e:
+            log.warning(f"Failed to read log file: {e}")
     entries.append({
         "time": datetime.now().isoformat(),
         "type": action_type,
@@ -466,8 +474,8 @@ def looks_like_json(text):
         try:
             json.loads(t)
             return True
-        except:
-            pass
+        except json.JSONDecodeError:
+            return False
     return False
 
 def is_url(text):
@@ -2142,7 +2150,8 @@ class GhostDaemon:
             return
         try:
             mtime = ACTION_FILE.stat().st_mtime
-        except:
+        except (OSError, ValueError) as e:
+            log.warning(f"Failed to stat action file: {e}")
             return
         if mtime <= self._action_mtime:
             return
@@ -2150,7 +2159,8 @@ class GhostDaemon:
         try:
             action = json.loads(ACTION_FILE.read_text())
             ACTION_FILE.unlink(missing_ok=True)
-        except:
+        except json.JSONDecodeError as e:
+            log.warning(f"Failed to parse action file: {e}")
             return
 
         action_id = action.get("actionId", "")
