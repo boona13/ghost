@@ -1496,6 +1496,14 @@ class GhostDaemon:
         ptype = payload.get("type", "task")
         console_bus.emit("info", "cron", job_name, f"Cron fired ({ptype})")
 
+        if job_name == _IMPLEMENTATION_AUDITOR_JOB:
+            if self.cron and self.cron.is_job_running(_FEATURE_IMPLEMENTER_JOB):
+                console_bus.emit(
+                    "info", "cron", job_name,
+                    "Skipped — Feature Implementer is running. Will retry next cycle.",
+                )
+                return
+
         if ptype == "task":
             prompt = payload.get("prompt", "")
             if not prompt:
