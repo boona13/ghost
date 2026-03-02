@@ -124,7 +124,8 @@ class ChannelSecurityEnforcer:
                 data = json.loads(f.read_text())
                 data["_quarantine_path"] = str(f)
                 result.append(data)
-            except: pass
+            except (json.JSONDecodeError, OSError) as e:
+                log.warning("Failed to read quarantine file %s: %s", f, e)
         return result
 
     def release_from_quarantine(self, quarantine_path: Path) -> bool:
@@ -148,9 +149,12 @@ def build_channel_security_tools(config: Dict[str, Any]) -> List[Dict[str, Any]]
                 with open(CHANNEL_AUDIT_LOG) as f:
                     lines = f.readlines()
                 for line in reversed(lines[-limit:]):
-                    try: entries.append(json.loads(line))
-                    except: pass
-            except: pass
+                    try:
+                        entries.append(json.loads(line))
+                    except json.JSONDecodeError as e:
+                        log.warning("Failed to parse audit log line: %s", e)
+            except OSError as e:
+                log.warning("Failed to read audit log: %s", e)
         if not entries: return "No audit entries."
         lines = [f"Recent events ({len(entries)}):"]
         for e in entries:
