@@ -264,7 +264,7 @@ def _analyze_ollama(provider: dict, b64: str, mime: str, prompt: str,
     )
     resp.raise_for_status()
     data = resp.json()
-    return data.get("message", {}).get("content", "").strip()
+    return (data.get("message", {}).get("content") or "").strip()
 
 
 _DISPATCH = {
