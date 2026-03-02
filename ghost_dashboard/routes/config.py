@@ -1,9 +1,12 @@
 """Config API — read/write ~/.ghost/config.json with live daemon reload."""
 
+import logging
 from flask import Blueprint, jsonify, request
 
 import sys
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from ghost import CONFIG_FILE, load_config, save_config, DEFAULT_CONFIG
@@ -25,7 +28,7 @@ def _notify_daemon():
             if new_model and hasattr(daemon, 'engine'):
                 daemon.engine.model = new_model
     except Exception:
-        pass
+        log.warning("Failed to reload config in daemon", exc_info=True)
 
 
 def _mask_key(key):

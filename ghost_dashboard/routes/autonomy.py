@@ -1,8 +1,11 @@
 """Autonomy API — action items, growth log, and growth routine management."""
 
+import logging
 from flask import Blueprint, jsonify, request
 import sys
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from ghost_autonomy import (
@@ -73,7 +76,7 @@ def get_status():
             import json
             crash_report = json.loads(crash_file.read_text())
         except Exception:
-            pass
+            log.warning("Failed to load crash report", exc_info=True)
 
     return jsonify({
         "routines": routines_status,

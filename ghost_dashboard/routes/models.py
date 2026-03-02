@@ -389,5 +389,5 @@ def _get_ollama_models():
                 for m in tags
             ]
     except Exception:
-        pass
+        log.warning("Failed to get Ollama tags", exc_info=True)
     return []

@@ -1,8 +1,11 @@
 """Integrations API — manage connections to Google services, Grok/X API, and Web Search."""
 
+import logging
 from flask import Blueprint, jsonify, request
 import sys
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from ghost_integrations import (
@@ -292,7 +295,7 @@ def configure_elevenlabs():
             cfg["elevenlabs_api_key"] = api_key
             config_file.write_text(json.dumps(cfg, indent=2))
         except Exception:
-            pass
+            log.warning("Failed to save ElevenLabs API key", exc_info=True)
 
     return jsonify({"ok": True, "message": "ElevenLabs API key saved"})
 
@@ -311,6 +314,6 @@ def disconnect_elevenlabs():
             cfg.pop("elevenlabs_api_key", None)
             config_file.write_text(json.dumps(cfg, indent=2))
         except Exception:
-            pass
+            log.warning("Failed to remove ElevenLabs API key", exc_info=True)
 
     return jsonify({"ok": True, "message": "ElevenLabs disconnected"})

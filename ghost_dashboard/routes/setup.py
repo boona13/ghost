@@ -1,9 +1,12 @@
 """Setup API — first-run wizard + multi-provider configuration."""
 
+import logging
 import os, sys
 from flask import Blueprint, jsonify, request
 from typing import Any, Dict, List
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
@@ -275,4 +278,4 @@ def _hot_swap_key(api_key):
             if hasattr(daemon, "engine"):
                 daemon.engine.api_key = api_key
     except Exception:
-        pass
+        log.warning("Failed to update daemon API key", exc_info=True)

@@ -1,7 +1,10 @@
 """Voice API — Voice Wake + Talk Mode control from the dashboard."""
 
 import json
+import logging
 from flask import Blueprint, jsonify, request
+
+log = logging.getLogger(__name__)
 
 bp = Blueprint("voice", __name__)
 
@@ -182,6 +185,6 @@ def voice_config_set():
                 current[k] = daemon.cfg[k]
             cfg_path.write_text(json.dumps(current, indent=2))
         except Exception:
-            pass
+            log.warning("Failed to save voice config", exc_info=True)
 
     return jsonify({"ok": True, "updated": updated})

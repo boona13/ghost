@@ -1,8 +1,11 @@
 """Canvas API — visual content panel for the agent."""
 
+import logging
 import sys
 from flask import Blueprint, jsonify, request, send_from_directory, abort
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 bp = Blueprint("canvas", __name__)
 
@@ -18,6 +21,7 @@ def _get_engine():
         from ghost_canvas import get_canvas_engine
         return get_canvas_engine()
     except Exception:
+        log.warning("Failed to get canvas engine", exc_info=True)
         return None
 
 

@@ -1,9 +1,12 @@
 """Channels API — multi-channel messaging configuration, status, and testing."""
 
 import json
+import logging
 from flask import Blueprint, jsonify, request
 import sys
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from ghost_channels import (
@@ -173,7 +176,7 @@ def disable_channel(channel_id):
             try:
                 prov.stop_inbound()
             except Exception:
-                pass
+                log.warning("Failed to stop inbound provider", exc_info=True)
             if hasattr(prov, "_configured"):
                 prov._configured = False
 
@@ -259,7 +262,7 @@ def inbound_log():
         try:
             entries = json.loads(INBOUND_LOG_FILE.read_text())
         except Exception:
-            pass
+            log.warning("Failed to load inbound log entries", exc_info=True)
     return jsonify({"entries": entries[:limit]})
 
 

@@ -1,9 +1,12 @@
 """API routes for the Ghost Self-Evolution system."""
 
+import logging
 import os
 import sys
 import threading
 from flask import Blueprint, jsonify, request
+
+log = logging.getLogger(__name__)
 
 bp = Blueprint("evolve", __name__)
 
@@ -54,7 +57,7 @@ def approve_evolution(evo_id):
         try:
             _on_evolve_approve()
         except Exception:
-            pass
+            log.warning("Evolve approve hook failed", exc_info=True)
     return jsonify({"ok": ok, "message": msg})
 
 

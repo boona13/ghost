@@ -40,6 +40,7 @@ def _encode_image_for_llm(file_path: str) -> dict | None:
         data = base64.b64encode(p.read_bytes()).decode('ascii')
         return {"data": data, "mime": mime}
     except Exception:
+        log.warning(f"Failed to load image file: {file_path}", exc_info=True)
         return None
 
 bp = Blueprint("chat", __name__)
@@ -286,7 +287,7 @@ def _trigger_chat_repair(daemon, phase: str, error: Exception, traceback_str: st
     try:
         CHAT_ERROR_REPORT_FILE.write_text(json.dumps(report, indent=2))
     except Exception:
-        pass
+        log.warning("Failed to write chat error report", exc_info=True)
 
     with _repair_lock:
         if _repair_in_progress:
@@ -375,7 +376,7 @@ def _process_message(session, daemon):
                 registry = ProjectRegistry()
                 active_project = registry.get(session.project_id)
             except Exception:
-                pass
+                log.warning(f"Failed to get project {session.project_id}", exc_info=True)
 
         tool_names = daemon.tool_registry.names() if daemon.tool_registry else []
 

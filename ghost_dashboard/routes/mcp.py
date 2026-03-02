@@ -1,6 +1,9 @@
 """MCP (Model Context Protocol) dashboard API — server management, tool discovery, and testing."""
 
+import logging
 from flask import Blueprint, jsonify, request
+
+log = logging.getLogger(__name__)
 
 bp = Blueprint("mcp", __name__)
 
@@ -180,7 +183,7 @@ def add_server():
         if daemon:
             daemon.cfg["mcp_servers"] = cfg.get("mcp_servers", {})
     except Exception:
-        pass
+        log.warning("Failed to update daemon config after adding MCP server", exc_info=True)
 
     auto_connect = data.get("auto_connect", True)
     if auto_connect and mgr and server_cfg.get("enabled", True):
@@ -212,7 +215,7 @@ def remove_server(server_name):
         if daemon:
             daemon.cfg["mcp_servers"] = cfg.get("mcp_servers", {})
     except Exception:
-        pass
+        log.warning("Failed to update daemon config after removing MCP server", exc_info=True)
 
     return jsonify({"ok": True, "server": server_name})
 

@@ -87,7 +87,7 @@ def force_approve(pr_id):
                 FutureFeaturesStore().mark_implemented(
                     feature_id, f"Force-approved via dashboard (PR {pr_id})")
             except Exception:
-                pass
+                log.warning("Failed to mark feature as implemented", exc_info=True)
 
         from ghost_evolve import DEPLOY_MARKER, get_engine
         import json, time
