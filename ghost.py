@@ -198,7 +198,8 @@ def _is_template(path):
     try:
         content = path.read_text()
         return "- **Name:**\n" in content or "- **Name:** \n" in content
-    except Exception:
+    except Exception as e:
+        log.warning("Failed to check template: %s", e)
         return False
 
 
@@ -237,7 +238,8 @@ def _load_identity_file(path, max_chars=BOOTSTRAP_MAX_CHARS):
                 + content[-tail_len:]
             )
         return content
-    except Exception:
+    except Exception as e:
+        log.warning("Failed to load identity file: %s", e)
         return None
 
 
@@ -1026,8 +1028,8 @@ class GhostDaemon:
                 try:
                     from ghost_evolve import _log_reviewer_mistakes
                     _log_reviewer_mistakes(pr, pr_id, pr.get("title", ""))
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning("Failed to log reviewer mistakes: %s", e)
 
                 if feature_id:
                     ok_retry, retry_status = self._features_store.mark_review_rejected(
@@ -1045,8 +1047,8 @@ class GhostDaemon:
                         "warning", "system", "stale_pr_requeue",
                         f"Re-queued {requeued} feature(s) after stale PR cleanup",
                     )
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("Failed to check stale PRs: %s", e)
 
         # Expose shell-hardening impact assessor for internal policy decisions
         self.assess_command_hardening_impact = assess_command_hardening_impact
@@ -1170,8 +1172,8 @@ class GhostDaemon:
                             registry, router,
                             check_interval=cfg.get("channel_health_check_interval", 300.0),
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log.warning("Failed to init health monitor: %s", e)
             except Exception as e:
                 import traceback
                 traceback.print_exc()
@@ -1388,8 +1390,8 @@ class GhostDaemon:
                         "warning", "system", "feature_reset",
                         f"Auto-reset orphaned feature {fid[:10]} back to pending",
                     )
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("Failed to reset orphaned feature: %s", e)
 
     def _build_provider_chain(self, model, fallback_models):
         """Build the provider-aware fallback chain from configured profiles.
@@ -1610,14 +1612,14 @@ class GhostDaemon:
                 try:
                     self.channel_router.send(f"**{title}**\n{message}",
                                              priority="normal", title=title)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning("Failed to send channel notification: %s", e)
             if PLAT == "Darwin":
                 try:
                     cmd = f'display notification "{message}" with title "{title}" sound name "default"'
                     subprocess.run(["osascript", "-e", cmd], capture_output=True, timeout=5)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning("Failed to send OS notification: %s", e)
             terminal_print("ask", f"[cron notify] {title}", message)
 
         elif ptype == "shell":
@@ -1640,31 +1642,31 @@ class GhostDaemon:
         if self.channel_inbound:
             try:
                 self.channel_inbound.stop_all()
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("Error stopping channel inbound: %s", e)
         # Phase 2: Stop health monitor and delivery queue
         if hasattr(self, "_health_monitor") and self._health_monitor:
             try:
                 self._health_monitor.stop()
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("Error stopping health monitor: %s", e)
         if self.channel_router:
             try:
                 self.channel_router.disable_queue()
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("Error disabling channel queue: %s", e)
         try:
             from ghost_dashboard import stop_dashboard
             stop_dashboard()
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("Error stopping dashboard: %s", e)
         if self.cron:
             self.cron.stop()
         if self.shell_sessions:
             try:
                 self.shell_sessions.cleanup_all()
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("Error cleaning up shell sessions: %s", e)
         if self.hooks:
             self.hooks.run_void("on_shutdown")
         if self.memory_db:
@@ -1677,12 +1679,12 @@ class GhostDaemon:
                 print(f"  [mcp] Shutdown error: {e}")
         try:
             _browser_stop()
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("Error stopping browser: %s", e)
         try:
             stop_voice_engine()
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("Error stopping voice engine: %s", e)
         print(f"\n  {DIM}👻 Ghost fading away... {self.actions_today} actions this session.{RST}\n")
 
     @staticmethod
@@ -1733,7 +1735,8 @@ class GhostDaemon:
                     history.append({"role": "user", "content": user_msg})
                     history.append({"role": "assistant", "content": assistant_msg})
             return history
-        except Exception:
+        except Exception as e:
+            log.warning("Failed to load conversation history: %s", e)
             return []
 
     def process_inbound(self, msg):
@@ -1777,7 +1780,8 @@ class GhostDaemon:
                 while not typing_stop.is_set():
                     try:
                         prov.send_typing(chat_id)
-                    except Exception:
+                    except Exception as e:
+                        log.debug("Typing indicator failed: %s", e)
                         break
                     typing_stop.wait(4)
             typing_thread = threading.Thread(target=_keep_typing, daemon=True,
@@ -1795,7 +1799,8 @@ class GhostDaemon:
                 matched_skills = self.skill_loader.match(
                     msg.text, None, disabled=disabled
                 )
-            except Exception:
+            except Exception as e:
+                log.warning("Failed to match skills: %s", e)
                 matched_skills = []
 
         tool_names = self.tool_registry.names() if self.tool_registry else []
@@ -2388,8 +2393,8 @@ class GhostDaemon:
                         pass
             if result.stdout.strip():
                 time.sleep(0.5)
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("Failed to kill existing process: %s", e)
 
     def run(self):
         self._kill_existing()
@@ -2452,7 +2457,8 @@ class GhostDaemon:
                     import json as _json
                     try:
                         marker = _json.loads(DEPLOY_MARKER.read_text())
-                    except Exception:
+                    except Exception as e:
+                        log.warning("Failed to read deploy marker: %s", e)
                         marker = {}
                     deployed_evo_id = marker.get("evolution_id", "")
                     is_rollback = marker.get("rollback", False)
@@ -2475,8 +2481,8 @@ class GhostDaemon:
                                     feat["id"],
                                     "Evolution was rolled back",
                                 )
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("Failed to process deploy marker: %s", e)
 
         console_bus.emit(
             "success", "system", "daemon_start",
@@ -2551,8 +2557,8 @@ class GhostDaemon:
                         self.cron.fire_now(_FEATURE_IMPLEMENTER_JOB)
                 set_queue_trigger(_dashboard_queue_trigger)
                 set_force_fire(lambda: self.cron.fire_now(_FEATURE_IMPLEMENTER_JOB) if self.cron else None)
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("Failed to wire queue triggers: %s", e)
 
             # Wire evolve approval → re-fire implementer when user approves
             # a pending evolution and the implementer is not running.
@@ -2566,8 +2572,8 @@ class GhostDaemon:
                     self._features_store.reset_stale_in_progress(max_age_seconds=0)
                     self.cron.fire_now(_FEATURE_IMPLEMENTER_JOB)
                 set_evolve_approve_hook(_on_evolve_approved)
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("Failed to wire evolve approval hook: %s", e)
         except Exception as e:
             print(f"  {DIM}Dashboard failed to start: {e}{RST}")
 
@@ -3049,7 +3055,8 @@ def main():
         from ghost_dashboard import run_dashboard
         try:
             port = int(args.rest[0]) if args.rest else 3333
-        except Exception:
+        except Exception as e:
+            log.warning("Invalid port specified, using default 3333: %s", e)
             port = 3333
         try:
             run_dashboard(port=port)
