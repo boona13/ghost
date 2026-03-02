@@ -832,6 +832,14 @@ def build_future_features_tools(cfg, on_queue_change=None):
             return f"Feature marked as failed: {feature_id}"
         return f"Feature not found: {feature_id}"
 
+    def _reject_future_feature(feature_id: str, reason: str = "", **kwargs):
+        """Permanently reject a feature (e.g. already implemented, not applicable)."""
+        ok = store.reject(feature_id, reason)
+        if ok:
+            _notify_queue()
+            return f"Feature rejected: {feature_id} — {reason}"
+        return f"Feature not found: {feature_id}"
+
     def _mark_feature_audited(feature_id: str, result: str = "pass", notes: str = ""):
         """Stamp a feature as audited so the auditor never re-examines it."""
         if store.is_audited(feature_id):
@@ -968,6 +976,24 @@ def build_future_features_tools(cfg, on_queue_change=None):
                 "required": ["feature_id"],
             },
             "execute": _fail_future_feature,
+        },
+        {
+            "name": "reject_future_feature",
+            "description": (
+                "Permanently reject a feature that should NOT be implemented. "
+                "Use this when a feature is already implemented in the codebase, "
+                "duplicates existing functionality, or is no longer applicable. "
+                "Unlike fail_future_feature, rejected features are never retried."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "feature_id": {"type": "string", "description": "Feature ID to reject"},
+                    "reason": {"type": "string", "default": "", "description": "Why (e.g. 'Already implemented in ghost_voice.py — moonshine_onnx is imported and used')"},
+                },
+                "required": ["feature_id", "reason"],
+            },
+            "execute": _reject_future_feature,
         },
         {
             "name": "mark_feature_audited",

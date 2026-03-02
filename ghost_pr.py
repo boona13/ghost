@@ -77,6 +77,8 @@ stop the next one. Check EVERY section below.
 ### Duplicate Functionality (caused M-17)
 - Does this PR add something that already exists in the codebase?
 - Check: is there an existing tool, module, or route that does the same thing?
+- If EXISTING CODE MATCHES are provided below, verify those files don't already implement this feature.
+- If the feature is already working in the codebase: VERDICT: BLOCK — "already implemented"
 
 ### Scope
 - PR should do ONE thing. Flag unrelated changes.
@@ -377,6 +379,44 @@ class ReviewEngine:
                     )})
             except Exception:
                 pass
+
+        # Codebase context: help reviewer detect duplicate/already-implemented features
+        try:
+            import subprocess
+            _stopwords = {
+                "the", "and", "for", "with", "from", "that", "this", "into",
+                "add", "fix", "bug", "feature", "ghost", "update", "implement",
+                "new", "support", "enable", "create", "make", "use", "set",
+            }
+            title_words = [
+                w.lower() for w in pr["title"].split()
+                if len(w) > 3 and w.lower() not in _stopwords
+            ]
+            pr_files_abs = set()
+            for pf in pr.get("files_changed", []):
+                pr_files_abs.add(str(PROJECT_DIR / pf))
+                pr_files_abs.add(str(pf))
+            hits = []
+            for term in title_words[:3]:
+                result = subprocess.run(
+                    ["grep", "-ril", term, "--include=*.py", str(PROJECT_DIR)],
+                    capture_output=True, text=True, timeout=5,
+                )
+                for fpath in result.stdout.strip().split("\n"):
+                    fpath = fpath.strip()
+                    if fpath and fpath not in pr_files_abs and ".venv" not in fpath:
+                        hits.append(f"'{term}' found in {fpath}")
+            if hits:
+                existing_context = (
+                    "**EXISTING CODE MATCHES** — files NOT in this PR that already "
+                    "reference feature keywords:\n"
+                    + "\n".join(f"- {h}" for h in hits[:10])
+                    + "\n\nIf these files already implement what this PR adds, "
+                    "the feature is a duplicate. VERDICT: BLOCK — 'already implemented'."
+                )
+                messages.insert(-1, {"role": "user", "content": existing_context})
+        except Exception:
+            pass
 
         log.info("Review round 1/1 for PR %s", pr_id)
         reviewer_text = self._chat(engine, messages)
