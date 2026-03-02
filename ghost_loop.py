@@ -1239,6 +1239,11 @@ class ToolLoopEngine:
                                 loop_detector.record_result(call_id, tool_result)
                                 _debug_logger.step_tool_call(step, fn_name, fn_args,
                                                              f"BLOCKED: verification missing")
+                                if on_step:
+                                    try:
+                                        on_step(step, fn_name, tool_result)
+                                    except Exception:
+                                        pass
                                 messages.append({
                                     "role": "tool",
                                     "tool_call_id": tc_id,
@@ -1246,7 +1251,7 @@ class ToolLoopEngine:
                                 })
                                 tool_calls_log.append({
                                     "tool": fn_name, "args": fn_args,
-                                    "result_preview": tool_result[:200],
+                                    "result": tool_result[:3000],
                                     "step": step, "blocked": True,
                                 })
                                 continue

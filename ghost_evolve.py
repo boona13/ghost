@@ -655,19 +655,51 @@ class EvolutionEngine:
 
     # ── Semantic Lint ─────────────────────────────────────────────
 
+    @staticmethod
+    def _extract_changed_lines(diff_text):
+        """Parse unified diff to extract set of added/changed line numbers in the new file."""
+        changed = set()
+        if not diff_text or diff_text == "(new file)":
+            return None  # None means "all lines" (new file)
+        current_line = 0
+        for raw_line in diff_text.split("\n"):
+            if raw_line.startswith("@@"):
+                m = re.search(r'\+(\d+)', raw_line)
+                if m:
+                    current_line = int(m.group(1)) - 1
+            elif raw_line.startswith("+") and not raw_line.startswith("+++"):
+                current_line += 1
+                changed.add(current_line)
+            elif raw_line.startswith("-") and not raw_line.startswith("---"):
+                pass  # deleted line, don't advance
+            else:
+                current_line += 1
+        return changed
+
     def _semantic_lint(self, evo):
         """Static analysis for patterns that cause PR rejections.
 
-        Scans changed .py files for anti-patterns the reviewer always catches:
-        bare except, unbounded reads, mutable imports, missing mkdir.
+        Only lints lines that were actually added or changed in this evolution,
+        not pre-existing code. For new files, all lines are checked.
         Returns a list of dicts: [{file, line, rule, message}].
         """
         issues = []
+        file_changed_lines = {}
         for change in evo.get("changes", []):
             fpath = change["file"]
+            diff_text = change.get("diff", "")
+            cl = self._extract_changed_lines(diff_text)
+            if fpath in file_changed_lines:
+                existing = file_changed_lines[fpath]
+                if existing is None or cl is None:
+                    file_changed_lines[fpath] = None
+                else:
+                    existing.update(cl)
+            else:
+                file_changed_lines[fpath] = cl
+
+        for fpath, changed_lines in file_changed_lines.items():
             if not fpath.endswith(".py"):
-                continue
-            if change.get("action") == "delete":
                 continue
             abs_path = _normalize_file_path(fpath)
             if not abs_path.exists():
@@ -680,6 +712,8 @@ class EvolutionEngine:
             rel = str(abs_path.relative_to(PROJECT_DIR)) if abs_path.is_relative_to(PROJECT_DIR) else fpath
 
             for i, line in enumerate(lines, 1):
+                if changed_lines is not None and i not in changed_lines:
+                    continue
                 stripped = line.strip()
 
                 # Rule 1: Bare except with pass (no logging)
