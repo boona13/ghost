@@ -79,6 +79,7 @@ from ghost_config_payloads import build_config_payload_tools
 from ghost_dependency_doctor import build_dependency_doctor_tools
 from ghost_pr import build_pr_tools
 from ghost_mcp import MCPClientManager, build_mcp_tools
+from ghost_subagents import build_subagent_tools
 
 # responses capabilities wiring marker: dashboard-managed feature flags loaded via config/routes
 
@@ -1256,6 +1257,21 @@ class GhostDaemon:
                     self.mcp_manager.start_monitor()
             except Exception as e:
                 print(f"  [mcp] Failed to initialize: {e}")
+
+        # Sub-Agents — Task Delegation and Parallel Execution
+        if cfg.get("enable_subagents", True):
+            try:
+                for tool_def in build_subagent_tools(
+                    cfg=cfg,
+                    tool_registry=self.tool_registry,
+                    skill_loader=self.skill_loader,
+                    auth_store=self.auth_store,
+                    provider_chain=self.provider_chain,
+                ):
+                    self.tool_registry.register(tool_def)
+                print("  [subagents] Initialized task delegation system")
+            except Exception as e:
+                print(f"  [subagents] Failed to initialize: {e}")
 
 
     def _load_soul(self):
