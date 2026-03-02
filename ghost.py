@@ -381,6 +381,7 @@ def save_config(cfg):
 # ═════════════════════════════════════════════════════════════════════
 
 _feed_lock = threading.Lock()
+_log_action_lock = threading.Lock()
 
 def read_feed():
     with _feed_lock:
@@ -409,20 +410,27 @@ def append_feed(entry, max_items=50):
 # ═════════════════════════════════════════════════════════════════════
 
 def log_action(action_type, preview, result):
-    entries = []
-    if LOG_FILE.exists():
+    with _log_action_lock:
+        entries = []
+        if LOG_FILE.exists():
+            try:
+                entries = json.loads(LOG_FILE.read_text())
+            except json.JSONDecodeError as e:
+                log.warning("Failed to read log file: %s", e)
+        entries.append({
+            "time": datetime.now().isoformat(),
+            "type": action_type,
+            "input": preview[:120],
+            "output": result[:300],
+        })
+        entries = entries[-500:]
+        # Atomic write: write to temp file then rename
+        temp_file = LOG_FILE.with_suffix(".tmp")
         try:
-            entries = json.loads(LOG_FILE.read_text())
-        except json.JSONDecodeError as e:
-            log.warning(f"Failed to read log file: {e}")
-    entries.append({
-        "time": datetime.now().isoformat(),
-        "type": action_type,
-        "input": preview[:120],
-        "output": result[:300],
-    })
-    entries = entries[-500:]
-    LOG_FILE.write_text(json.dumps(entries, indent=2))
+            temp_file.write_text(json.dumps(entries, indent=2))
+            temp_file.replace(LOG_FILE)
+        except OSError as e:
+            log.warning("Failed to write log file: %s", e)
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -2644,15 +2652,19 @@ def cmd_status():
         try:
             os.kill(int(pid), 0)
             print(f"  {GRN}{B}RUNNING{RST}  PID {pid}")
-        except:
+        except (OSError, ValueError) as e:
+            log.warning("PID check failed: %s", e)
             print(f"  {DIM}NOT RUNNING{RST}  (stale PID file)")
     else:
         print(f"  {DIM}NOT RUNNING{RST}")
 
     entries = []
     if LOG_FILE.exists():
-        try: entries = json.loads(LOG_FILE.read_text())
-        except: pass
+        try:
+            content = LOG_FILE.read_text()
+            entries = json.loads(content)
+        except json.JSONDecodeError as e:
+            log.warning("Failed to parse log file: %s", e)
 
     total = len(entries)
     today = sum(1 for e in entries
@@ -2687,8 +2699,8 @@ def cmd_status():
             jobs = cron.list_jobs()
             enabled = sum(1 for j in jobs if j.get("enabled"))
             print(f"  Cron jobs: {len(jobs)} total, {enabled} enabled")
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("Failed to get cron stats: %s", e)
 
     if cfg.get("enable_memory_db"):
         try:
@@ -2696,8 +2708,8 @@ def cmd_status():
             stats = mdb.stats()
             print(f"  Memory: {stats['total']} entries, {stats['total_tokens']} tokens")
             mdb.close()
-        except:
-            pass
+        except Exception as e:
+            log.warning("Failed to get memory stats: %s", e)
 
     print(f"  SOUL.md: {'YES' if SOUL_FILE.exists() else 'NO'} ({SOUL_FILE})")
     print(f"  USER.md: {'YES' if USER_FILE.exists() else 'NO'} ({USER_FILE})")
