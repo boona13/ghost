@@ -434,13 +434,16 @@ class FutureFeaturesStore:
         return False
 
     def mark_review_rejected(self, feature_id: str, reason: str = "",
-                             max_retries: int = 3) -> tuple[bool, str]:
+                             max_retries: int = 3,
+                             reviewer_feedback: str = "") -> tuple[bool, str]:
         """Handle PR reviewer rejection by re-queuing or deferring.
 
         Behavior:
         - If implementation_attempts < max_retries: set back to pending so the
           Feature Implementer can try again and submit a new PR.
         - Otherwise: set deferred to stop infinite retry loops.
+        - Accumulates ALL reviewer feedback in pr_rejections[] so the next
+          attempt has full context of every past rejection.
 
         Returns:
             (ok, status) where status is "pending" or "deferred".
@@ -464,13 +467,22 @@ class FutureFeaturesStore:
 
             f["updated_at"] = now
             f["last_error"] = reason
+
+            if "pr_rejections" not in f:
+                f["pr_rejections"] = []
+            f["pr_rejections"].append({
+                "attempt": attempts,
+                "timestamp": now,
+                "feedback": (reviewer_feedback or reason)[:2000],
+            })
+
             if "implementation_log" not in f:
                 f["implementation_log"] = []
             f["implementation_log"].append({
                 "timestamp": now,
                 "message": (
-                    f"PR reviewer rejected: {reason}. "
-                    f"{'Deferred after max retries' if final_status == STATUS_DEFERRED else 'Re-queued for another implementation attempt'}."
+                    f"PR reviewer rejected (attempt {attempts}). "
+                    f"{'Deferred after max retries' if final_status == STATUS_DEFERRED else 'Re-queued for another attempt'}."
                 ),
             })
             self._save(features)
@@ -738,10 +750,15 @@ def build_future_features_tools(cfg, on_queue_change=None):
             lines.append(f"\nAudited: {f['audited_at']} (result={f.get('audit_result', '?')})")
             if f.get("audit_notes"):
                 lines.append(f"Audit Notes: {f['audit_notes']}")
+        if f.get("pr_rejections"):
+            lines.append(f"\n⚠️  PAST PR REJECTIONS ({len(f['pr_rejections'])} total) — YOU MUST address ALL of these:")
+            for i, rej in enumerate(f["pr_rejections"], 1):
+                lines.append(f"\n--- Rejection #{i} (attempt {rej.get('attempt', '?')}) ---")
+                lines.append(rej.get("feedback", "(no feedback)"))
         if f.get("implementation_log"):
             lines.append(f"\nImplementation Log:")
-            for log in f["implementation_log"]:
-                lines.append(f"  - {log['timestamp']}: {log['message']}")
+            for entry in f["implementation_log"][-5:]:
+                lines.append(f"  - {entry['timestamp']}: {entry['message']}")
         return "\n".join(lines)
 
     def _approve_future_feature(feature_id: str):

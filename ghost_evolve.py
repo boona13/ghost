@@ -815,7 +815,8 @@ class EvolutionEngine:
                         )
                     ok_retry, retry_status = FutureFeaturesStore().mark_review_rejected(
                         feature_id, reason,
-                        max_retries=3)
+                        max_retries=3,
+                        reviewer_feedback=latest_reviewer_feedback)
                     if ok_retry:
                         _notify_queue_best_effort()
             except Exception:
@@ -824,15 +825,15 @@ class EvolutionEngine:
             _log_reviewer_mistakes(pr_after, pr["pr_id"], title)
             from ghost_pr import MAX_REVIEW_ROUNDS
             retry_msg = (
-                "Feature was re-queued to pending for another implementer attempt."
+                "Feature was re-queued to pending for another attempt."
                 if retry_status == "pending" else
-                "Feature was deferred after max retry attempts."
+                "Feature was DEFERRED after max retry attempts."
                 if retry_status == "deferred" else
                 "Feature retry status unknown."
             )
             return False, (
-                f"PR {pr['pr_id']} REJECTED after {MAX_REVIEW_ROUNDS} review rounds. "
-                f"{retry_msg} Call task_complete."
+                f"PR {pr['pr_id']} REJECTED. {retry_msg}\n"
+                f"{'You MUST call task_complete NOW — do NOT retry in this session.' if retry_status == 'deferred' else 'Call task_complete NOW. The feature has been re-queued and will be attempted in a FUTURE run with all rejection feedback accumulated.'}"
             )
 
     def deploy(self, evolution_id):
@@ -1463,8 +1464,17 @@ def build_evolve_tools(cfg):
             )
         return "\n".join(lines)
 
+    _session_rejected_features = set()
+
     def evolve_submit_pr_exec(evolution_id, title, description="",
                               feature_id=""):
+        if feature_id and feature_id in _session_rejected_features:
+            return (
+                f"BLOCKED: Feature {feature_id} was already rejected in this session. "
+                "Do NOT retry — call task_complete NOW. "
+                "The feature has been re-queued with all reviewer feedback accumulated. "
+                "A future run will attempt it with full context."
+            )
         ok, msg = engine.submit_pr(
             evolution_id, title, description,
             feature_id=feature_id, cfg=cfg)
@@ -1474,6 +1484,8 @@ def build_evolve_tools(cfg):
                 "PR APPROVED AND MERGED — deploy triggered. "
                 "You may now log this as a successful evolution."
             )
+        if feature_id:
+            _session_rejected_features.add(feature_id)
         return msg
 
     def evolve_deploy_exec(evolution_id):
