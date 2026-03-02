@@ -385,6 +385,35 @@ def _check_incomplete_workflows(tool_calls_log: list) -> str | None:
     return None
 
 
+def _check_verification_before_submit(tool_calls_log: list) -> str | None:
+    """Block evolve_submit_pr if no file_read/grep happened after evolve_test.
+
+    Returns an error message if verification is missing, None if OK.
+    """
+    last_test_step = -1
+    for tc in tool_calls_log:
+        if tc["tool"] == "evolve_test":
+            s = tc.get("step", 0)
+            if s > last_test_step:
+                last_test_step = s
+
+    if last_test_step < 0:
+        return None
+
+    verification_tools = {"file_read", "grep"}
+    verified = any(
+        tc["tool"] in verification_tools and tc.get("step", 0) > last_test_step
+        for tc in tool_calls_log
+    )
+    if not verified:
+        return (
+            "BLOCKED: You must VERIFY your changes before submitting. "
+            "After evolve_test passes, use file_read to review the changed files "
+            "and confirm they are correct. Then call evolve_submit_pr again."
+        )
+    return None
+
+
 @dataclass
 class LoopDetectionConfig:
     enabled: bool = True
@@ -1179,6 +1208,25 @@ class ToolLoopEngine:
                                 on_step(step, fn_name, "(running...)")
                             except Exception:
                                 pass
+
+                        if fn_name == "evolve_submit_pr":
+                            verify_issue = _check_verification_before_submit(tool_calls_log)
+                            if verify_issue:
+                                tool_result = verify_issue
+                                loop_detector.record_result(call_id, tool_result)
+                                _debug_logger.step_tool_call(step, fn_name, fn_args,
+                                                             f"BLOCKED: verification missing")
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tc_id,
+                                    "content": tool_result,
+                                })
+                                tool_calls_log.append({
+                                    "tool": fn_name, "args": fn_args,
+                                    "result_preview": tool_result[:200],
+                                    "step": step, "blocked": True,
+                                })
+                                continue
 
                         t0 = time.time()
                         try:

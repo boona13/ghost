@@ -669,6 +669,16 @@ GROWTH_ROUTINES = [
             "- NEVER 'from module import mutable_var' — use 'import module; module.var'.\n"
             "- Tool execute functions MUST accept **kwargs. Optional params need defaults.\n"
             "- NEVER bare except. NEVER except Exception: pass. Catch specific types + log.\n"
+            "- Keep code SIMPLE. No unnecessary abstractions or over-engineering. One function, one job.\n"
+            "- Dashboard modals MUST default to hidden. Dismiss via X button, overlay click, AND Escape key.\n"
+            "- Use SVG icons in dashboard UI. NEVER use emojis as icons.\n"
+            "- API responses MUST return LIVE data from the actual store. NEVER return hardcoded defaults or stale values.\n"
+            "- NEVER perform blocking I/O (pip install, network calls, large file reads) at module level or in __init__.\n"
+            "- Before building anything new, grep the codebase to check if a similar tool/module already exists.\n"
+            + _CODE_PATTERNS
+            + _PRE_PR_CHECKLIST
+            + _GHOST_SYSTEM_MAP
+            + _DEV_STANDARDS
             + _CAPABILITIES
         ),
     },
@@ -767,6 +777,8 @@ GROWTH_ROUTINES = [
             "  source='implementation_auditor'). Auditing your own fixes creates infinite loops.\n"
             "- A feature that passes structural checks but FAILS rendering checks is BROKEN.\n"
             "- Use log_growth_activity to summarize: features audited, gaps found, fixes queued.\n"
+            + _CODE_PATTERNS
+            + _PRE_PR_CHECKLIST
             + _CAPABILITIES
         ),
     },

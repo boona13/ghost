@@ -29,6 +29,7 @@ from pathlib import Path
 GHOST_HOME = Path.home() / ".ghost"
 EVOLVE_DIR = GHOST_HOME / "evolve"
 DEPLOY_MARKER = EVOLVE_DIR / "deploy_pending"
+LAST_DEPLOY_FILE = EVOLVE_DIR / "last_deploy.json"
 SHUTDOWN_MARKER = GHOST_HOME / "shutdown_requested"
 BACKUP_DIR = EVOLVE_DIR / "backups"
 SUPERVISOR_PID_FILE = GHOST_HOME / "supervisor.pid"
@@ -214,16 +215,24 @@ class GhostSupervisor:
         log("Ghost stopped")
 
     def _handle_deploy(self):
-        """Process a deploy signal: read marker, clear crash history, log.
+        """Process a deploy signal: read marker, persist for new process, clear crash history.
 
-        After this returns, the start() loop will call _launch_ghost() + _monitor_loop()
-        to start and watch the new Ghost process.
+        Writes deploy info to last_deploy.json so the new Ghost process can
+        read it on startup (e.g. to auto-complete the deployed feature).
+        The deploy_pending marker is then deleted — it's a one-shot signal.
         """
         deploy_info = {}
         try:
             deploy_info = json.loads(DEPLOY_MARKER.read_text())
         except Exception:
             pass
+
+        # Persist deploy context for the new Ghost process before deleting the marker.
+        try:
+            EVOLVE_DIR.mkdir(parents=True, exist_ok=True)
+            LAST_DEPLOY_FILE.write_text(json.dumps(deploy_info, indent=2))
+        except Exception as e:
+            log(f"Warning: could not write last_deploy.json: {e}")
 
         DEPLOY_MARKER.unlink(missing_ok=True)
         self._last_deploy_info = deploy_info

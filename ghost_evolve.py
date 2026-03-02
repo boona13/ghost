@@ -642,10 +642,114 @@ class EvolutionEngine:
             if any(not r["ok"] for r in api_results):
                 results["passed"] = False
 
+        if results["passed"]:
+            lint_issues = self._semantic_lint(evo)
+            results["semantic_lint"] = lint_issues
+            if lint_issues:
+                results["passed"] = False
+
         evo["test_results"] = results
         evo["status"] = "tested_pass" if results["passed"] else "tested_fail"
 
         return results["passed"], results
+
+    # ── Semantic Lint ─────────────────────────────────────────────
+
+    def _semantic_lint(self, evo):
+        """Static analysis for patterns that cause PR rejections.
+
+        Scans changed .py files for anti-patterns the reviewer always catches:
+        bare except, unbounded reads, mutable imports, missing mkdir.
+        Returns a list of dicts: [{file, line, rule, message}].
+        """
+        issues = []
+        for change in evo.get("changes", []):
+            fpath = change["file"]
+            if not fpath.endswith(".py"):
+                continue
+            if change.get("action") == "delete":
+                continue
+            abs_path = _normalize_file_path(fpath)
+            if not abs_path.exists():
+                continue
+            try:
+                source = abs_path.read_text()
+            except Exception:
+                continue
+            lines = source.split("\n")
+            rel = str(abs_path.relative_to(PROJECT_DIR)) if abs_path.is_relative_to(PROJECT_DIR) else fpath
+
+            for i, line in enumerate(lines, 1):
+                stripped = line.strip()
+
+                # Rule 1: Bare except with pass (no logging)
+                if re.match(r'^except\s*:', stripped) or re.match(r'^except\s+Exception\s*:', stripped):
+                    body_lines = []
+                    for j in range(i, min(i + 5, len(lines))):
+                        body_lines.append(lines[j].strip())
+                    body = " ".join(body_lines)
+                    if re.search(r'\bpass\b', body) and "log." not in body and "logging." not in body:
+                        issues.append({
+                            "file": rel, "line": i, "rule": "bare-except",
+                            "message": "Bare except with pass — catch specific types and log the error",
+                        })
+
+                # Rule 2: from ghost_* import mutable_var (not class/func/CONSTANT)
+                m = re.match(r'^from\s+(ghost_\w+)\s+import\s+(\w+)', stripped)
+                if m:
+                    name = m.group(2)
+                    if not name[0].isupper() and name != name.upper():
+                        # Check if it's a function/class in the source module
+                        _src_mod = PROJECT_DIR / f"{m.group(1)}.py"
+                        _is_callable = False
+                        try:
+                            if _src_mod.exists():
+                                _src_text = _src_mod.read_text()
+                                if re.search(rf'^(def|class)\s+{re.escape(name)}\b', _src_text, re.MULTILINE):
+                                    _is_callable = True
+                        except Exception:
+                            pass
+                        if not _is_callable:
+                            issues.append({
+                                "file": rel, "line": i, "rule": "mutable-import",
+                                "message": f"'from {m.group(1)} import {name}' imports a mutable copy — use 'import {m.group(1)}; {m.group(1)}.{name}' instead",
+                            })
+
+                # Rule 3: Unbounded file read into json.loads
+                if re.search(r'json\.loads?\(.*\.read_text\(\)', stripped):
+                    size_guard = any(
+                        "stat()" in lines[max(0, j)].strip() or "st_size" in lines[max(0, j)].strip()
+                        for j in range(max(0, i - 6), i - 1)
+                    )
+                    if not size_guard:
+                        issues.append({
+                            "file": rel, "line": i, "rule": "unbounded-read",
+                            "message": "json.loads(path.read_text()) without a file size check — add a size guard or use bounded reads",
+                        })
+
+                # Rule 4: .write_text() without preceding mkdir
+                if ".write_text(" in stripped or re.search(r"open\(.+,\s*['\"]w", stripped):
+                    has_mkdir = any(
+                        "mkdir(" in lines[max(0, j)]
+                        for j in range(max(0, i - 6), i - 1)
+                    )
+                    has_parent_mkdir = any(
+                        "mkdir(" in lines[max(0, j)]
+                        for j in range(max(0, i - 20), i - 1)
+                    )
+                    if not has_mkdir and not has_parent_mkdir:
+                        if ".write_text(" in stripped:
+                            path_in_line = stripped.split(".write_text")[0].split("=")[-1].strip()
+                        else:
+                            open_m = re.search(r'open\(([^,)]+)', stripped)
+                            path_in_line = open_m.group(1).strip() if open_m else ""
+                        if path_in_line and path_in_line.upper() != path_in_line:
+                            issues.append({
+                                "file": rel, "line": i, "rule": "missing-mkdir",
+                                "message": "File write without preceding Path.mkdir(parents=True, exist_ok=True)",
+                            })
+
+        return issues
 
     def submit_pr(self, evolution_id, title, description, feature_id="", cfg=None):
         """Submit a PR for code review instead of deploying directly.
@@ -672,6 +776,20 @@ class EvolutionEngine:
             return False, f"Evolution '{evolution_id}' not found.{hint}"
         if evo.get("status") != "tested_pass":
             return False, "Cannot submit PR: tests have not passed. Run evolve_test first."
+
+        # Pre-submit semantic lint: catch anti-patterns before the expensive review
+        lint_issues = self._semantic_lint(evo)
+        if lint_issues:
+            issues_text = "\n".join(
+                f"  - {i['file']}:{i['line']} [{i['rule']}]: {i['message']}"
+                for i in lint_issues
+            )
+            return False, (
+                f"PRE-SUBMIT VALIDATION FAILED — {len(lint_issues)} issue(s) found:\n"
+                f"{issues_text}\n\n"
+                "Fix these issues with evolve_apply, then re-run evolve_test, "
+                "then try evolve_submit_pr again."
+            )
 
         # Ensure git branch exists — recover if plan() failed to create it
         branch_name = evo.get("git_branch")
@@ -781,7 +899,7 @@ class EvolutionEngine:
                 return False, f"Merge failed after approval: {msg}"
             ghost_git.delete_branch(branch_name)
             store.mark_merged(pr["pr_id"])
-            return self.deploy(evolution_id)
+            return self.deploy(evolution_id, feature_id=feature_id)
 
         elif verdict == "blocked":
             ghost_git.stash_and_checkout("main")
@@ -845,11 +963,14 @@ class EvolutionEngine:
                 f"{'You MUST call task_complete NOW — do NOT retry in this session.' if retry_status == 'deferred' else 'Call task_complete NOW. The feature has been re-queued and will be attempted in a FUTURE run with all rejection feedback accumulated.'}"
             )
 
-    def deploy(self, evolution_id):
+    def deploy(self, evolution_id, feature_id=""):
         """Signal the supervisor to restart Ghost with the new code.
 
         Before writing the deploy marker, waits for other cron jobs to finish
         (up to 30s) so the restart doesn't kill them mid-execution.
+
+        The deploy marker carries feature_id so the supervisor can persist it
+        for the new Ghost process to auto-complete the feature on startup.
         """
         with self._lock:
             evo = self._active_evolutions.get(evolution_id)
@@ -888,6 +1009,7 @@ class EvolutionEngine:
 
             deploy_info = {
                 "evolution_id": evolution_id,
+                "feature_id": feature_id,
                 "backup_path": evo["backup_path"],
                 "timestamp": time.time(),
             }
@@ -1460,6 +1582,10 @@ def build_evolve_tools(cfg):
                 lines.append(f"  API route {api_r['endpoint']}: OK (HTTP {api_r.get('status', '?')})")
             else:
                 lines.append(f"  API route {api_r['endpoint']}: FAIL — {api_r.get('error', 'unknown')}")
+        for lint in results.get("semantic_lint", []):
+            lines.append(
+                f"  LINT {lint['file']}:{lint['line']} [{lint['rule']}]: {lint['message']}"
+            )
         if passed:
             lines.append(
                 "\nAll tests passed. Call evolve_submit_pr to submit for code review, "

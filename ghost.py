@@ -989,6 +989,36 @@ class GhostDaemon:
         # (feature added/approved/completed/failed) AND no implementation is running.
         self._features_store = FutureFeaturesStore()
 
+        # Post-deploy cleanup: the supervisor writes last_deploy.json with
+        # the deploy context (evolution_id, feature_id) before relaunching.
+        # Process it HERE — before build_future_features_tools (which runs
+        # reset_stale_in_progress) and before cron starts — so the feature
+        # is already marked implemented/failed before anything can re-queue it.
+        _last_deploy_file = Path.home() / ".ghost" / "evolve" / "last_deploy.json"
+        try:
+            if _last_deploy_file.exists():
+                import json as _json
+                deploy_info = _json.loads(_last_deploy_file.read_text())
+                _last_deploy_file.unlink(missing_ok=True)
+
+                deployed_evo_id = deploy_info.get("evolution_id", "")
+                feature_id = deploy_info.get("feature_id", "")
+                is_rollback = deploy_info.get("rollback", False)
+
+                if is_rollback and feature_id:
+                    self._features_store.mark_failed(
+                        feature_id, "Evolution was rolled back")
+                    log.info("Auto-failed feature %s after rollback", feature_id)
+                elif feature_id and not is_rollback:
+                    self._features_store.mark_implemented(
+                        feature_id,
+                        f"Auto-completed after deploy of evolution {deployed_evo_id}",
+                    )
+                    log.info("Auto-completed feature %s after deploy %s",
+                             feature_id, deployed_evo_id)
+        except Exception as e:
+            log.warning("Post-deploy feature cleanup failed: %s", e)
+
         def _on_queue_change():
             if not self.cron:
                 return
@@ -2456,45 +2486,6 @@ class GhostDaemon:
             self.cron.start()
             bootstrap_growth_cron(self.cron, self.cfg)
 
-        # Post-deploy cleanup: if Ghost just restarted after a successful
-        # evolve_deploy, auto-complete the specific feature whose evolution
-        # was deployed. Only trust the deploy_pending marker (written by
-        # evolve_deploy on success) — NOT the mere existence of backup files.
-        try:
-            in_progress = list(self._features_store.get_all("in_progress"))
-            if in_progress:
-                from ghost_evolve import DEPLOY_MARKER
-                if DEPLOY_MARKER.exists():
-                    import json as _json
-                    try:
-                        marker = _json.loads(DEPLOY_MARKER.read_text())
-                    except Exception as e:
-                        log.warning("Failed to read deploy marker: %s", e)
-                        marker = {}
-                    deployed_evo_id = marker.get("evolution_id", "")
-                    is_rollback = marker.get("rollback", False)
-
-                    if deployed_evo_id and not is_rollback:
-                        for feat in in_progress:
-                            if feat.get("evolution_id") == deployed_evo_id:
-                                self._features_store.mark_implemented(
-                                    feat["id"],
-                                    f"Auto-completed on restart after deploy of evolution {deployed_evo_id}",
-                                )
-                                console_bus.emit(
-                                    "success", "system", "feature_auto_complete",
-                                    f"Auto-completed feature {feat['id'][:10]} on restart",
-                                )
-                    elif is_rollback:
-                        for feat in in_progress:
-                            if feat.get("evolution_id") == deployed_evo_id.replace("rollback_", ""):
-                                self._features_store.mark_failed(
-                                    feat["id"],
-                                    "Evolution was rolled back",
-                                )
-        except Exception as e:
-            log.warning("Failed to process deploy marker: %s", e)
-
         console_bus.emit(
             "success", "system", "daemon_start",
             f"Ghost started — {len(self.tool_registry.names())} tools, "
@@ -2627,6 +2618,13 @@ class GhostDaemon:
                 self.check_actions()
                 if not getattr(self, "supervised", False) and deploy_marker.exists():
                     print(f"  {MAG}Deploy marker detected — restarting Ghost...{RST}")
+                    try:
+                        import json as _json
+                        _deploy_info = _json.loads(deploy_marker.read_text())
+                        _last_deploy = Path.home() / ".ghost" / "evolve" / "last_deploy.json"
+                        _last_deploy.write_text(_json.dumps(_deploy_info, indent=2))
+                    except Exception:
+                        pass
                     try:
                         deploy_marker.unlink()
                     except OSError:

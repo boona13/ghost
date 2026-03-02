@@ -358,6 +358,26 @@ class ReviewEngine:
             )},
         ]
 
+        # Inject rejection history so the reviewer can verify past issues were fixed
+        if pr.get("feature_id"):
+            try:
+                from ghost_future_features import FutureFeaturesStore
+                feat = FutureFeaturesStore().get_by_id(pr["feature_id"])
+                rejections = feat.get("pr_rejections", []) if feat else []
+                if rejections:
+                    history_text = "\n".join(
+                        f"- Attempt {r.get('attempt', i+1)}: {r.get('feedback', 'unknown')[:300]}"
+                        for i, r in enumerate(rejections[-3:])
+                    )
+                    messages.insert(2, {"role": "user", "content": (
+                        f"**REJECTION HISTORY** — This feature has been rejected "
+                        f"{len(rejections)} time(s) before. Previous feedback:\n"
+                        f"{history_text}\n\n"
+                        "Pay SPECIAL attention to whether these specific issues were fixed."
+                    )})
+            except Exception:
+                pass
+
         log.info("Review round 1/1 for PR %s", pr_id)
         reviewer_text = self._chat(engine, messages)
         if not reviewer_text:
