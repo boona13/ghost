@@ -1766,19 +1766,58 @@ def build_evolve_tools(cfg):
 
     _feature_cooldowns = {}
     _RETRY_COOLDOWN_S = 900  # 15 min between submit attempts for same feature
+    _COOLDOWN_WAIT_THRESHOLD_S = 300  # wait up to 5 min if cooldown is almost expired
+
+    def _preserve_evolution_on_cooldown(evolution_id, title, feature_id):
+        """Commit work on branch and preserve for next cycle when cooldown blocks submit."""
+        import ghost_git
+        evo = engine._active_evolutions.get(evolution_id)
+        if not evo:
+            return "Evolution not found — work may be lost."
+        branch = evo.get("git_branch")
+        if not branch:
+            return "No git branch — work may be lost."
+        try:
+            if ghost_git.current_branch() != branch:
+                ghost_git.checkout(branch)
+            ghost_git.commit(f"WIP: {title}")
+        except Exception:
+            pass
+        try:
+            ghost_git.stash_and_checkout("main")
+        except Exception:
+            pass
+        evo["status"] = "review_rejected"
+        evo["pr_id"] = evo.get("pr_id", "")
+        try:
+            from ghost_future_features import FutureFeaturesStore
+            if feature_id:
+                FutureFeaturesStore().mark_review_rejected(
+                    feature_id, "Cooldown blocked PR submission — work preserved on branch",
+                    max_retries=99,
+                    evolution_id=evolution_id,
+                    branch_name=branch,
+                    pr_id=evo.get("pr_id", ""))
+        except Exception:
+            pass
+        return (
+            f"COOLDOWN active but work PRESERVED on branch {branch}. "
+            "Call task_complete. Next cycle will use evolve_resume to submit "
+            "without rebuilding."
+        )
 
     def evolve_submit_pr_exec(evolution_id, title, description="",
                               feature_id=""):
         if feature_id and feature_id in _feature_cooldowns:
             elapsed = time.time() - _feature_cooldowns[feature_id]
-            if elapsed < _RETRY_COOLDOWN_S:
-                remaining_min = max(1, int((_RETRY_COOLDOWN_S - elapsed) / 60))
-                return (
-                    f"COOLDOWN: Feature {feature_id} was rejected {int(elapsed)}s ago. "
-                    f"~{remaining_min} min remaining before retry is allowed. "
-                    "Call task_complete NOW. The feature will be automatically "
-                    "re-attempted after cooldown with all rejection feedback accumulated."
-                )
+            remaining = _RETRY_COOLDOWN_S - elapsed
+            if remaining > 0:
+                if remaining <= _COOLDOWN_WAIT_THRESHOLD_S:
+                    log.info("Cooldown has %ds remaining — waiting before submit", int(remaining))
+                    time.sleep(remaining + 2)
+                else:
+                    return _preserve_evolution_on_cooldown(
+                        evolution_id, title, feature_id)
             del _feature_cooldowns[feature_id]
         ok, msg = engine.submit_pr(
             evolution_id, title, description,
@@ -1789,8 +1828,6 @@ def build_evolve_tools(cfg):
                 "PR APPROVED AND MERGED — deploy triggered. "
                 "You may now log this as a successful evolution."
             )
-        # Only set cooldown after an actual reviewer rejection, not pre-submit failures
-        # like "tests not passed" or "pre-submit validation failed"
         is_reviewer_rejection = "REJECTED" in msg or "BLOCKED" in msg
         if feature_id and is_reviewer_rejection:
             _feature_cooldowns[feature_id] = time.time()

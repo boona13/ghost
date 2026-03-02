@@ -698,7 +698,10 @@ class ReviewEngine:
             "4. Use grep_codebase to verify wiring and check for duplicates.\n"
             "5. Leave comments with leave_comment for each issue found.\n"
             "6. Use suggest_change when you can provide an exact fix.\n"
-            "7. When done, call submit_review with your verdict.\n"
+            "7. 🔴 MANDATORY: Call submit_review(verdict, summary) EXACTLY ONCE to end the review.\n"
+            "   Your verdict MUST be one of: APPROVE, REQUEST_CHANGES, or BLOCK.\n"
+            "   If you do NOT call submit_review, your review defaults to REQUEST_CHANGES.\n"
+            "   Never just write your verdict in text — you MUST use the submit_review tool.\n"
         )
         return context
 

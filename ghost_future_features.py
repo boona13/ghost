@@ -248,6 +248,7 @@ class FutureFeaturesStore:
 
         Returns (success: bool, error: str | None).
         Rejects if another feature is already in_progress, unless force=True.
+        Rejects if the feature is still in cooldown (retry_after not yet reached).
         """
         features = self._load()
 
@@ -262,6 +263,21 @@ class FutureFeaturesStore:
 
         for f in features:
             if f["id"] == feature_id:
+                retry_after = f.get("retry_after")
+                if retry_after and not force:
+                    try:
+                        cooldown_end = datetime.fromisoformat(retry_after)
+                        now = datetime.now()
+                        if cooldown_end > now:
+                            remaining_s = int((cooldown_end - now).total_seconds())
+                            remaining_min = max(1, remaining_s // 60)
+                            return False, (
+                                f"Feature is in cooldown (~{remaining_min} min remaining). "
+                                f"Pick a DIFFERENT feature from the list. This feature will "
+                                f"be available after {retry_after}."
+                            )
+                    except (ValueError, TypeError):
+                        pass
                 f["status"] = STATUS_IN_PROGRESS
                 f["updated_at"] = datetime.now().isoformat()
                 is_resume = bool(f.get("current_branch") and f.get("current_evolution_id"))
@@ -798,11 +814,13 @@ def build_future_features_tools(cfg, on_queue_change=None):
             if f.get("audit_notes"):
                 lines.append(f"Audit Notes: {f['audit_notes']}")
         if f.get("current_branch"):
-            lines.append(f"\n🔀 RESUME CONTEXT (fix-and-resubmit):")
+            lines.append(f"\n🔴🔴🔴 RESUME CONTEXT (fix-and-resubmit) — YOU MUST USE evolve_resume 🔴🔴🔴")
             lines.append(f"  Branch: {f.get('current_branch')}")
             lines.append(f"  Evolution ID: {f.get('current_evolution_id', 'unknown')}")
             lines.append(f"  PR ID: {f.get('current_pr_id', 'unknown')}")
             lines.append(f"  Review Round: {f.get('review_round', 0)}")
+            lines.append(f"  ACTION: Call start_future_feature THEN evolve_resume(evolution_id='{f.get('current_evolution_id')}')")
+            lines.append(f"  DO NOT call evolve_plan. DO NOT start fresh. Resume the existing branch.")
         if f.get("pr_rejections"):
             lines.append(f"\n⚠️  PAST PR REJECTIONS ({len(f['pr_rejections'])} total) — YOU MUST address ALL of these:")
             for i, rej in enumerate(f["pr_rejections"], 1):
