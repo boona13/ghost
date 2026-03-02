@@ -108,7 +108,6 @@ ghost_skill_manager.py          — Managed skill installation with validation
 ghost_projects.py               — Project management (create, update, resolve project contexts)
 
 # Knowledge & Content
-ghost_obsidian.py               — Obsidian vault integration (notes, daily notes, knowledge capture)
 ghost_canvas.py                 — Visual output panel for HTML/CSS/JS demos and dashboards
 
 # Webhooks & Integrations
@@ -151,7 +150,7 @@ ghost_implementation_auditor_filters.py — Audit deduplication and filtering lo
 # Dashboard
 ghost_dashboard/                — Flask web dashboard
   __init__.py                   — App factory, start_with_daemon(), stop_dashboard()
-  routes/                       — API blueprints (status, config, models, identity, skills, cron, memory, feed, daemon, evolve, chat, future_features, projects, obsidian, webhooks, voice, canvas, security, setup, etc.)
+  routes/                       — API blueprints (status, config, models, identity, skills, cron, memory, feed, daemon, evolve, chat, future_features, projects, webhooks, voice, canvas, security, setup, mcp, etc.)
   static/js/pages/              — Frontend page modules (one per dashboard tab)
   templates/                    — index.html (main SPA shell)
 

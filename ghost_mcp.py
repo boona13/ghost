@@ -1,948 +1,771 @@
 """
-Ghost Model Context Protocol (MCP) Support
+Ghost MCP (Model Context Protocol) Client
 
-Connects Ghost to MCP servers for tool discovery and execution.
-MCP is an open standard by Anthropic for AI model integration.
+MCP is an open protocol for extending AI capabilities with external tools.
+This module lets Ghost connect to MCP servers and use their tools.
 
-Features:
-- MCP client over stdio transport (JSON-RPC 2.0)
-- Tool discovery and execution
-- Resource reading from MCP servers
-- Config-driven server management
-- Async support with proper error handling
-
-Usage:
-    Servers are configured in ~/.ghost/config.json under 'mcp_servers'.
-    Tools are automatically discovered and registered with Ghost's tool registry.
+Security:
+- Process isolation via subprocess with separate process groups
+- Command validation preventing shell injection
+- Tool-level access control
+- Timeout protection
 """
 
 import json
 import logging
+import os
+import re
+import signal
 import subprocess
 import threading
 import time
-import uuid
-from dataclasses import dataclass, field, asdict
-from pathlib import Path
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
-from collections import defaultdict
 
 log = logging.getLogger("ghost.mcp")
+DEFAULT_MCP_TIMEOUT = 30.0
 
-GHOST_HOME = Path.home() / ".ghost"
-
-
-# JSON-RPC 2.0 helpers
-class JSONRPCError(Exception):
-    """JSON-RPC error response."""
-    def __init__(self, code: int, message: str, data: Any = None):
-        self.code = code
-        self.message = message
-        self.data = data
-        super().__init__(f"JSON-RPC Error {code}: {message}")
-
-
-def _jsonrpc_request(method: str, params: Optional[dict] = None, msg_id: Optional[str] = None) -> dict:
-    """Build a JSON-RPC request."""
-    return {
-        "jsonrpc": "2.0",
-        "method": method,
-        "params": params or {},
-        "id": msg_id or str(uuid.uuid4())
-    }
-
-
-def _jsonrpc_response(result: Any, msg_id: str) -> dict:
-    """Build a JSON-RPC success response."""
-    return {
-        "jsonrpc": "2.0",
-        "result": result,
-        "id": msg_id
-    }
-
-
-def _jsonrpc_error(code: int, message: str, msg_id: Optional[str] = None, data: Any = None) -> dict:
-    """Build a JSON-RPC error response."""
-    err = {"code": code, "message": message}
-    if data is not None:
-        err["data"] = data
-    return {
-        "jsonrpc": "2.0",
-        "error": err,
-        "id": msg_id
-    }
-
-
-# ═══════════════════════════════════════════════════════════════
-#  DATA MODELS
-# ═══════════════════════════════════════════════════════════════
 
 @dataclass
 class MCPServerConfig:
-    """Configuration for an MCP server connection."""
-    id: str
+    """Configuration for a single MCP server."""
     name: str
     command: str
     args: List[str] = field(default_factory=list)
     env: Dict[str, str] = field(default_factory=dict)
     enabled: bool = True
-    timeout_seconds: int = 30
-    auto_connect: bool = True
-    created_at: str = ""
-    
-    def to_dict(self) -> dict:
-        return asdict(self)
-    
+    timeout: float = DEFAULT_MCP_TIMEOUT
+    allowed_tools: Optional[List[str]] = None
+    blocked_tools: List[str] = field(default_factory=list)
+
     @classmethod
-    def from_dict(cls, d: dict) -> "MCPServerConfig":
-        required = {"id", "name", "command"}
-        missing = required - set(d.keys())
-        if missing:
-            raise ValueError(f"Missing required fields: {missing}")
-        known = {f.name for f in cls.__dataclass_fields__.values()}
-        return cls(**{k: v for k, v in d.items() if k in known})
+    def from_dict(cls, name: str, d: dict) -> "MCPServerConfig":
+        return cls(
+            name=name,
+            command=d.get("command", ""),
+            args=d.get("args", []),
+            env=d.get("env", {}),
+            enabled=d.get("enabled", True),
+            timeout=d.get("timeout", DEFAULT_MCP_TIMEOUT),
+            allowed_tools=d.get("allowed_tools"),
+            blocked_tools=d.get("blocked_tools", []),
+        )
+
+    def validate(self) -> tuple[bool, str]:
+        if not self.name or not re.match(r'^[a-zA-Z0-9_-]+$', self.name):
+            return False, f"Invalid server name: {self.name}"
+        if not self.command:
+            return False, "Command is required"
+        if re.search(r'[;&|`$(){}[\\]]', self.command):
+            return False, "Command contains forbidden characters"
+        return True, ""
 
 
 @dataclass
-class MCPTool:
-    """An MCP tool discovered from a server."""
-    name: str
-    description: str
-    input_schema: dict
-    server_id: str
-    
-    def to_dict(self) -> dict:
-        return asdict(self)
+class MCPConnection:
+    """Active connection to an MCP server."""
+    config: MCPServerConfig
+    process: subprocess.Popen
+    request_id: int = 0
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    tools_cache: Optional[List[Dict[str, Any]]] = None
+    connected_at: float = field(default_factory=time.time)
+    last_used: float = field(default_factory=time.time)
+
+    def is_alive(self) -> bool:
+        return self.process.poll() is None
 
 
-@dataclass 
-class MCPResource:
-    """An MCP resource discovered from a server."""
-    uri: str
-    name: str
-    description: str
-    mime_type: str
-    server_id: str
-    
-    def to_dict(self) -> dict:
-        return asdict(self)
+class MCPClientManager:
+    """Manages connections to MCP servers. Thread-safe.
 
-
-# ═══════════════════════════════════════════════════════════════
-#  MCP MANAGER
-# ═══════════════════════════════════════════════════════════════
-
-class MCPManager:
-    """Manages multiple MCP server connections."""
-    
-    def __init__(self, cfg: dict):
-        self.cfg = cfg
-        self._clients: Dict[str, MCPClient] = {}
-        self._lock = threading.RLock()
-        self._configs = self._load_configs()
-    
-    def _load_configs(self) -> List[MCPServerConfig]:
-        configs = []
-        for d in self.cfg.get("mcp_servers", []):
-            try:
-                configs.append(MCPServerConfig.from_dict(d))
-            except Exception as e:
-                log.error(f"Failed to load MCP server config: {e}")
-        return configs
-    
-    def start(self):
-        """Connect to all auto_connect servers."""
-        for config in self._configs:
-            if config.enabled and config.auto_connect:
-                self.connect_server(config.id)
-    
-    def get_server_configs(self) -> List[MCPServerConfig]:
-        return self._configs
-    
-    def connect_server(self, server_id: str) -> bool:
-        config = None
-        with self._lock:
-            if server_id in self._clients:
-                return True
-            config = next((c for c in self._configs if c.id == server_id), None)
-        
-        if not config:
-            log.error(f"MCP server '{server_id}' not found in config")
-            return False
-        
-        # Don't hold lock during I/O (subprocess spawn + JSON-RPC)
-        client = MCPClient(config)
-        if not client.connect():
-            return False
-        
-        with self._lock:
-            # Double-check: another thread may have connected while we waited
-            if server_id in self._clients:
-                client.disconnect()
-                return True
-            self._clients[server_id] = client
-            return True
-    
-    def disconnect_server(self, server_id: str):
-        with self._lock:
-            client = self._clients.pop(server_id, None)
-            if client:
-                client.disconnect()
-    
-    def list_tools(self, server_id=None) -> List[MCPTool]:
-        with self._lock:
-            if server_id:
-                client = self._clients.get(server_id)
-                return client.tools if client else []
-            return [tool for client in self._clients.values() for tool in client.tools]
-    
-    def call_tool(self, server_id: str, tool_name: str, arguments: dict) -> dict:
-        with self._lock:
-            client = self._clients.get(server_id)
-            if not client:
-                return {"content": [{"type": "text", "text": f"Server {server_id} not connected"}], "isError": True}
-        return client.call_tool(tool_name, arguments)
-    
-    def get_server_status(self, server_id: str) -> dict:
-        with self._lock:
-            client = self._clients.get(server_id)
-            config = next((c for c in self._configs if c.id == server_id), None)
-            return {
-                "id": server_id,
-                "connected": client.is_connected if client else False,
-                "enabled": config.enabled if config else False
-            }
-    
-    def get_all_server_statuses(self) -> List[dict]:
-        return [self.get_server_status(c.id) for c in self._configs]
-
-
-# ═══════════════════════════════════════════════════════════════
-#  TOOL BUILDERS
-# ═══════════════════════════════════════════════════════════════
-
-def build_mcp_tools(mcp_manager: MCPManager, cfg: dict) -> List[dict]:
-    """Build MCP tool definitions for Ghost's tool registry."""
-    if not mcp_manager:
-        return []
-    
-    tools = []
-    
-    def execute_list_servers(_=None, **kwargs):
-        return {"servers": [s.to_dict() for s in mcp_manager.get_server_configs()]}
-    
-    tools.append({
-        "name": "mcp_list_servers",
-        "description": "List configured MCP servers",
-        "parameters": {"type": "object", "properties": {}},
-        "execute": execute_list_servers
-    })
-    
-    def execute_list_tools(server_id=None, **kwargs):
-        return {"tools": [t.to_dict() for t in mcp_manager.list_tools(server_id)]}
-    
-    tools.append({
-        "name": "mcp_list_tools",
-        "description": "List available tools from connected MCP servers",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "server_id": {"type": "string", "description": "Optional server ID to filter by"}
-            }
-        },
-        "execute": execute_list_tools
-    })
-    
-    def execute_call_tool(server_id, tool_name, arguments=None, **kwargs):
-        return mcp_manager.call_tool(server_id, tool_name, arguments or {})
-    
-    tools.append({
-        "name": "mcp_call_tool",
-        "description": "Call an MCP tool by name on a specific server",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "server_id": {"type": "string", "description": "Server ID"},
-                "tool_name": {"type": "string", "description": "Name of the tool to call"},
-                "arguments": {"type": "object", "description": "Tool arguments"}
-            },
-            "required": ["server_id", "tool_name"]
-        },
-        "execute": execute_call_tool
-    })
-    
-    def execute_connect_server(server_id, **kwargs):
-        return {"success": mcp_manager.connect_server(server_id)}
-    
-    tools.append({
-        "name": "mcp_connect_server",
-        "description": "Connect to a specific MCP server",
-        "parameters": {
-            "type": "object",
-            "properties": {"server_id": {"type": "string"}},
-            "required": ["server_id"]
-        },
-        "execute": execute_connect_server
-    })
-    
-    def execute_disconnect_server(server_id, **kwargs):
-        mcp_manager.disconnect_server(server_id)
-        return {"success": True}
-    
-    tools.append({
-        "name": "mcp_disconnect_server",
-        "description": "Disconnect from a specific MCP server",
-        "parameters": {
-            "type": "object",
-            "properties": {"server_id": {"type": "string"}},
-            "required": ["server_id"]
-        },
-        "execute": execute_disconnect_server
-    })
-    
-    def execute_server_status(server_id=None, **kwargs):
-        if server_id:
-            return {"status": mcp_manager.get_server_status(server_id)}
-        return {"statuses": mcp_manager.get_all_server_statuses()}
-    
-    tools.append({
-        "name": "mcp_server_status",
-        "description": "Get connection status of MCP servers",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "server_id": {"type": "string", "description": "Optional specific server ID"}
-            }
-        },
-        "execute": execute_server_status
-    })
-    
-    return tools
-
-
-# ═══════════════════════════════════════════════════════════════
-#  MCP CLIENT (stdio transport)
-# ═══════════════════════════════════════════════════════════════
-
-class MCPClient:
+    Features:
+    - Auto-connect enabled servers on startup
+    - Background health monitor with auto-reconnect for dead servers
+    - Process isolation via subprocess with separate process groups
     """
-    MCP client connecting via stdio transport.
-    
-    Manages the subprocess connection and JSON-RPC communication.
-    Thread-safe for request/response handling.
-    """
-    
-    def __init__(self, config: MCPServerConfig):
-        self.config = config
-        self._process: Optional[subprocess.Popen] = None
-        self._lock = threading.RLock()
-        self._write_lock = threading.Lock()  # Protects stdin writes
-        self._pending: Dict[str, threading.Event] = {}
-        self._responses: Dict[str, dict] = {}
-        self._reader_thread: Optional[threading.Thread] = None
-        self._stderr_thread: Optional[threading.Thread] = None
-        self._running = False
-        self._connected = False
-        self._server_info: Optional[dict] = None
-        self._tools: List[MCPTool] = []
-        self._resources: List[MCPResource] = []
-    
-    @property
-    def is_connected(self) -> bool:
-        return self._connected and self._process is not None
-    
-    @property
-    def tools(self) -> List[MCPTool]:
-        return list(self._tools)
-    
-    @property
-    def resources(self) -> List[MCPResource]:
-        return list(self._resources)
-    
-    def connect(self, timeout: Optional[int] = None) -> bool:
-        """Start the MCP server process and initialize connection."""
-        if self._connected:
-            return True
-        
-        timeout = timeout or self.config.timeout_seconds
-        
-        try:
-            import os
-            env = dict(os.environ)
-            env.update(self.config.env)
-            
-            self._process = subprocess.Popen(
-                [self.config.command] + self.config.args,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
-                env=env
-            )
-            
-            self._running = True
-            self._reader_thread = threading.Thread(target=self._read_loop, daemon=True)
-            self._reader_thread.start()
-            self._stderr_thread = threading.Thread(target=self._stderr_loop, daemon=True)
-            self._stderr_thread.start()
-            
-            # Initialize with server
-            init_result = self._call_method("initialize", {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {
-                    "tools": {"listChanged": True},
-                    "resources": {"subscribe": False, "listChanged": True}
-                },
-                "clientInfo": {
-                    "name": "ghost",
-                    "version": "1.0.0"
-                }
-            }, timeout=timeout)
-            
-            if init_result:
-                self._server_info = init_result
-                self._connected = True
-                log.info(f"MCP server '{self.config.name}' initialized")
-                self._discover_capabilities()
-                return True
-            else:
-                log.error(f"MCP server '{self.config.name}' initialization failed")
-                self.disconnect()
-                return False
-                
-        except Exception as e:
-            log.error(f"Failed to connect to MCP server '{self.config.name}': {e}")
-            self.disconnect()
-            return False
-    
-    def disconnect(self):
-        """Close connection and cleanup."""
-        self._running = False
-        self._connected = False
-        
-        if self._process:
-            try:
-                self._process.terminate()
-                self._process.wait(timeout=5)
-            except (OSError, ProcessLookupError):
-                try:
-                    self._process.kill()
-                except (OSError, ProcessLookupError):
-                    pass
-            self._process = None
-        
-        with self._lock:
-            for event in self._pending.values():
-                event.set()
-            self._pending.clear()
-            self._responses.clear()
-        
-        log.info(f"MCP server '{self.config.name}' disconnected")
-    
-    def _stderr_loop(self):
-        """Background thread to drain stderr and prevent pipe buffer deadlock."""
-        if not self._process or not self._process.stderr:
-            return
-        try:
-            for line in iter(self._process.stderr.readline, ''):
-                if not line:
-                    break
-                log.debug(f"MCP server '{self.config.name}' stderr: {line.strip()}")
-        except Exception as e:
-            log.debug(f"MCP stderr read error: {e}")
-    
-    def _read_loop(self):
-        """Background thread to read responses from stdout."""
-        while self._running and self._process and self._process.poll() is None:
-            try:
-                line = self._process.stdout.readline()
-                if not line:
-                    time.sleep(0.01)
-                    continue
-                
-                try:
-                    msg = json.loads(line.strip())
-                    self._handle_message(msg)
-                except json.JSONDecodeError:
-                    log.debug(f"Invalid JSON from MCP server: {line[:100]}")
-                    
-            except Exception as e:
-                if self._running:
-                    log.debug(f"MCP read error: {e}")
-                time.sleep(0.1)
-    
-    def _handle_message(self, msg: dict):
-        """Handle incoming JSON-RPC message."""
-        msg_id = msg.get("id")
-        
-        if "result" in msg or "error" in msg:
-            with self._lock:
-                self._responses[msg_id] = msg
-                if msg_id in self._pending:
-                    self._pending[msg_id].set()
-        else:
-            log.debug(f"MCP notification: {msg.get('method')}")
-    
-    def _call_method(self, method: str, params: Optional[dict] = None, 
-                     timeout: Optional[int] = None) -> Optional[Any]:
-        """Call an MCP method and wait for response."""
-        if not self._process or self._process.poll() is not None:
-            return None
-        
-        msg_id = str(uuid.uuid4())
-        request = _jsonrpc_request(method, params, msg_id)
-        
-        event = threading.Event()
-        with self._lock:
-            self._pending[msg_id] = event
-        
-        try:
-            request_line = json.dumps(request) + "\n"
-            with self._write_lock:
-                if not self._process or self._process.poll() is not None:
-                    return None
-                self._process.stdin.write(request_line)
-                self._process.stdin.flush()
-            
-            timeout = timeout or self.config.timeout_seconds
-            if event.wait(timeout=timeout):
-                with self._lock:
-                    response = self._responses.pop(msg_id, None)
-                
-                if response is None:
-                    return None
-                
-                if "error" in response:
-                    err = response["error"]
-                    raise JSONRPCError(err.get("code", -1), err.get("message", "Unknown error"), err.get("data"))
-                
-                return response.get("result")
-            else:
-                log.warning(f"MCP method '{method}' timed out after {timeout}s")
-                return None
-                
-        except Exception as e:
-            log.error(f"MCP method '{method}' failed: {e}")
-            return None
-        finally:
-            with self._lock:
-                self._pending.pop(msg_id, None)
-    
-    def _discover_capabilities(self):
-        """Discover tools and resources from the server."""
-        try:
-            tools_result = self._call_method("tools/list")
-            if tools_result and "tools" in tools_result:
-                self._tools = [
-                    MCPTool(
-                        name=t.get("name", ""),
-                        description=t.get("description", ""),
-                        input_schema=t.get("inputSchema", {}),
-                        server_id=self.config.id
-                    )
-                    for t in tools_result["tools"]
-                ]
-                log.info(f"Discovered {len(self._tools)} tools from '{self.config.name}'")
-            
-            resources_result = self._call_method("resources/list")
-            if resources_result and "resources" in resources_result:
-                self._resources = [
-                    MCPResource(
-                        uri=r.get("uri", ""),
-                        name=r.get("name", ""),
-                        description=r.get("description", ""),
-                        mime_type=r.get("mimeType", "text/plain"),
-                        server_id=self.config.id
-                    )
-                    for r in resources_result["resources"]
-                ]
-                log.info(f"Discovered {len(self._resources)} resources from '{self.config.name}'")
-                
-        except Exception as e:
-            log.error(f"Failed to discover capabilities: {e}")
-    
-    def call_tool(self, tool_name: str, arguments: dict, timeout: Optional[int] = None) -> dict:
-        """Call an MCP tool with the given arguments."""
-        if not self._connected:
-            return {"content": [{"type": "text", "text": "MCP server not connected"}], "isError": True}
-        
-        try:
-            result = self._call_method("tools/call", {
-                "name": tool_name,
-                "arguments": arguments
-            }, timeout=timeout)
-            
-            if result is None:
-                return {"content": [{"type": "text", "text": "Tool call timed out"}], "isError": True}
-            
-            return result
-            
-        except JSONRPCError as e:
-            return {
-                "content": [{"type": "text", "text": f"MCP error: {e.message}"}],
-                "isError": True
-            }
-        except Exception as e:
-            return {
-                "content": [{"type": "text", "text": f"Error calling tool: {e}"}],
-                "isError": True
-            }
-    
-    def read_resource(self, uri: str) -> Optional[str]:
-        """Read an MCP resource by URI."""
-        if not self._connected:
-            return None
-        
-        try:
-            result = self._call_method("resources/read", {"uri": uri})
-            if result and "contents" in result:
-                contents = result["contents"]
-                if contents and len(contents) > 0:
-                    return contents[0].get("text", "")
-            return None
-        except Exception as e:
-            log.error(f"Failed to read resource '{uri}': {e}")
-            return None
 
+    HEALTH_CHECK_INTERVAL = 30.0  # seconds between health checks
+    MAX_RECONNECT_ATTEMPTS = 3
+    RECONNECT_BACKOFF = 5.0  # seconds between reconnect attempts
 
-# ═══════════════════════════════════════════════════════════════
-#  MCP MANAGER
-# ═══════════════════════════════════════════════════════════════
-
-class MCPManager:
-    """Manages multiple MCP server connections and tool aggregation."""
-    
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: Optional[Dict[str, Any]] = None, **kwargs):
         self.cfg = cfg or {}
-        self._clients: Dict[str, MCPClient] = {}
+        self._servers: Dict[str, MCPConnection] = {}
         self._lock = threading.RLock()
-        self._tool_index: Dict[str, MCPClient] = {}
+        self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="mcp_")
+        self._shutdown = False
         self._server_configs: Dict[str, MCPServerConfig] = {}
-        self._load_configs()
-    
-    def _load_configs(self):
-        """Load MCP server configs from config dict."""
-        servers = self.cfg.get("mcp_servers", [])
-        for s in servers:
-            config = MCPServerConfig.from_dict(s)
-            if not config.id:
-                config.id = str(uuid.uuid4())[:8]
-            self._server_configs[config.id] = config
-    
-    def start(self):
-        """Connect to all auto-connect enabled servers."""
-        for config in self._server_configs.values():
-            if config.enabled and config.auto_connect:
-                self.connect_server(config.id)
-    
-    def stop(self):
-        """Disconnect all servers."""
+        self._reconnect_attempts: Dict[str, int] = {}
+        self._monitor_thread: Optional[threading.Thread] = None
+        servers_cfg = self.cfg.get("mcp_servers", {})
+        for name, scfg in servers_cfg.items():
+            if isinstance(scfg, dict):
+                self._server_configs[name] = MCPServerConfig.from_dict(name, scfg)
+
+    def _validate_command(self, cmd: str) -> tuple[bool, str]:
+        if not cmd:
+            return False, "Empty command"
+        if re.search(r'[;&|`$(){}[\\]<>]', cmd):
+            return False, "Command contains shell metacharacters"
+        if not re.match(r'^[a-zA-Z0-9_./\\~-]+$', cmd):
+            return False, "Invalid characters in command"
+        return True, ""
+
+    def connect(self, server_name: str, config_override: Optional[Dict[str, Any]] = None, **kwargs) -> Future:
+        future = Future()
+
+        def _do_connect():
+            try:
+                with self._lock:
+                    if self._shutdown:
+                        future.set_result({"ok": False, "error": "MCP manager is shut down"})
+                        return
+                    if server_name in self._servers:
+                        self._disconnect_one(server_name)
+
+                if config_override:
+                    config = MCPServerConfig.from_dict(server_name, config_override)
+                elif server_name in self._server_configs:
+                    config = self._server_configs[server_name]
+                else:
+                    future.set_result({"ok": False, "error": f"Unknown server: {server_name}"})
+                    return
+
+                valid, err = config.validate()
+                if not valid:
+                    future.set_result({"ok": False, "error": err})
+                    return
+
+                cmd_valid, cmd_err = self._validate_command(config.command)
+                if not cmd_valid:
+                    future.set_result({"ok": False, "error": f"Command validation failed: {cmd_err}"})
+                    return
+
+                env = os.environ.copy()
+                env.update(config.env)
+                cmd_list = [config.command] + config.args
+                log.info(f"Starting MCP server \'{server_name}\': {' '.join(cmd_list)}")
+
+                try:
+                    process = subprocess.Popen(
+                        cmd_list,
+                        stdin=subprocess.PIPE,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        env=env,
+                        start_new_session=True,
+                    )
+                except FileNotFoundError:
+                    future.set_result({"ok": False, "error": f"Command not found: {config.command}"})
+                    return
+                except PermissionError:
+                    future.set_result({"ok": False, "error": f"Permission denied: {config.command}"})
+                    return
+
+                conn = MCPConnection(config=config, process=process)
+                with self._lock:
+                    self._servers[server_name] = conn
+
+                init_result = self._send_request(conn, "initialize", {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "Ghost", "version": "1.0.0"},
+                }, timeout=config.timeout)
+
+                if not init_result.get("ok"):
+                    self._disconnect_one(server_name)
+                    future.set_result({"ok": False, "error": f"Initialize failed: {init_result.get('error', 'unknown')}"})
+                    return
+
+                tools_result = self._send_request(conn, "tools/list", {}, timeout=config.timeout)
+                if tools_result.get("ok"):
+                    conn.tools_cache = tools_result.get("result", {}).get("tools", [])
+
+                log.info(f"MCP server \'{server_name}\' connected with {len(conn.tools_cache or [])} tools")
+
+                future.set_result({
+                    "ok": True,
+                    "tools": conn.tools_cache or [],
+                    "server": server_name,
+                })
+
+            except Exception as e:
+                log.exception(f"Error connecting to MCP server {server_name}")
+                future.set_result({"ok": False, "error": str(e)})
+
+        self._executor.submit(_do_connect)
+        return future
+
+    def _send_request(self, conn, method: str, params: Dict[str, Any], timeout: float = 30.0) -> Dict[str, Any]:
+        with conn.lock:
+            if not conn.is_alive():
+                return {"ok": False, "error": "Server process is not running"}
+            conn.request_id += 1
+            req_id = conn.request_id
+
+        request = {"jsonrpc": "2.0", "id": req_id, "method": method, "params": params}
+        request_line = json.dumps(request) + "\n"
+
+        try:
+            if conn.process.stdin is None:
+                return {"ok": False, "error": "Server stdin is closed"}
+            conn.process.stdin.write(request_line)
+            conn.process.stdin.flush()
+        except BrokenPipeError:
+            return {"ok": False, "error": "Server process closed stdin (broken pipe)"}
+        except OSError as e:
+            return {"ok": False, "error": f"IO error: {e}"}
+
+        conn.last_used = time.time()
+        start_time = time.time()
+
+        try:
+            while time.time() - start_time < timeout:
+                if conn.process.stdout is None:
+                    return {"ok": False, "error": "Server stdout is closed"}
+                import select
+                ready, _, _ = select.select([conn.process.stdout], [], [], 0.5)
+                if not ready:
+                    if not conn.is_alive():
+                        return {"ok": False, "error": "Server process died"}
+                    continue
+                line = conn.process.stdout.readline()
+                if not line:
+                    if not conn.is_alive():
+                        return {"ok": False, "error": "Server process died"}
+                    continue
+                try:
+                    response = json.loads(line)
+                    if response.get("id") == req_id:
+                        if "error" in response:
+                            return {"ok": False, "error": response["error"]}
+                        return {"ok": True, "result": response.get("result", {})}
+                except json.JSONDecodeError:
+                    log.warning(f"Invalid JSON from MCP server: {line[:200]}")
+                    continue
+            return {"ok": False, "error": f"Timeout after {timeout}s"}
+        except Exception as e:
+            log.exception("Error reading MCP response")
+            return {"ok": False, "error": f"Read error: {e}"}
+
+    def _disconnect_one(self, server_name: str) -> None:
+        if server_name not in self._servers:
+            return
+        conn = self._servers.pop(server_name)
+        log.info(f"Disconnecting MCP server \'{server_name}\'")
+        try:
+            if conn.is_alive() and conn.process.stdin:
+                try:
+                    conn.process.stdin.write(json.dumps({"jsonrpc": "2.0", "id": 9999, "method": "shutdown"}) + "\n")
+                    conn.process.stdin.flush()
+                    conn.process.stdin.close()
+                except (BrokenPipeError, OSError):
+                    pass
+            time.sleep(0.1)
+            if conn.is_alive():
+                try:
+                    conn.process.terminate()
+                    conn.process.wait(timeout=2.0)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(os.getpgid(conn.process.pid), signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    try:
+                        conn.process.kill()
+                        conn.process.wait(timeout=1.0)
+                    except Exception:
+                        pass
+        except Exception as e:
+            log.warning(f"Error disconnecting {server_name}: {e}")
+
+    def disconnect(self, server_name: str, **kwargs) -> Future:
+        future = Future()
+        def _do_disconnect():
+            try:
+                with self._lock:
+                    self._disconnect_one(server_name)
+                future.set_result({"ok": True})
+            except Exception as e:
+                future.set_result({"ok": False, "error": str(e)})
+        self._executor.submit(_do_disconnect)
+        return future
+
+    def list_servers(self, **kwargs) -> List[Dict[str, Any]]:
         with self._lock:
-            for client in list(self._clients.values()):
-                client.disconnect()
-            self._clients.clear()
-            self._tool_index.clear()
-    
-    def connect_server(self, server_id: str) -> bool:
-        """Connect to a specific server by ID."""
-        config = self._server_configs.get(server_id)
-        if not config:
-            log.error(f"MCP server config not found: {server_id}")
-            return False
-        
-        with self._lock:
-            if server_id in self._clients:
-                self._clients[server_id].disconnect()
-            
-            client = MCPClient(config)
-            if client.connect():
-                self._clients[server_id] = client
-                
-                # Index tools
-                for tool in client.tools:
-                    full_name = f"{config.name}.{tool.name}"
-                    self._tool_index[full_name] = client
-                    self._tool_index[tool.name] = client
-                
-                return True
-            return False
-    
-    def disconnect_server(self, server_id: str):
-        """Disconnect a specific server."""
-        with self._lock:
-            if server_id in self._clients:
-                client = self._clients.pop(server_id)
-                
-                # Remove tools from index
-                for tool in client.tools:
-                    full_name = f"{client.config.name}.{tool.name}"
-                    self._tool_index.pop(full_name, None)
-                    self._tool_index.pop(tool.name, None)
-                
-                client.disconnect()
-    
-    def get_server_status(self, server_id: str) -> dict:
-        """Get status of a specific server."""
-        config = self._server_configs.get(server_id)
-        if not config:
-            return {"error": "Server not found"}
-        
-        with self._lock:
-            client = self._clients.get(server_id)
-            is_connected = client.is_connected if client else False
-            
-            return {
-                "id": server_id,
-                "name": config.name,
-                "enabled": config.enabled,
-                "connected": is_connected,
-                "tool_count": len(client.tools) if client else 0,
-                "resource_count": len(client.resources) if client else 0,
-            }
-    
-    def get_all_tools(self) -> List[dict]:
-        """Get all available tools from all connected servers."""
-        tools = []
-        with self._lock:
-            for client in self._clients.values():
-                for tool in client.tools:
-                    tools.append({
-                        "name": f"{client.config.name}.{tool.name}",
-                        "original_name": tool.name,
-                        "description": tool.description,
-                        "input_schema": tool.input_schema,
-                        "server_id": client.config.id,
-                        "server_name": client.config.name,
-                    })
-        return tools
-    
-    def call_tool(self, tool_name: str, arguments: dict, timeout: Optional[int] = None) -> dict:
-        """Call a tool by name (can be simple name or server.name format)."""
-        with self._lock:
-            client = self._tool_index.get(tool_name)
-            if not client:
-                return {
-                    "content": [{"type": "text", "text": f"Tool '{tool_name}' not found"}],
-                    "isError": True
+            result = []
+            for name, config in self._server_configs.items():
+                conn = self._servers.get(name)
+                alive = conn is not None and conn.is_alive()
+                entry = {
+                    "name": name,
+                    "enabled": config.enabled,
+                    "connected": alive,
+                    "tool_count": len(conn.tools_cache) if conn and conn.tools_cache else 0,
+                    "command": config.command,
+                    "args": config.args,
                 }
-            
-            # Extract simple tool name if full name was used
-            simple_name = tool_name
-            if "." in tool_name:
-                simple_name = tool_name.split(".", 1)[1]
-            
-            return client.call_tool(simple_name, arguments, timeout)
-    
-    def add_server(self, config: MCPServerConfig) -> bool:
-        """Add a new server config."""
-        if not config.id:
-            config.id = str(uuid.uuid4())[:8]
-        self._server_configs[config.id] = config
-        return True
-    
-    def remove_server(self, server_id: str) -> bool:
-        """Remove a server config and disconnect if connected."""
-        self.disconnect_server(server_id)
-        if server_id in self._server_configs:
-            del self._server_configs[server_id]
-            return True
-        return False
-    
-    def update_server(self, server_id: str, updates: dict) -> bool:
-        """Update a server config."""
-        if server_id not in self._server_configs:
+                if conn:
+                    entry["connected_at"] = conn.connected_at
+                    entry["last_used"] = conn.last_used
+                    entry["idle_seconds"] = round(time.time() - conn.last_used, 1)
+                    entry["request_count"] = conn.request_id
+                result.append(entry)
+            return result
+
+    def list_tools(self, server_name: Optional[str] = None, **kwargs) -> Future:
+        future = Future()
+        def _do_list():
+            try:
+                with self._lock:
+                    if server_name:
+                        conn = self._servers.get(server_name)
+                        if not conn:
+                            future.set_result({"ok": False, "error": f"Server not connected: {server_name}"})
+                            return
+                        if not conn.is_alive():
+                            future.set_result({"ok": False, "error": f"Server not running: {server_name}"})
+                            return
+                        tools_result = self._send_request(conn, "tools/list", {}, timeout=conn.config.timeout)
+                        if tools_result.get("ok"):
+                            conn.tools_cache = tools_result.get("result", {}).get("tools", [])
+                            future.set_result({"ok": True, "tools": conn.tools_cache, "server": server_name})
+                        else:
+                            future.set_result(tools_result)
+                    else:
+                        all_tools = []
+                        for name, conn in self._servers.items():
+                            if conn.is_alive():
+                                tools_result = self._send_request(conn, "tools/list", {}, timeout=conn.config.timeout)
+                                if tools_result.get("ok"):
+                                    tools = tools_result.get("result", {}).get("tools", [])
+                                    conn.tools_cache = tools
+                                    for t in tools:
+                                        t["_server"] = name
+                                    all_tools.extend(tools)
+                        future.set_result({"ok": True, "tools": all_tools})
+            except Exception as e:
+                log.exception("Error listing MCP tools")
+                future.set_result({"ok": False, "error": str(e)})
+        self._executor.submit(_do_list)
+        return future
+
+    def _is_tool_allowed(self, conn, tool_name: str) -> bool:
+        config = conn.config
+        if tool_name in config.blocked_tools:
             return False
-        
-        config = self._server_configs[server_id]
-        for key, value in updates.items():
-            if hasattr(config, key):
-                setattr(config, key, value)
-        
+        if config.allowed_tools is not None:
+            return tool_name in config.allowed_tools
         return True
-    
-    def get_server_configs(self) -> List[dict]:
-        """Get all server configs."""
-        return [c.to_dict() for c in self._server_configs.values()]
+
+    def call_tool(self, server_name: str, tool_name: str, arguments: Dict[str, Any], **kwargs) -> Future:
+        future = Future()
+        def _do_call():
+            try:
+                with self._lock:
+                    conn = self._servers.get(server_name)
+                    if not conn:
+                        future.set_result({"ok": False, "error": f"Server not connected: {server_name}"})
+                        return
+                    if not conn.is_alive():
+                        future.set_result({"ok": False, "error": f"Server not running: {server_name}"})
+                        return
+                    if not self._is_tool_allowed(conn, tool_name):
+                        future.set_result({"ok": False, "error": f"Tool \'{tool_name}\' is not allowed"})
+                        return
+                result = self._send_request(conn, "tools/call", {"name": tool_name, "arguments": arguments}, timeout=conn.config.timeout)
+                future.set_result(result)
+            except Exception as e:
+                log.exception(f"Error calling MCP tool {tool_name}")
+                future.set_result({"ok": False, "error": str(e)})
+        self._executor.submit(_do_call)
+        return future
+
+    def add_server(self, name: str, config_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """Add a new server config at runtime. Does NOT persist to config.json."""
+        config = MCPServerConfig.from_dict(name, config_dict)
+        valid, err = config.validate()
+        if not valid:
+            return {"ok": False, "error": err}
+        with self._lock:
+            self._server_configs[name] = config
+        log.info(f"Added MCP server config '{name}'")
+        return {"ok": True, "server": name}
+
+    def remove_server(self, name: str) -> Dict[str, Any]:
+        """Remove a server config and disconnect if connected."""
+        with self._lock:
+            if name not in self._server_configs:
+                return {"ok": False, "error": f"Unknown server: {name}"}
+            self._disconnect_one(name)
+            del self._server_configs[name]
+            self._reconnect_attempts.pop(name, None)
+        log.info(f"Removed MCP server config '{name}'")
+        return {"ok": True, "server": name}
+
+    def auto_connect(self) -> Dict[str, Any]:
+        """Connect all enabled servers. Called on daemon startup."""
+        results = {}
+        enabled = [
+            name for name, cfg in self._server_configs.items()
+            if cfg.enabled
+        ]
+        if not enabled:
+            log.info("No enabled MCP servers to auto-connect")
+            return results
+
+        log.info(f"Auto-connecting {len(enabled)} MCP server(s): {', '.join(enabled)}")
+        futures = {}
+        for name in enabled:
+            futures[name] = self.connect(name)
+
+        for name, future in futures.items():
+            try:
+                result = future.result(timeout=60.0)
+                results[name] = result
+                if result.get("ok"):
+                    tool_count = len(result.get("tools", []))
+                    log.info(f"  [mcp] Auto-connected '{name}' ({tool_count} tools)")
+                    self._reconnect_attempts[name] = 0
+                else:
+                    log.warning(f"  [mcp] Auto-connect failed for '{name}': {result.get('error')}")
+            except Exception as e:
+                results[name] = {"ok": False, "error": str(e)}
+                log.warning(f"  [mcp] Auto-connect error for '{name}': {e}")
+
+        return results
+
+    def health_check(self) -> Dict[str, Any]:
+        """Check health of all connected servers. Returns per-server status."""
+        report = {}
+        with self._lock:
+            for name, conn in list(self._servers.items()):
+                alive = conn.is_alive()
+                idle_seconds = time.time() - conn.last_used
+                report[name] = {
+                    "alive": alive,
+                    "connected_at": conn.connected_at,
+                    "last_used": conn.last_used,
+                    "idle_seconds": round(idle_seconds, 1),
+                    "tool_count": len(conn.tools_cache) if conn.tools_cache else 0,
+                    "request_count": conn.request_id,
+                }
+
+            for name, cfg in self._server_configs.items():
+                if name not in report and cfg.enabled:
+                    report[name] = {
+                        "alive": False,
+                        "connected_at": None,
+                        "last_used": None,
+                        "idle_seconds": None,
+                        "tool_count": 0,
+                        "request_count": 0,
+                        "note": "enabled but not connected",
+                    }
+        return report
+
+    def reconnect_dead(self) -> Dict[str, Any]:
+        """Reconnect servers that were connected but whose process died."""
+        reconnected = {}
+        with self._lock:
+            dead_servers = [
+                name for name, conn in self._servers.items()
+                if not conn.is_alive()
+            ]
+
+        for name in dead_servers:
+            attempts = self._reconnect_attempts.get(name, 0)
+            if attempts >= self.MAX_RECONNECT_ATTEMPTS:
+                log.warning(f"[mcp] Giving up reconnecting '{name}' after {attempts} attempts")
+                reconnected[name] = {"ok": False, "error": "max reconnect attempts reached"}
+                continue
+
+            self._reconnect_attempts[name] = attempts + 1
+            log.info(f"[mcp] Reconnecting dead server '{name}' (attempt {attempts + 1}/{self.MAX_RECONNECT_ATTEMPTS})")
+
+            with self._lock:
+                self._disconnect_one(name)
+
+            try:
+                future = self.connect(name)
+                result = future.result(timeout=60.0)
+                reconnected[name] = result
+                if result.get("ok"):
+                    self._reconnect_attempts[name] = 0
+                    log.info(f"[mcp] Reconnected '{name}' successfully")
+                else:
+                    log.warning(f"[mcp] Reconnect failed for '{name}': {result.get('error')}")
+            except Exception as e:
+                reconnected[name] = {"ok": False, "error": str(e)}
+                log.warning(f"[mcp] Reconnect error for '{name}': {e}")
+
+        return reconnected
+
+    def start_monitor(self) -> None:
+        """Start background health monitor thread."""
+        if self._monitor_thread and self._monitor_thread.is_alive():
+            return
+        self._monitor_thread = threading.Thread(
+            target=self._monitor_loop,
+            name="mcp_health_monitor",
+            daemon=True,
+        )
+        self._monitor_thread.start()
+        log.info("MCP health monitor started")
+
+    def _monitor_loop(self) -> None:
+        """Background loop: periodically check health and reconnect dead servers."""
+        while not self._shutdown:
+            time.sleep(self.HEALTH_CHECK_INTERVAL)
+            if self._shutdown:
+                break
+            try:
+                with self._lock:
+                    dead = [
+                        name for name, conn in self._servers.items()
+                        if not conn.is_alive()
+                    ]
+                if dead:
+                    log.info(f"[mcp] Health monitor detected {len(dead)} dead server(s): {', '.join(dead)}")
+                    self.reconnect_dead()
+            except Exception as e:
+                log.warning(f"[mcp] Health monitor error: {e}")
+
+    def shutdown(self, **kwargs) -> None:
+        log.info("Shutting down MCP client manager")
+        self._shutdown = True
+        if self._monitor_thread and self._monitor_thread.is_alive():
+            self._monitor_thread.join(timeout=5.0)
+        with self._lock:
+            for name in list(self._servers.keys()):
+                self._disconnect_one(name)
+        self._executor.shutdown(wait=True)
+        log.info("MCP client manager shut down complete")
 
 
-# ═══════════════════════════════════════════════════════════════
-#  TOOL BUILDER
-# ═══════════════════════════════════════════════════════════════
+def build_mcp_tools(cfg: Dict[str, Any], mcp_manager: Optional["MCPClientManager"] = None, **kwargs):
+    """Build MCP tool definitions for Ghost daemon."""
+    if mcp_manager is None:
+        mcp_manager = MCPClientManager(cfg)
 
-def build_mcp_tools(mcp_manager: Optional[MCPManager] = None, cfg: dict = None):
-    """
-    Build Ghost tool definitions for MCP integration.
-    
-    Returns list of tool dicts that can be registered with Ghost's tool registry.
-    """
+    def _result_from_future(future, timeout: float = 30.0):
+        try:
+            return future.result(timeout=timeout)
+        except TimeoutError:
+            return {"ok": False, "error": "Operation timed out"}
+
+    def _list_tools_filtered(mcp_mgr, server_name: Optional[str] = None):
+        """List tools with filtering applied."""
+        result = _result_from_future(mcp_mgr.list_tools(server_name))
+        if not result.get("ok"):
+            return result
+        tools = result.get("tools", [])
+        if server_name:
+            conn = mcp_mgr._servers.get(server_name)
+            if conn:
+                filtered = []
+                for t in tools:
+                    name = t.get("name", "")
+                    if mcp_mgr._is_tool_allowed(conn, name):
+                        filtered.append(t)
+                result["tools"] = filtered
+        return result
+
     tools = []
-    
-    # Tool: List MCP servers
-    def execute_list_servers():
-        if not mcp_manager:
-            return {"error": "MCP manager not available"}
-        return {"servers": mcp_manager.get_server_configs()}
-    
+
     tools.append({
-        "name": "mcp_list_servers",
-        "description": "List all configured MCP servers with their connection status.",
-        "parameters": {
-            "type": "object",
-            "properties": {},
-            "required": []
-        },
-        "execute": lambda **kwargs: execute_list_servers()
-    })
-    
-    # Tool: List available MCP tools
-    def execute_list_tools():
-        if not mcp_manager:
-            return {"error": "MCP manager not available"}
-        return {"tools": mcp_manager.get_all_tools()}
-    
-    tools.append({
-        "name": "mcp_list_tools",
-        "description": "List all available tools from connected MCP servers.",
-        "parameters": {
-            "type": "object",
-            "properties": {},
-            "required": []
-        },
-        "execute": lambda **kwargs: execute_list_tools()
-    })
-    
-    # Tool: Call MCP tool
-    def execute_call_tool(tool_name: str, arguments: dict = None, timeout: int = 30):
-        if not mcp_manager:
-            return {"error": "MCP manager not available"}
-        
-        result = mcp_manager.call_tool(tool_name, arguments or {}, timeout)
-        
-        # Format content for display
-        content_parts = result.get("content", [])
-        text_parts = []
-        for part in content_parts:
-            if part.get("type") == "text":
-                text_parts.append(part.get("text", ""))
-        
-        return {
-            "result": "\\n".join(text_parts),
-            "is_error": result.get("isError", False)
-        }
-    
-    tools.append({
-        "name": "mcp_call_tool",
-        "description": (
-            "Call a tool from an MCP server. Use mcp_list_tools first to see available tools. "
-            "Tool names can be in format 'server.toolname' or just 'toolname'."
-        ),
+        "name": "mcp_connect",
+        "description": "Connect to an MCP (Model Context Protocol) server. MCP servers provide external tools like filesystem access, browser automation, database queries, etc. Example: mcp_connect with server_name='filesystem' to connect to a configured filesystem MCP server.",
         "parameters": {
             "type": "object",
             "properties": {
+                "server_name": {
+                    "type": "string",
+                    "description": "Name of the MCP server to connect to (must be configured in config)"
+                },
+                "config_override": {
+                    "type": "object",
+                    "description": "Optional: override configuration. Keys: command, args (list), env (dict), timeout (number), allowed_tools (list), blocked_tools (list)"
+                }
+            },
+            "required": ["server_name"]
+        },
+        "execute": lambda server_name, config_override=None, **kw: _result_from_future(
+            mcp_manager.connect(server_name, config_override, **kw)
+        )
+    })
+
+    tools.append({
+        "name": "mcp_disconnect",
+        "description": "Disconnect from an MCP server and terminate its process.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "server_name": {
+                    "type": "string",
+                    "description": "Name of the MCP server to disconnect from"
+                }
+            },
+            "required": ["server_name"]
+        },
+        "execute": lambda server_name, **kw: _result_from_future(mcp_manager.disconnect(server_name, **kw))
+    })
+
+    tools.append({
+        "name": "mcp_list_servers",
+        "description": "List all configured MCP servers and their connection status. Returns server names, whether they're enabled, connected, and how many tools each provides.",
+        "parameters": {"type": "object", "properties": {}},
+        "execute": lambda **kw: mcp_manager.list_servers(**kw)
+    })
+
+    tools.append({
+        "name": "mcp_list_tools",
+        "description": "List available tools from connected MCP servers. If server_name is provided, lists only tools from that server. Otherwise lists tools from all connected servers. Tools returned include name, description, and input schema.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "server_name": {
+                    "type": "string",
+                    "description": "Optional: specific server to list tools from. If omitted, lists tools from all connected servers."
+                }
+            }
+        },
+        "execute": lambda server_name=None, **kw: _list_tools_filtered(mcp_manager, server_name)
+    })
+
+    tools.append({
+        "name": "mcp_call_tool",
+        "description": "Call a tool on an MCP server. The tool must be from a connected server and must be in the allowed list (or not in the blocked list). Returns the tool's output.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "server_name": {
+                    "type": "string",
+                    "description": "Name of the MCP server that provides this tool"
+                },
                 "tool_name": {
                     "type": "string",
-                    "description": "Name of the tool to call (format: 'server.toolname' or just 'toolname')"
+                    "description": "Name of the tool to call"
                 },
                 "arguments": {
                     "type": "object",
-                    "description": "Arguments to pass to the tool"
-                },
-                "timeout": {
-                    "type": "integer",
-                    "description": "Timeout in seconds",
-                    "default": 30
+                    "description": "Arguments to pass to the tool (must match the tool's input schema)"
                 }
             },
-            "required": ["tool_name"]
+            "required": ["server_name", "tool_name", "arguments"]
         },
-        "execute": lambda **kwargs: execute_call_tool(
-            kwargs.get("tool_name"),
-            kwargs.get("arguments"),
-            kwargs.get("timeout", 30)
+        "execute": lambda server_name, tool_name, arguments, **kw: _result_from_future(
+            mcp_manager.call_tool(server_name, tool_name, arguments, **kw)
         )
     })
-    
-    # Tool: Connect to MCP server
-    def execute_connect_server(server_id: str):
-        if not mcp_manager:
-            return {"error": "MCP manager not available"}
-        
-        success = mcp_manager.connect_server(server_id)
-        if success:
-            status = mcp_manager.get_server_status(server_id)
-            return {"success": True, "status": status}
-        return {"success": False, "error": f"Failed to connect to server {server_id}"}
-    
+
+    def _add_server(name, command, args=None, env=None, enabled=True,
+                    timeout=30, allowed_tools=None, blocked_tools=None,
+                    auto_connect=True, **kw):
+        server_cfg = {
+            "command": command,
+            "args": args or [],
+            "env": env or {},
+            "enabled": enabled,
+            "timeout": timeout,
+            "allowed_tools": allowed_tools,
+            "blocked_tools": blocked_tools or [],
+        }
+        result = mcp_manager.add_server(name, server_cfg)
+        if not result.get("ok"):
+            return result
+
+        try:
+            from ghost import load_config, save_config
+            cfg_data = load_config()
+            if "mcp_servers" not in cfg_data:
+                cfg_data["mcp_servers"] = {}
+            cfg_data["mcp_servers"][name] = server_cfg
+            save_config(cfg_data)
+        except Exception as e:
+            log.warning(f"Failed to persist MCP server '{name}' to config: {e}")
+
+        if auto_connect and enabled:
+            connect_result = _result_from_future(mcp_manager.connect(name))
+            result["connect_result"] = connect_result
+        return result
+
     tools.append({
-        "name": "mcp_connect_server",
-        "description": "Connect to a specific MCP server by its ID.",
+        "name": "mcp_add_server",
+        "description": "Add a new MCP server configuration and optionally connect to it. "
+            "The server is persisted to Ghost's config so it survives restarts. "
+            "Use this to integrate new external tools from MCP-compatible servers. "
+            "Example: mcp_add_server(name='filesystem', command='npx', args=['-y', '@modelcontextprotocol/server-filesystem', '/tmp'])",
         "parameters": {
             "type": "object",
             "properties": {
-                "server_id": {
+                "name": {
                     "type": "string",
-                    "description": "The ID of the MCP server to connect"
+                    "description": "Unique name for this server (alphanumeric, hyphens, underscores)"
+                },
+                "command": {
+                    "type": "string",
+                    "description": "Command to start the MCP server (e.g. 'npx', 'node', 'python')"
+                },
+                "args": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Command arguments (e.g. ['-y', '@modelcontextprotocol/server-filesystem', '/tmp'])"
+                },
+                "env": {
+                    "type": "object",
+                    "description": "Optional environment variables for the server process"
+                },
+                "enabled": {
+                    "type": "boolean",
+                    "description": "Whether the server is enabled (default: true)"
+                },
+                "timeout": {
+                    "type": "number",
+                    "description": "Request timeout in seconds (default: 30)"
+                },
+                "auto_connect": {
+                    "type": "boolean",
+                    "description": "Connect immediately after adding (default: true)"
                 }
             },
-            "required": ["server_id"]
+            "required": ["name", "command"]
         },
-        "execute": lambda **kwargs: execute_connect_server(kwargs.get("server_id"))
+        "execute": _add_server
     })
-    
-    # Tool: Disconnect from MCP server
-    def execute_disconnect_server(server_id: str):
-        if not mcp_manager:
-            return {"error": "MCP manager not available"}
-        
-        mcp_manager.disconnect_server(server_id)
-        return {"success": True, "message": f"Disconnected from server {server_id}"}
-    
+
+    def _remove_server(name, **kw):
+        result = mcp_manager.remove_server(name)
+        if result.get("ok"):
+            try:
+                from ghost import load_config, save_config
+                cfg_data = load_config()
+                mcp_servers = cfg_data.get("mcp_servers", {})
+                if name in mcp_servers:
+                    del mcp_servers[name]
+                    cfg_data["mcp_servers"] = mcp_servers
+                    save_config(cfg_data)
+            except Exception as e:
+                log.warning(f"Failed to remove MCP server '{name}' from config: {e}")
+        return result
+
     tools.append({
-        "name": "mcp_disconnect_server",
-        "description": "Disconnect from a specific MCP server by its ID.",
+        "name": "mcp_remove_server",
+        "description": "Remove an MCP server. Disconnects if connected and removes from config permanently.",
         "parameters": {
             "type": "object",
             "properties": {
-                "server_id": {
+                "name": {
                     "type": "string",
-                    "description": "The ID of the MCP server to disconnect"
+                    "description": "Name of the MCP server to remove"
                 }
             },
-            "required": ["server_id"]
+            "required": ["name"]
         },
-        "execute": lambda **kwargs: execute_disconnect_server(kwargs.get("server_id"))
+        "execute": _remove_server
     })
-    
-    # Tool: Get server status
-    def execute_server_status(server_id: str = None):
-        if not mcp_manager:
-            return {"error": "MCP manager not available"}
-        
-        if server_id:
-            return {"status": mcp_manager.get_server_status(server_id)}
-        else:
-            # Get status for all servers
-            configs = mcp_manager.get_server_configs()
-            statuses = {}
-            for cfg in configs:
-                statuses[cfg["id"]] = mcp_manager.get_server_status(cfg["id"])
-            return {"statuses": statuses}
-    
-    tools.append({
-        "name": "mcp_server_status",
-        "description": "Get connection status of MCP servers. If server_id is omitted, returns all servers.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "server_id": {
-                    "type": "string",
-                    "description": "Optional: ID of specific server to check"
-                }
-            },
-            "required": []
-        },
-        "execute": lambda **kwargs: execute_server_status(kwargs.get("server_id"))
-    })
-    
+
     return tools

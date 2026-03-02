@@ -28,7 +28,7 @@ export async function render(container) {
     : '<span class="text-[9px] px-1.5 py-0.5 rounded-full bg-zinc-600/50 text-zinc-500 font-medium">disabled</span>';
 
   const eventStatusColor = (s) => ({
-    dispatched: 'text-emerald-400', completed: 'text-emerald-400',
+    dispatched: 'text-blue-400', completed: 'text-emerald-400',
     auth_failed: 'text-red-400', hmac_failed: 'text-red-400',
     error: 'text-red-400', cooldown: 'text-amber-400',
     concurrency_limit: 'text-amber-400',
@@ -36,7 +36,7 @@ export async function render(container) {
 
   const eventStatusDot = (s) => {
     const c = {
-      dispatched: 'bg-emerald-400', completed: 'bg-emerald-400',
+      dispatched: 'bg-blue-400', completed: 'bg-emerald-400',
       auth_failed: 'bg-red-400', hmac_failed: 'bg-red-400',
       error: 'bg-red-400', cooldown: 'bg-amber-400',
       concurrency_limit: 'bg-amber-400',
@@ -66,10 +66,14 @@ export async function render(container) {
     </div>
     ` : ''}
 
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+    <div class="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
       <div class="stat-card">
         <div class="text-2xl font-bold text-white">${triggerList.length}</div>
         <div class="text-xs text-zinc-500">Triggers</div>
+      </div>
+      <div class="stat-card">
+        <div class="text-2xl font-bold text-emerald-400">${triggerList.filter(t => t.enabled).length}</div>
+        <div class="text-xs text-zinc-500">Active</div>
       </div>
       <div class="stat-card">
         <div class="text-2xl font-bold ${hasSecret ? 'text-emerald-400' : 'text-red-400'}">${hasSecret ? 'Active' : 'No Secret'}</div>
@@ -105,7 +109,7 @@ export async function render(container) {
           <textarea id="wh-prompt" class="form-input w-full h-24" placeholder="Use {field_name} placeholders that map to payload paths.\nExample: A push to {repository} on branch {branch} by {pusher}..."></textarea>
         </div>
         <div class="mb-3">
-          <label class="form-label">Extract Fields <span class="text-zinc-600">(JSON: variable name → payload dot-path)</span></label>
+          <label class="form-label">Extract Fields <span class="text-zinc-600">(JSON: variable name -> payload dot-path)</span></label>
           <textarea id="wh-fields" class="form-input w-full h-16 font-mono text-xs" placeholder='{"repository": "repository.full_name", "branch": "ref"}'></textarea>
         </div>
         <div class="mb-3">
@@ -114,7 +118,7 @@ export async function render(container) {
         </div>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
         <div>
           <label class="form-label">Cooldown (seconds)</label>
           <input id="wh-cooldown" type="number" class="form-input w-full" value="30" min="0">
@@ -122,6 +126,10 @@ export async function render(container) {
         <div>
           <label class="form-label">HMAC Header <span class="text-zinc-600">(optional)</span></label>
           <input id="wh-hmac-header" type="text" class="form-input w-full" placeholder="X-Hub-Signature-256">
+        </div>
+        <div>
+          <label class="form-label">HMAC Secret <span class="text-zinc-600">(optional)</span></label>
+          <input id="wh-hmac-secret" type="password" class="form-input w-full" placeholder="Shared secret for signature verification">
         </div>
       </div>
 
@@ -133,7 +141,7 @@ export async function render(container) {
     <h3 class="text-sm font-semibold text-white mb-3">Configured Triggers</h3>
     <div class="space-y-3 mb-6" id="wh-trigger-list">
       ${triggerList.map(t => `
-        <div class="stat-card">
+        <div class="stat-card" data-trigger-id="${u.escapeHtml(t.id)}">
           <div class="flex items-center justify-between mb-2">
             <div class="flex items-center gap-3">
               <div class="toggle ${t.enabled ? 'on' : ''}" data-wh-toggle="${t.id}"><span class="toggle-dot"></span></div>
@@ -144,6 +152,7 @@ export async function render(container) {
             <div class="flex gap-2">
               <button class="btn-copy-url text-[10px] px-2 py-1 rounded bg-surface-600 text-zinc-400 hover:bg-surface-500" data-id="${t.id}">Copy URL</button>
               <button class="btn-test-wh text-[10px] px-2 py-1 rounded bg-blue-500/20 text-blue-400 hover:bg-blue-500/30" data-id="${t.id}">Test</button>
+              <button class="btn-edit-wh text-[10px] px-2 py-1 rounded bg-ghost-500/20 text-ghost-400 hover:bg-ghost-500/30" data-id="${t.id}">Edit</button>
               <button class="btn-del-wh text-[10px] px-2 py-1 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20" data-id="${t.id}">Delete</button>
             </div>
           </div>
@@ -157,32 +166,31 @@ export async function render(container) {
             <div class="text-[10px] text-zinc-600 mb-1">Endpoint URL:</div>
             <code class="text-[11px] text-ghost-400 bg-surface-700 px-2 py-1 rounded block break-all">${window.location.origin}/api/webhooks/${u.escapeHtml(t.id)}</code>
           </div>
+          ${t.hmac_header ? `<div class="mt-1 text-[10px] text-zinc-500">HMAC: <span class="text-zinc-400">${u.escapeHtml(t.hmac_header)}</span> ${t.hmac_secret && t.hmac_secret !== '***' ? '' : '<span class="text-emerald-500/70">(configured)</span>'}</div>` : ''}
           <details class="mt-2">
             <summary class="text-[10px] text-zinc-600 cursor-pointer hover:text-zinc-400">Prompt template</summary>
             <pre class="text-[11px] text-zinc-400 bg-surface-700 rounded p-2 mt-1 whitespace-pre-wrap max-h-32 overflow-y-auto">${u.escapeHtml(t.prompt_template || '(none)')}</pre>
           </details>
+          ${Object.keys(t.extract_fields || {}).length > 0 ? `
+          <details class="mt-1">
+            <summary class="text-[10px] text-zinc-600 cursor-pointer hover:text-zinc-400">Extract fields (${Object.keys(t.extract_fields).length})</summary>
+            <pre class="text-[11px] text-zinc-400 bg-surface-700 rounded p-2 mt-1 whitespace-pre-wrap max-h-24 overflow-y-auto">${u.escapeHtml(JSON.stringify(t.extract_fields, null, 2))}</pre>
+          </details>
+          ` : ''}
         </div>
       `).join('')}
     </div>
     ` : ''}
 
-    <h3 class="text-sm font-semibold text-zinc-400 mb-3">Recent Events</h3>
-    <div id="wh-history" class="stat-card">
-      ${events.length === 0
-        ? '<div class="text-xs text-zinc-600 py-4 text-center">No webhook events yet</div>'
-        : events.slice(0, 30).map(e => `
-          <div class="flex items-center gap-2 py-2 border-b border-surface-600/30 last:border-0">
-            ${eventStatusDot(e.status)}
-            <span class="text-[10px] px-1.5 py-0.5 rounded bg-surface-600 text-zinc-400 font-mono">${u.escapeHtml(e.trigger_id)}</span>
-            <span class="text-[11px] ${eventStatusColor(e.status)} font-medium">${u.escapeHtml(e.status)}</span>
-            <span class="text-[11px] text-zinc-500 flex-1 truncate">${u.escapeHtml(e.detail || '')}</span>
-            <span class="text-[10px] text-zinc-600">${e.timestamp ? u.timeAgo(e.timestamp) : ''}</span>
-          </div>
-        `).join('')
-      }
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="text-sm font-semibold text-zinc-400">Recent Events</h3>
+      <button id="wh-refresh-events" class="text-[10px] px-2 py-1 rounded bg-surface-600 text-zinc-400 hover:bg-surface-500">Refresh</button>
+    </div>
+    <div id="wh-history" class="stat-card mb-6">
+      ${_renderEvents(events, u)}
     </div>
 
-    <div class="mt-6 stat-card">
+    <div class="stat-card">
       <h3 class="text-sm font-semibold text-zinc-400 mb-3">Integration Guide</h3>
       <div class="text-xs text-zinc-500 space-y-2">
         <p>External services send a <code class="bg-surface-700 px-1 py-0.5 rounded text-zinc-400">POST</code> request to the trigger URL with a JSON payload.</p>
@@ -197,14 +205,63 @@ export async function render(container) {
         <details>
           <summary class="cursor-pointer hover:text-zinc-300 font-medium">Example: GitHub Webhook Setup</summary>
           <div class="bg-surface-700 rounded p-3 mt-2 text-[11px] text-zinc-400 space-y-1">
-            <p>1. Create a trigger using the "GitHub Push" template above</p>
-            <p>2. Go to your GitHub repo → Settings → Webhooks → Add webhook</p>
+            <p>1. Create a trigger using the "GitHub Push" or "GitHub Pull Request" template above</p>
+            <p>2. Go to your GitHub repo -> Settings -> Webhooks -> Add webhook</p>
             <p>3. Set <strong>Payload URL</strong> to the trigger's endpoint URL</p>
             <p>4. Set <strong>Content type</strong> to <code>application/json</code></p>
-            <p>5. Set <strong>Secret</strong> to your <code>webhook_secret</code> from Ghost config</p>
+            <p>5. Set <strong>Secret</strong> to match the HMAC Secret you configured on the trigger</p>
             <p>6. Select events: Pushes, Pull requests, Issues, etc.</p>
           </div>
         </details>
+        <details>
+          <summary class="cursor-pointer hover:text-zinc-300 font-medium">Example: Stripe Webhook Setup</summary>
+          <div class="bg-surface-700 rounded p-3 mt-2 text-[11px] text-zinc-400 space-y-1">
+            <p>1. Create a custom trigger with extract fields for Stripe events</p>
+            <p>2. Go to Stripe Dashboard -> Developers -> Webhooks -> Add endpoint</p>
+            <p>3. Set the endpoint URL to the trigger's endpoint</p>
+            <p>4. Add Authorization header with your Ghost webhook_secret as Bearer token</p>
+            <p>5. Select which Stripe events to listen for</p>
+          </div>
+        </details>
+      </div>
+    </div>
+
+    <div id="wh-edit-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60">
+      <div class="bg-surface-800 rounded-xl border border-surface-600 p-6 w-full max-w-lg mx-4 max-h-[85vh] overflow-y-auto">
+        <h3 class="text-sm font-semibold text-white mb-4">Edit Trigger</h3>
+        <input type="hidden" id="edit-wh-id">
+        <div class="space-y-3">
+          <div>
+            <label class="form-label">Name</label>
+            <input id="edit-wh-name" type="text" class="form-input w-full">
+          </div>
+          <div>
+            <label class="form-label">Prompt Template</label>
+            <textarea id="edit-wh-prompt" class="form-input w-full h-28"></textarea>
+          </div>
+          <div>
+            <label class="form-label">Extract Fields (JSON)</label>
+            <textarea id="edit-wh-fields" class="form-input w-full h-20 font-mono text-xs"></textarea>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="form-label">Cooldown (seconds)</label>
+              <input id="edit-wh-cooldown" type="number" class="form-input w-full" min="0">
+            </div>
+            <div>
+              <label class="form-label">HMAC Header</label>
+              <input id="edit-wh-hmac-header" type="text" class="form-input w-full" placeholder="X-Hub-Signature-256">
+            </div>
+          </div>
+          <div>
+            <label class="form-label">HMAC Secret <span class="text-zinc-600">(leave empty to keep current)</span></label>
+            <input id="edit-wh-hmac-secret" type="password" class="form-input w-full" placeholder="Leave empty to keep current">
+          </div>
+        </div>
+        <div class="flex justify-end gap-3 mt-4">
+          <button id="edit-wh-cancel" class="text-xs px-4 py-2 rounded bg-surface-600 text-zinc-400 hover:bg-surface-500">Cancel</button>
+          <button id="edit-wh-save" class="text-xs px-4 py-2 rounded bg-ghost-600 text-white hover:bg-ghost-500 font-medium">Save Changes</button>
+        </div>
       </div>
     </div>
   `;
@@ -216,17 +273,17 @@ export async function render(container) {
     btn.textContent = 'Generating...';
     try {
       const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-      let secret = 'ghst_wh_';
+      let newSecret = 'ghst_wh_';
       const arr = new Uint8Array(32);
       crypto.getRandomValues(arr);
-      for (const b of arr) secret += chars[b % chars.length];
+      for (const b of arr) newSecret += chars[b % chars.length];
 
-      await api.post('/api/config', { webhook_secret: secret });
+      await api.post('/api/config', { webhook_secret: newSecret });
 
       const resultDiv = container.querySelector('#wh-secret-result');
       resultDiv.classList.remove('hidden');
       resultDiv.className = 'text-xs mt-3 text-emerald-400';
-      resultDiv.innerHTML = `Secret set! <code class="bg-surface-700 px-1.5 py-0.5 rounded text-ghost-400 select-all">${u.escapeHtml(secret)}</code> — save this, it won't be shown again.`;
+      resultDiv.innerHTML = `Secret set! <code class="bg-surface-700 px-1.5 py-0.5 rounded text-ghost-400 select-all">${u.escapeHtml(newSecret)}</code> — save this, it won't be shown again.`;
       btn.textContent = 'Done!';
       setTimeout(() => render(container), 3000);
     } catch (e) {
@@ -243,11 +300,7 @@ export async function render(container) {
   const tmplSelect = container.querySelector('#wh-template');
   const customFields = container.querySelector('#wh-custom-fields');
   tmplSelect?.addEventListener('change', () => {
-    if (tmplSelect.value) {
-      customFields.classList.add('hidden');
-    } else {
-      customFields.classList.remove('hidden');
-    }
+    customFields.classList.toggle('hidden', !!tmplSelect.value);
   });
 
   // ── Create trigger ──
@@ -260,7 +313,13 @@ export async function render(container) {
 
     let body;
     if (templateId) {
-      body = { name, template_id: templateId, cooldown_seconds: parseInt(container.querySelector('#wh-cooldown').value) || 30 };
+      body = {
+        name,
+        template_id: templateId,
+        cooldown_seconds: parseInt(container.querySelector('#wh-cooldown').value) || 30,
+        hmac_header: container.querySelector('#wh-hmac-header').value.trim(),
+        hmac_secret: container.querySelector('#wh-hmac-secret').value,
+      };
     } else {
       const prompt = container.querySelector('#wh-prompt').value.trim();
       if (!prompt) { u.toast('Prompt template is required for custom triggers', 'error'); return; }
@@ -270,7 +329,7 @@ export async function render(container) {
       if (fieldsText) {
         try {
           extractFields = JSON.parse(fieldsText);
-        } catch (e) {
+        } catch {
           u.toast('Extract fields must be valid JSON', 'error');
           return;
         }
@@ -283,6 +342,7 @@ export async function render(container) {
         extract_fields: extractFields,
         cooldown_seconds: parseInt(container.querySelector('#wh-cooldown').value) || 30,
         hmac_header: container.querySelector('#wh-hmac-header').value.trim(),
+        hmac_secret: container.querySelector('#wh-hmac-secret').value,
       };
     }
 
@@ -317,13 +377,8 @@ export async function render(container) {
       const id = el.dataset.whToggle;
       const isOn = el.classList.contains('on');
       try {
-        const res = await fetch(`/api/webhooks/triggers/${id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ enabled: !isOn }),
-        });
-        const data = await res.json();
-        if (data.ok) {
+        const res = await api.patch(`/api/webhooks/triggers/${id}`, { enabled: !isOn });
+        if (res.ok) {
           u.toast(isOn ? 'Trigger disabled' : 'Trigger enabled');
           render(container);
         }
@@ -352,20 +407,16 @@ export async function render(container) {
       btn.textContent = 'Testing...';
       btn.disabled = true;
       try {
-        const configRes = await api.get('/api/config');
-        const sec = configRes?.config?.webhook_secret || '';
-        const res = await fetch(`/api/webhooks/${id}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${sec}`,
-          },
-          body: JSON.stringify({ test: true, message: 'Dashboard test event', timestamp: new Date().toISOString() }),
-        });
-        const data = await res.json();
-        btn.textContent = data.ok ? 'Fired!' : 'Failed';
-        if (data.ok) u.toast('Test webhook fired');
-        else u.toast(data.error || 'Test failed', 'error');
+        const cfgRes = await api.get('/api/config');
+        const sec = cfgRes?.config?.webhook_secret || '';
+        const res = await api.postRaw(`/api/webhooks/${id}`, {
+          test: true,
+          message: 'Dashboard test event',
+          timestamp: new Date().toISOString(),
+        }, { 'Authorization': `Bearer ${sec}` });
+        btn.textContent = res.ok ? 'Fired!' : 'Failed';
+        if (res.ok) u.toast('Test webhook fired');
+        else u.toast(res.error || 'Test failed', 'error');
       } catch (e) {
         btn.textContent = 'Error';
         u.toast(`Error: ${e.message}`, 'error');
@@ -388,4 +439,144 @@ export async function render(container) {
       }
     });
   });
+
+  // ── Edit trigger ──
+  const editModal = container.querySelector('#wh-edit-modal');
+
+  container.querySelectorAll('.btn-edit-wh').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.id;
+      const trigger = triggerList.find(t => t.id === id);
+      if (!trigger) return;
+
+      container.querySelector('#edit-wh-id').value = trigger.id;
+      container.querySelector('#edit-wh-name').value = trigger.name;
+      container.querySelector('#edit-wh-prompt').value = trigger.prompt_template || '';
+      container.querySelector('#edit-wh-fields').value =
+        Object.keys(trigger.extract_fields || {}).length > 0
+          ? JSON.stringify(trigger.extract_fields, null, 2)
+          : '';
+      container.querySelector('#edit-wh-cooldown').value = trigger.cooldown_seconds;
+      container.querySelector('#edit-wh-hmac-header').value = trigger.hmac_header || '';
+      container.querySelector('#edit-wh-hmac-secret').value = '';
+
+      editModal.classList.remove('hidden');
+      editModal.classList.add('flex');
+    });
+  });
+
+  container.querySelector('#edit-wh-cancel')?.addEventListener('click', () => {
+    editModal.classList.add('hidden');
+    editModal.classList.remove('flex');
+  });
+
+  editModal?.addEventListener('click', (e) => {
+    if (e.target === editModal) {
+      editModal.classList.add('hidden');
+      editModal.classList.remove('flex');
+    }
+  });
+
+  container.querySelector('#edit-wh-save')?.addEventListener('click', async () => {
+    const id = container.querySelector('#edit-wh-id').value;
+    const saveBtn = container.querySelector('#edit-wh-save');
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+
+    const updates = {
+      name: container.querySelector('#edit-wh-name').value.trim(),
+      prompt_template: container.querySelector('#edit-wh-prompt').value,
+      cooldown_seconds: parseInt(container.querySelector('#edit-wh-cooldown').value) || 30,
+      hmac_header: container.querySelector('#edit-wh-hmac-header').value.trim(),
+    };
+
+    const fieldsText = container.querySelector('#edit-wh-fields').value.trim();
+    if (fieldsText) {
+      try {
+        updates.extract_fields = JSON.parse(fieldsText);
+      } catch {
+        u.toast('Extract fields must be valid JSON', 'error');
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save Changes';
+        return;
+      }
+    } else {
+      updates.extract_fields = {};
+    }
+
+    const hmacSecret = container.querySelector('#edit-wh-hmac-secret').value;
+    if (hmacSecret) {
+      updates.hmac_secret = hmacSecret;
+    }
+
+    try {
+      const res = await api.patch(`/api/webhooks/triggers/${id}`, updates);
+      if (res.ok) {
+        u.toast('Trigger updated');
+        editModal.classList.add('hidden');
+        editModal.classList.remove('flex');
+        render(container);
+      } else {
+        u.toast(res.error || 'Failed to update', 'error');
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save Changes';
+      }
+    } catch (e) {
+      u.toast(`Error: ${e.message}`, 'error');
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save Changes';
+    }
+  });
+
+  // ── Refresh events ──
+  container.querySelector('#wh-refresh-events')?.addEventListener('click', async () => {
+    const btn = container.querySelector('#wh-refresh-events');
+    btn.textContent = 'Refreshing...';
+    btn.disabled = true;
+    try {
+      const freshHistory = await api.get('/api/webhooks/history');
+      const freshEvents = (freshHistory.events || []).reverse();
+      const historyDiv = container.querySelector('#wh-history');
+      if (historyDiv) historyDiv.innerHTML = _renderEvents(freshEvents, u);
+      u.toast('Events refreshed');
+    } catch (e) {
+      u.toast(`Error: ${e.message}`, 'error');
+    }
+    btn.textContent = 'Refresh';
+    btn.disabled = false;
+  });
+}
+
+function _renderEvents(events, u) {
+  if (events.length === 0) {
+    return '<div class="text-xs text-zinc-600 py-4 text-center">No webhook events yet</div>';
+  }
+  return events.slice(0, 50).map(e => `
+    <div class="flex items-center gap-2 py-2 border-b border-surface-600/30 last:border-0">
+      ${_eventDot(e.status)}
+      <span class="text-[10px] px-1.5 py-0.5 rounded bg-surface-600 text-zinc-400 font-mono">${u.escapeHtml(e.trigger_id)}</span>
+      <span class="text-[11px] ${_eventColor(e.status)} font-medium">${u.escapeHtml(e.status)}</span>
+      <span class="text-[11px] text-zinc-500 flex-1 truncate">${u.escapeHtml(e.detail || '')}</span>
+      <span class="text-[10px] text-zinc-600">${e.timestamp ? u.timeAgo(e.timestamp) : ''}</span>
+    </div>
+  `).join('');
+}
+
+function _eventColor(s) {
+  return ({
+    dispatched: 'text-blue-400', completed: 'text-emerald-400',
+    auth_failed: 'text-red-400', hmac_failed: 'text-red-400',
+    error: 'text-red-400', cooldown: 'text-amber-400',
+    concurrency_limit: 'text-amber-400',
+  })[s] || 'text-zinc-400';
+}
+
+function _eventDot(s) {
+  const c = ({
+    dispatched: 'bg-blue-400', completed: 'bg-emerald-400',
+    auth_failed: 'bg-red-400', hmac_failed: 'bg-red-400',
+    error: 'bg-red-400', cooldown: 'bg-amber-400',
+    concurrency_limit: 'bg-amber-400',
+  })[s] || 'bg-zinc-600';
+  return `<span class="inline-block w-1.5 h-1.5 rounded-full ${c}"></span>`;
 }

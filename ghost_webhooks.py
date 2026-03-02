@@ -270,7 +270,9 @@ class WebhookRegistry:
 
     def create_from_template(self, template_id: str,
                              name: str = "",
-                             cooldown_seconds: int = 30) -> Optional[WebhookTrigger]:
+                             cooldown_seconds: int = 30,
+                             hmac_header: str = "",
+                             hmac_secret: str = "") -> Optional[WebhookTrigger]:
         tmpl = BUILTIN_TEMPLATES.get(template_id)
         if not tmpl:
             return None
@@ -280,6 +282,8 @@ class WebhookRegistry:
             event_type=template_id,
             extract_fields=tmpl["extract_fields"],
             cooldown_seconds=cooldown_seconds,
+            hmac_header=hmac_header,
+            hmac_secret=hmac_secret,
         )
 
     def get(self, trigger_id: str) -> Optional[WebhookTrigger]:

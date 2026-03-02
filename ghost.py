@@ -70,7 +70,6 @@ from ghost_hook_debug import build_hook_debug_tools
 from ghost_uptime import build_uptime_tools
 from ghost_code_tools import build_code_search_tools
 from ghost_setup_providers import build_setup_provider_tools
-from ghost_obsidian import build_obsidian_tools
 from ghost_tool_intent_security import ToolIntentSecurity
 from ghost_responses_capabilities import get_responses_capabilities, get_responses_capabilities_scope
 from ghost_implementation_auditor_filters import build_implementation_auditor_filter_tools
@@ -78,7 +77,7 @@ from ghost_interrupt import make_interrupt_tools
 from ghost_config_payloads import build_config_payload_tools
 from ghost_dependency_doctor import build_dependency_doctor_tools
 from ghost_pr import build_pr_tools
-from ghost_mcp import MCPManager, build_mcp_tools
+from ghost_mcp import MCPClientManager, build_mcp_tools
 
 # responses capabilities wiring marker: dashboard-managed feature flags loaded via config/routes
 
@@ -904,11 +903,6 @@ class GhostDaemon:
         for tool_def in build_x_tracker_tools():
             self.tool_registry.register(tool_def)
 
-        # Obsidian vault integration (Markdown note workflows)
-        if cfg.get("enable_obsidian", True):
-            for tool_def in build_obsidian_tools(cfg):
-                self.tool_registry.register(tool_def)
-
         # State file repair tool + startup integrity check
         # Skip full repair in dry-run mode for faster startup
         for tool_def in build_state_repair_tools():
@@ -1196,11 +1190,17 @@ class GhostDaemon:
         self.mcp_manager = None
         if cfg.get("enable_mcp", True):
             try:
-                self.mcp_manager = MCPManager(cfg)
-                self.mcp_manager.start()
-                for tool_def in build_mcp_tools(mcp_manager=self.mcp_manager, cfg=cfg):
+                self.mcp_manager = MCPClientManager(cfg)
+                for tool_def in build_mcp_tools(cfg, mcp_manager=self.mcp_manager):
                     self.tool_registry.register(tool_def)
-                print(f"  [mcp] Initialized with {len(self.mcp_manager.get_server_configs())} server(s)")
+                servers = self.mcp_manager.list_servers()
+                enabled = [s for s in servers if s.get("enabled")]
+                print(f"  [mcp] Initialized with {len(servers)} server(s) ({len(enabled)} enabled)")
+                if enabled and not dry_run:
+                    results = self.mcp_manager.auto_connect()
+                    connected = sum(1 for r in results.values() if r.get("ok"))
+                    print(f"  [mcp] Auto-connected {connected}/{len(enabled)} server(s)")
+                    self.mcp_manager.start_monitor()
             except Exception as e:
                 print(f"  [mcp] Failed to initialize: {e}")
 
@@ -1652,6 +1652,11 @@ class GhostDaemon:
         if self.memory_db:
             self.memory_db.prune(5000)
             self.memory_db.close()
+        if getattr(self, "mcp_manager", None):
+            try:
+                self.mcp_manager.shutdown()
+            except Exception as e:
+                print(f"  [mcp] Shutdown error: {e}")
         try:
             _browser_stop()
         except Exception:

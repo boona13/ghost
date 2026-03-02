@@ -75,6 +75,8 @@ def create_trigger():
             template_id,
             name=name,
             cooldown_seconds=data.get("cooldown_seconds", 30),
+            hmac_header=data.get("hmac_header", ""),
+            hmac_secret=data.get("hmac_secret", ""),
         )
         if not trigger:
             from ghost_webhooks import BUILTIN_TEMPLATES

@@ -30,7 +30,6 @@ Ghost ships with 25 bundled skills in the `skills/` directory:
 | `himalaya` | email, mail, inbox | shell_exec | Email via Himalaya CLI |
 | `nano-pdf` | pdf, document | shell_exec | PDF processing |
 | `notion` | notion, page, database | shell_exec | Notion integration |
-| `obsidian` | obsidian, vault, note | shell_exec, file_read, file_write | Obsidian vault management |
 | `openai-image-gen` | generate image, create image, dall-e | web_fetch | AI image generation |
 | `peekaboo` | screenshot, screen, capture | shell_exec | Screenshot tools |
 | `researcher` | research, find, look up, search | web_fetch, shell_exec | Web research |
@@ -43,6 +42,7 @@ Ghost ships with 25 bundled skills in the `skills/` directory:
 | `trello` | trello, board, card | shell_exec | Trello integration |
 | `video-frames` | video, frame, extract | shell_exec | Video frame extraction |
 | `weather` | weather, forecast, temperature | web_fetch | Weather information |
+| `webhooks` | webhook, trigger, github webhook | webhook_create, webhook_list, webhook_delete, webhook_test | Webhook trigger management |
 
 ## SKILL.md Format
 

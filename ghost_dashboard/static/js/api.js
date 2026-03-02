@@ -24,6 +24,24 @@ export const api = {
     return r.json();
   },
 
+  async postRaw(url, data = {}, extraHeaders = {}) {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...extraHeaders },
+      body: JSON.stringify(data),
+    });
+    return r.json();
+  },
+
+  async patch(url, data = {}) {
+    const r = await fetch(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    return r.json();
+  },
+
   async del(url) {
     const r = await fetch(url, { method: 'DELETE' });
     return r.json();
