@@ -357,24 +357,27 @@ def _check_incomplete_workflows(tool_calls_log: list) -> str | None:
 
     started_feature = "start_future_feature" in tools_used
     used_evolve_plan = "evolve_plan" in tools_used
+    used_evolve_resume = "evolve_resume" in tools_used
+    used_evolve_start = used_evolve_plan or used_evolve_resume
     used_evolve_apply = "evolve_apply" in tools_used
     used_evolve_deploy = "evolve_deploy" in tools_used or "evolve_submit_pr" in tools_used
     used_fail = "fail_future_feature" in tools_used
 
-    if used_evolve_plan and not used_evolve_deploy and not used_fail:
+    if used_evolve_start and not used_evolve_deploy and not used_fail:
         if not used_evolve_apply:
+            verb = "evolve_resume" if used_evolve_resume else "evolve_plan"
             return (
-                "You called evolve_plan but never called evolve_apply. "
+                f"You called {verb} but never called evolve_apply. "
                 "You MUST apply changes. Call evolve_apply now for each file, "
                 "then evolve_test, then evolve_submit_pr. Do NOT rollback or quit."
             )
         return (
-            "You started an evolution (evolve_plan + evolve_apply) but never "
-            "called evolve_submit_pr. Finish: evolve_test → evolve_submit_pr. "
+            "You started an evolution but never called evolve_submit_pr. "
+            "Finish: evolve_test → evolve_submit_pr. "
             "Do NOT call task_complete until evolve_submit_pr succeeds."
         )
 
-    if started_feature and not used_evolve_plan and not used_fail:
+    if started_feature and not used_evolve_start and not used_fail:
         return (
             "You called start_future_feature but never called evolve_plan. "
             "You MUST implement the feature NOW. Call evolve_plan, then "
@@ -1400,6 +1403,16 @@ class ToolLoopEngine:
                         if "Evolution planned:" in result:
                             evo_id = result.split("Evolution planned:")[1].strip().split()[0]
                             run_evo_ids.add(evo_id)
+                    elif tc["tool"] == "evolve_resume":
+                        result = tc.get("result", "")
+                        if "resumed on branch" in result:
+                            for word in result.split():
+                                if word.startswith("evolve/"):
+                                    run_evo_ids.add(word.replace("evolve/", "").rstrip("."))
+                                    break
+                        evo_arg = tc.get("args", {}).get("evolution_id", "")
+                        if evo_arg:
+                            run_evo_ids.add(evo_arg)
                 cleanup_results = get_engine().cleanup_incomplete(
                     only_ids=run_evo_ids if run_evo_ids else None
                 )
@@ -1476,7 +1489,7 @@ class ToolRegistry:
     # System tools that cannot be shadowed/overwritten
     RESERVED_TOOL_NAMES = {"evolve_plan", "evolve_apply", "evolve_test", 
                            "evolve_deploy", "evolve_rollback", "evolve_delete",
-                           "evolve_submit_pr",
+                           "evolve_submit_pr", "evolve_resume",
                            "shell_exec", "file_read", "file_write", "credential_get",
                            "credential_save", "cron_add", "cron_remove"}
 

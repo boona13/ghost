@@ -255,6 +255,40 @@ def stash_and_checkout(branch: str) -> Tuple[bool, str]:
         return False, f"Stash-and-checkout failed: {e}"
 
 
+def update_branch(feature_branch: str) -> Tuple[bool, str]:
+    """Merge latest main into feature branch (GitHub's 'Update branch').
+
+    Uses merge (not rebase) to preserve commit history. Aborts on conflict.
+    """
+    try:
+        _run(["checkout", feature_branch])
+        _run(["merge", "main", "-m",
+              f"Update branch: merge main into {feature_branch}"])
+        return True, f"Updated {feature_branch} with latest main"
+    except subprocess.CalledProcessError as e:
+        _run(["merge", "--abort"], check=False)
+        return False, f"Conflict updating branch: {e.stderr}"
+
+
+def get_interdiff(old_sha: str, new_sha: str) -> str:
+    """Diff between two commits (shows changes between review rounds)."""
+    try:
+        r = _run(["diff", old_sha, new_sha], check=False)
+        return r.stdout
+    except Exception:
+        return ""
+
+
+def get_head_sha(branch: str = None) -> str:
+    """Get HEAD SHA of a branch (or current HEAD)."""
+    try:
+        ref = branch or "HEAD"
+        r = _run(["rev-parse", ref], check=False)
+        return r.stdout.strip() if r.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
 def ensure_clean_main() -> Tuple[bool, str]:
     """Ensure we're on main with no uncommitted changes."""
     ok, msg = init_repo()

@@ -264,9 +264,12 @@ class FutureFeaturesStore:
             if f["id"] == feature_id:
                 f["status"] = STATUS_IN_PROGRESS
                 f["updated_at"] = datetime.now().isoformat()
-                f["started_at"] = datetime.now().isoformat()
-                f["evolution_id"] = evolution_id
-                f["implementation_attempts"] = f.get("implementation_attempts", 0) + 1
+                is_resume = bool(f.get("current_branch") and f.get("current_evolution_id"))
+                if not is_resume:
+                    f["started_at"] = datetime.now().isoformat()
+                    f["implementation_attempts"] = f.get("implementation_attempts", 0) + 1
+                if evolution_id:
+                    f["evolution_id"] = evolution_id
                 self._save(features)
                 return True, None
         return False, "Feature not found"
@@ -443,15 +446,20 @@ class FutureFeaturesStore:
 
     def mark_review_rejected(self, feature_id: str, reason: str = "",
                              max_retries: int = 5,
-                             reviewer_feedback: str = "") -> tuple[bool, str]:
-        """Handle PR reviewer rejection by re-queuing or deferring.
+                             reviewer_feedback: str = "",
+                             evolution_id: str = "",
+                             branch_name: str = "",
+                             pr_id: str = "") -> tuple[bool, str]:
+        """Handle PR reviewer rejection by re-queuing with branch context preserved.
+
+        GitHub-style: the branch and evolution stay alive so the next attempt
+        can do targeted fixes instead of rebuilding from scratch.
 
         Behavior:
-        - If implementation_attempts < max_retries: set back to pending so the
-          Feature Implementer can try again and submit a new PR.
-        - Otherwise: set deferred to stop infinite retry loops.
-        - Accumulates ALL reviewer feedback in pr_rejections[] so the next
-          attempt has full context of every past rejection.
+        - If implementation_attempts < max_retries: set back to pending, preserve
+          branch/PR/evolution context for fix-and-resubmit.
+        - Otherwise: set deferred, clear context fields.
+        - Accumulates ALL reviewer feedback in pr_rejections[].
 
         Returns:
             (ok, status) where status is "pending" or "deferred".
@@ -468,12 +476,23 @@ class FutureFeaturesStore:
                 f["defer_reason"] = (
                     f"PR reviewer rejected after {attempts} attempts"
                 )
+                f.pop("current_branch", None)
+                f.pop("current_pr_id", None)
+                f.pop("current_evolution_id", None)
+                f.pop("review_round", None)
                 final_status = STATUS_DEFERRED
             else:
                 f["status"] = STATUS_PENDING
                 f["retry_after"] = (
                     datetime.now() + timedelta(minutes=15)
                 ).isoformat()
+                if evolution_id:
+                    f["current_evolution_id"] = evolution_id
+                if branch_name:
+                    f["current_branch"] = branch_name
+                if pr_id:
+                    f["current_pr_id"] = pr_id
+                f["review_round"] = f.get("review_round", 0) + 1
                 final_status = STATUS_PENDING
 
             f["updated_at"] = now
@@ -493,7 +512,7 @@ class FutureFeaturesStore:
                 "timestamp": now,
                 "message": (
                     f"PR reviewer rejected (attempt {attempts}). "
-                    f"{'Deferred after max retries' if final_status == STATUS_DEFERRED else 'Re-queued for another attempt'}."
+                    f"{'Deferred after max retries' if final_status == STATUS_DEFERRED else 'Re-queued for fix-and-resubmit (branch preserved)'}."
                 ),
             })
             self._save(features)
@@ -778,6 +797,12 @@ def build_future_features_tools(cfg, on_queue_change=None):
             lines.append(f"\nAudited: {f['audited_at']} (result={f.get('audit_result', '?')})")
             if f.get("audit_notes"):
                 lines.append(f"Audit Notes: {f['audit_notes']}")
+        if f.get("current_branch"):
+            lines.append(f"\n🔀 RESUME CONTEXT (fix-and-resubmit):")
+            lines.append(f"  Branch: {f.get('current_branch')}")
+            lines.append(f"  Evolution ID: {f.get('current_evolution_id', 'unknown')}")
+            lines.append(f"  PR ID: {f.get('current_pr_id', 'unknown')}")
+            lines.append(f"  Review Round: {f.get('review_round', 0)}")
         if f.get("pr_rejections"):
             lines.append(f"\n⚠️  PAST PR REJECTIONS ({len(f['pr_rejections'])} total) — YOU MUST address ALL of these:")
             for i, rej in enumerate(f["pr_rejections"], 1):

@@ -231,6 +231,28 @@ class PRStore:
             self._write_pr_unlocked(pr)
             return True
 
+    def set_old_head_sha(self, pr_id: str, sha: str) -> bool:
+        """Store the branch HEAD SHA from before the latest fixes (for interdiff)."""
+        with self._lock:
+            pr = self._read_pr_unlocked(pr_id)
+            if not pr:
+                return False
+            pr["old_head_sha"] = sha
+            self._write_pr_unlocked(pr)
+            return True
+
+    def reopen_pr(self, pr_id: str) -> bool:
+        """Reopen a rejected PR for a new review round (stale review dismissal)."""
+        with self._lock:
+            pr = self._read_pr_unlocked(pr_id)
+            if not pr:
+                return False
+            pr["status"] = "open"
+            pr["verdict"] = None
+            pr["review_rounds"] = pr.get("review_rounds", 0) + 1
+            self._write_pr_unlocked(pr)
+            return True
+
     def _save_pr(self, pr: Dict):
         with self._lock:
             self._write_pr_unlocked(pr)
@@ -239,128 +261,383 @@ class PRStore:
 # ── Review Engine ────────────────────────────────────────────────────
 
 class ReviewEngine:
-    """Orchestrates code review as a real multi-turn conversation.
+    """Orchestrates code review as a GitHub-style tool loop.
 
-    Instead of isolated single_shot() calls that rebuild massive context
-    each time, the review runs as one continuous chat thread. The diff is
-    sent once, and the LLM role-plays reviewer/developer on alternating
-    turns via short turn markers.
+    The reviewer runs as a full ToolLoopEngine agent with dedicated tools
+    for reading diffs per-file, browsing the codebase, leaving inline
+    comments, suggesting exact code changes, and submitting a final verdict.
     """
 
     def __init__(self, store: PRStore, evolve_engine=None):
         self.store = store
         self.evolve_engine = evolve_engine
 
-    # ── Direct LLM chat (bypasses ToolLoopEngine) ────────────────────
+    # ── Diff splitting ───────────────────────────────────────────────
 
     @staticmethod
-    def _chat(engine, messages, max_tokens=8192, temperature=0.3):
-        """Send the conversation to the LLM and return the assistant text.
+    def _split_diff_by_file(raw_diff: str) -> list[dict]:
+        """Split a unified diff into per-file chunks.
 
-        Uses engine._call_llm() directly — no tool loop, no pushback,
-        no loop detection. Just a plain chat completion.
-        Returns None on any failure.
+        Returns list of dicts: [{file, diff, is_new, lines_added, lines_removed}]
+        Sorted: new files first, then integration files, then patches.
         """
-        payload = {
-            "model": engine.model,
-            "messages": list(messages),
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }
-        try:
-            data, error = engine._call_llm(payload)
-        except Exception as exc:
-            log.warning("LLM call raised: %s", exc)
-            return None
-        if error or not data:
-            log.warning("LLM call failed: %s", error)
-            return None
-        choices = data.get("choices") if isinstance(data, dict) else None
-        if not choices:
-            return None
-        text = (choices[0].get("message", {}).get("content") or "").strip()
-        return text or None
+        if not raw_diff:
+            return []
 
-    # ── Diff preparation ─────────────────────────────────────────────
-
-    @staticmethod
-    def _prepare_diff(raw_diff: str, max_chars: int = 40000) -> str:
-        """Prepare diff for reviewer, prioritizing new files over patches.
-
-        New files are shown in full (reviewer needs complete code to verify
-        tool signatures, imports, etc.). Patches to existing files are
-        truncated if the total exceeds max_chars.
-        """
-        if len(raw_diff) <= max_chars:
-            return raw_diff
-
-        new_file_parts = []
-        patch_parts = []
-        current_part = []
-        is_new_file = False
+        files = []
+        current_file = None
+        current_lines = []
+        is_new = False
 
         for line in raw_diff.split("\n"):
             if line.startswith("diff --git"):
-                if current_part:
-                    target = new_file_parts if is_new_file else patch_parts
-                    target.append("\n".join(current_part))
-                current_part = [line]
-                is_new_file = False
+                if current_file and current_lines:
+                    diff_text = "\n".join(current_lines)
+                    added = diff_text.count("\n+") - diff_text.count("\n+++")
+                    removed = diff_text.count("\n-") - diff_text.count("\n---")
+                    files.append({
+                        "file": current_file,
+                        "diff": diff_text,
+                        "is_new": is_new,
+                        "lines_added": max(0, added),
+                        "lines_removed": max(0, removed),
+                    })
+                parts = line.split(" b/")
+                current_file = parts[-1] if len(parts) > 1 else "unknown"
+                current_lines = [line]
+                is_new = False
             elif line.startswith("new file mode"):
-                is_new_file = True
-                current_part.append(line)
+                is_new = True
+                current_lines.append(line)
             else:
-                current_part.append(line)
+                current_lines.append(line)
 
-        if current_part:
-            target = new_file_parts if is_new_file else patch_parts
-            target.append("\n".join(current_part))
+        if current_file and current_lines:
+            diff_text = "\n".join(current_lines)
+            added = diff_text.count("\n+") - diff_text.count("\n+++")
+            removed = diff_text.count("\n-") - diff_text.count("\n---")
+            files.append({
+                "file": current_file,
+                "diff": diff_text,
+                "is_new": is_new,
+                "lines_added": max(0, added),
+                "lines_removed": max(0, removed),
+            })
 
-        new_text = "\n".join(new_file_parts)
-        remaining = max_chars - len(new_text)
+        integration_files = {"ghost.py", "__init__.py", "app.js", "index.html"}
 
-        if remaining > 2000:
-            patch_text = "\n".join(patch_parts)
-            if len(patch_text) > remaining:
-                patch_text = patch_text[:remaining] + "\n\n[... patches truncated for length, new files shown in full above ...]"
-            return new_text + "\n" + patch_text if new_text else patch_text
-        else:
-            return new_text[:max_chars] + "\n\n[... truncated ...]"
+        def _sort_key(f):
+            name = Path(f["file"]).name
+            if f["is_new"]:
+                return (0, name)
+            if name in integration_files:
+                return (1, name)
+            return (2, name)
 
-    # ── Main review loop ─────────────────────────────────────────────
+        files.sort(key=_sort_key)
+        return files
 
-    def run_review(self, pr_id: str, engine) -> str:
-        """Run a single-round code review. Returns: approved/rejected/blocked.
+    # ── Reviewer tools (built per-review, scoped to PR) ──────────────
 
-        The reviewer examines the diff once and renders a final verdict.
-        If the verdict is not APPROVE, the PR is rejected immediately so
-        the feature can be re-queued with the feedback incorporated into
-        the next evolution attempt.
-        """
-        pr = self.store.get_pr(pr_id)
-        if not pr:
-            return "rejected"
+    def _build_reviewer_tools(self, pr: dict) -> list[dict]:
+        """Build the 6 dedicated reviewer tools, all scoped to this PR."""
+        pr_id = pr["pr_id"]
+        file_diffs = self._split_diff_by_file(pr.get("diff", ""))
+        diff_index = {fd["file"]: fd for fd in file_diffs}
 
-        self.store.update_status(pr_id, "reviewing")
-        log.info("Starting review for PR %s: %s", pr_id, pr["title"])
+        def read_pr_diff(file: str = "", **kwargs) -> str:
+            if not file:
+                lines = [f"PR has {len(file_diffs)} changed file(s):\n"]
+                for fd in file_diffs:
+                    tag = "NEW" if fd["is_new"] else "MODIFIED"
+                    lines.append(
+                        f"  [{tag}] {fd['file']} "
+                        f"(+{fd['lines_added']}/-{fd['lines_removed']})"
+                    )
+                lines.append(
+                    "\nCall read_pr_diff(file='<filename>') to see the diff for a specific file."
+                )
+                return "\n".join(lines)
 
-        diff_text = self._prepare_diff(pr["diff"])
-        messages = [
-            {"role": "system", "content": REVIEW_SYSTEM_PROMPT},
-            {"role": "user", "content": (
-                f"## Pull Request: {pr['title']}\n"
-                f"**Description:** {pr['description']}\n"
-                f"**Files changed:** {', '.join(pr['files_changed'])}\n\n"
-                f"```diff\n{diff_text}\n```"
-            )},
-            {"role": "user", "content": (
-                "**REVIEWER:** Review the diff above. Check code quality, "
-                "correctness, UI/UX, frontend-backend integration, and scope. "
-                "End with your VERDICT."
-            )},
+            fd = diff_index.get(file)
+            if not fd:
+                for key in diff_index:
+                    if key.endswith(file) or file.endswith(key):
+                        fd = diff_index[key]
+                        break
+            if not fd:
+                return f"File '{file}' not found in this PR. Available: {', '.join(diff_index.keys())}"
+            return f"Diff for {fd['file']}:\n```diff\n{fd['diff']}\n```"
+
+        def read_pr_file(file: str, offset: int = 1, limit: int = 200, **kwargs) -> str:
+            abs_path = PROJECT_DIR / file
+            if not abs_path.exists():
+                return f"File not found: {file}"
+            try:
+                all_lines = abs_path.read_text().splitlines()
+                start = max(0, offset - 1)
+                end = start + limit
+                selected = all_lines[start:end]
+                numbered = [
+                    f"{i + start + 1:4d}| {line}"
+                    for i, line in enumerate(selected)
+                ]
+                total = len(all_lines)
+                header = f"File: {file} (lines {start+1}-{min(end, total)} of {total})"
+                return header + "\n" + "\n".join(numbered)
+            except Exception as e:
+                return f"Error reading {file}: {e}"
+
+        def grep_codebase(pattern: str, include: str = "*.py", **kwargs) -> str:
+            import subprocess
+            try:
+                args = ["grep", "-rn", pattern, f"--include={include}", str(PROJECT_DIR)]
+                result = subprocess.run(
+                    args, capture_output=True, text=True, timeout=10,
+                )
+                output = result.stdout.strip()
+                if not output:
+                    return f"No matches for '{pattern}' in {include}"
+                lines = output.split("\n")
+                if len(lines) > 30:
+                    return "\n".join(lines[:30]) + f"\n\n... ({len(lines)} total matches, showing first 30)"
+                return output
+            except Exception as e:
+                return f"grep error: {e}"
+
+        def leave_comment(file: str, line: int, message: str,
+                         severity: str = "warning", **kwargs) -> str:
+            if severity not in ("critical", "warning", "suggestion", "note"):
+                severity = "warning"
+            with self.store._lock:
+                current_pr = self.store._read_pr_unlocked(pr_id)
+                if not current_pr:
+                    return "PR not found"
+                if "inline_comments" not in current_pr:
+                    current_pr["inline_comments"] = []
+                current_pr["inline_comments"].append({
+                    "file": file,
+                    "line": line,
+                    "message": message,
+                    "severity": severity,
+                    "round": current_pr.get("review_rounds", 1),
+                })
+                self.store._write_pr_unlocked(current_pr)
+            return f"Comment added: [{severity}] {file}:{line} — {message[:80]}"
+
+        def suggest_change(file: str, old_code: str, new_code: str,
+                          explanation: str = "", **kwargs) -> str:
+            with self.store._lock:
+                current_pr = self.store._read_pr_unlocked(pr_id)
+                if not current_pr:
+                    return "PR not found"
+                if "suggested_changes" not in current_pr:
+                    current_pr["suggested_changes"] = []
+                current_pr["suggested_changes"].append({
+                    "file": file,
+                    "old_code": old_code,
+                    "new_code": new_code,
+                    "explanation": explanation,
+                    "round": current_pr.get("review_rounds", 1),
+                    "applied": False,
+                })
+                self.store._write_pr_unlocked(current_pr)
+            return f"Suggestion added for {file}: {explanation[:80]}"
+
+        _review_submitted = {"done": False}
+
+        def submit_review(verdict: str, summary: str, **kwargs) -> str:
+            verdict_upper = verdict.upper().strip()
+            if verdict_upper in ("APPROVE", "APPROVED"):
+                verdict_key = "approved"
+            elif verdict_upper in ("BLOCK", "BLOCKED"):
+                verdict_key = "blocked"
+            else:
+                verdict_key = "rejected"
+
+            self.store.add_discussion(
+                pr_id, "reviewer", summary,
+                pr.get("review_rounds", 1)
+            )
+            if verdict_key == "blocked":
+                reason = summary[:500]
+                self.store.set_verdict(pr_id, "blocked", reason)
+            elif verdict_key == "approved":
+                self.store.set_verdict(pr_id, "approved")
+            else:
+                self.store.set_verdict(pr_id, "rejected", summary[:500])
+
+            _review_submitted["done"] = True
+            return f"Review submitted: {verdict_key.upper()}. Call task_complete now."
+
+        return [
+            {
+                "name": "read_pr_diff",
+                "description": (
+                    "Read the diff for a specific file in this PR. "
+                    "Call with no arguments to see the list of changed files with stats. "
+                    "Call with file='<filename>' to see the actual diff for that file."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file": {
+                            "type": "string",
+                            "description": "File to read diff for (omit to see file list)",
+                            "default": "",
+                        },
+                    },
+                },
+                "execute": read_pr_diff,
+            },
+            {
+                "name": "read_pr_file",
+                "description": (
+                    "Read the full current content of a file (not just the diff). "
+                    "Use this to check surrounding code, imports, class definitions, etc."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file": {"type": "string", "description": "File path relative to project root"},
+                        "offset": {"type": "integer", "description": "Line to start reading from (1-based)", "default": 1},
+                        "limit": {"type": "integer", "description": "Number of lines to read", "default": 200},
+                    },
+                    "required": ["file"],
+                },
+                "execute": read_pr_file,
+            },
+            {
+                "name": "grep_codebase",
+                "description": (
+                    "Search the codebase for a pattern. Used to check for duplicate "
+                    "functionality, verify wiring (imports in ghost.py, tool registration), "
+                    "or find related code."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "pattern": {"type": "string", "description": "Search pattern (regex)"},
+                        "include": {"type": "string", "description": "File glob (e.g. '*.py', '*.js')", "default": "*.py"},
+                    },
+                    "required": ["pattern"],
+                },
+                "execute": grep_codebase,
+            },
+            {
+                "name": "leave_comment",
+                "description": (
+                    "Leave an inline review comment on a specific file and line. "
+                    "The implementer sees these on the next fix-and-resubmit round. "
+                    "Use 'critical' for blocking issues, 'warning' for should-fix, "
+                    "'suggestion' for nice-to-have, 'note' for informational."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file": {"type": "string", "description": "File the comment is about"},
+                        "line": {"type": "integer", "description": "Line number the comment refers to"},
+                        "message": {"type": "string", "description": "The review comment"},
+                        "severity": {
+                            "type": "string",
+                            "enum": ["critical", "warning", "suggestion", "note"],
+                            "default": "warning",
+                            "description": "Severity level",
+                        },
+                    },
+                    "required": ["file", "line", "message"],
+                },
+                "execute": leave_comment,
+            },
+            {
+                "name": "suggest_change",
+                "description": (
+                    "Suggest an exact code change (like GitHub's suggestion feature). "
+                    "The implementer can apply this directly. Use when the fix is obvious "
+                    "and you can provide the exact corrected code."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "file": {"type": "string", "description": "File to suggest change for"},
+                        "old_code": {"type": "string", "description": "The current code that should be changed"},
+                        "new_code": {"type": "string", "description": "The suggested replacement code"},
+                        "explanation": {"type": "string", "description": "Why this change is needed", "default": ""},
+                    },
+                    "required": ["file", "old_code", "new_code"],
+                },
+                "execute": suggest_change,
+            },
+            {
+                "name": "submit_review",
+                "description": (
+                    "Submit your final review verdict. MUST be called exactly once "
+                    "after reviewing all files. Verdict must be one of: APPROVE, "
+                    "REQUEST_CHANGES, or BLOCK."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "verdict": {
+                            "type": "string",
+                            "enum": ["APPROVE", "REQUEST_CHANGES", "BLOCK"],
+                            "description": "Your final verdict",
+                        },
+                        "summary": {
+                            "type": "string",
+                            "description": "Brief overall assessment (1-3 sentences)",
+                        },
+                    },
+                    "required": ["verdict", "summary"],
+                },
+                "execute": submit_review,
+            },
         ]
 
-        # Inject rejection history so the reviewer can verify past issues were fixed
+    # ── Reviewer prompt builder ──────────────────────────────────────
+
+    def _build_reviewer_prompt(self, pr: dict) -> str:
+        """Build the system prompt for the reviewer agent.
+
+        Loads the pr-reviewer skill if available, otherwise falls back
+        to the hardcoded REVIEW_SYSTEM_PROMPT.
+        """
+        skill_content = ""
+        try:
+            skill_path = PROJECT_DIR / "skills" / "pr-reviewer" / "SKILL.md"
+            if skill_path.exists():
+                raw = skill_path.read_text()
+                if "---" in raw:
+                    parts = raw.split("---", 2)
+                    if len(parts) >= 3:
+                        skill_content = parts[2].strip()
+        except Exception:
+            pass
+
+        if skill_content:
+            return skill_content
+        return REVIEW_SYSTEM_PROMPT
+
+    # ── Review context builder ───────────────────────────────────────
+
+    def _build_review_context(self, pr: dict) -> str:
+        """Build the initial context message for the reviewer."""
+        file_diffs = self._split_diff_by_file(pr.get("diff", ""))
+        file_list = "\n".join(
+            f"  {'[NEW]' if fd['is_new'] else '[MOD]'} {fd['file']} "
+            f"(+{fd['lines_added']}/-{fd['lines_removed']})"
+            for fd in file_diffs
+        )
+
+        context = (
+            f"## Pull Request: {pr['title']}\n"
+            f"**Description:** {pr['description']}\n"
+            f"**Branch:** {pr['branch']}\n"
+            f"**Review round:** {pr.get('review_rounds', 1)}\n"
+            f"**Files changed ({len(file_diffs)}):**\n{file_list}\n\n"
+        )
+
+        # Injection history for re-reviews
         if pr.get("feature_id"):
             try:
                 from ghost_future_features import FutureFeaturesStore
@@ -371,120 +648,137 @@ class ReviewEngine:
                         f"- Attempt {r.get('attempt', i+1)}: {r.get('feedback', 'unknown')[:300]}"
                         for i, r in enumerate(rejections[-3:])
                     )
-                    messages.insert(2, {"role": "user", "content": (
+                    context += (
                         f"**REJECTION HISTORY** — This feature has been rejected "
                         f"{len(rejections)} time(s) before. Previous feedback:\n"
                         f"{history_text}\n\n"
-                        "Pay SPECIAL attention to whether these specific issues were fixed."
-                    )})
+                        "Pay SPECIAL attention to whether these specific issues were fixed.\n\n"
+                    )
             except Exception:
                 pass
 
-        # Codebase context: help reviewer detect duplicate/already-implemented features
-        try:
-            import subprocess
-            _stopwords = {
-                "the", "and", "for", "with", "from", "that", "this", "into",
-                "add", "fix", "bug", "feature", "ghost", "update", "implement",
-                "new", "support", "enable", "create", "make", "use", "set",
-            }
-            title_words = [
-                w.lower() for w in pr["title"].split()
-                if len(w) > 3 and w.lower() not in _stopwords
-            ]
-            pr_files_abs = set()
-            for pf in pr.get("files_changed", []):
-                pr_files_abs.add(str(PROJECT_DIR / pf))
-                pr_files_abs.add(str(pf))
-            hits = []
-            for term in title_words[:3]:
-                result = subprocess.run(
-                    ["grep", "-ril", term, "--include=*.py", str(PROJECT_DIR)],
-                    capture_output=True, text=True, timeout=5,
-                )
-                for fpath in result.stdout.strip().split("\n"):
-                    fpath = fpath.strip()
-                    if fpath and fpath not in pr_files_abs and ".venv" not in fpath:
-                        hits.append(f"'{term}' found in {fpath}")
-            if hits:
-                existing_context = (
-                    "**EXISTING CODE MATCHES** — files NOT in this PR that already "
-                    "reference feature keywords:\n"
-                    + "\n".join(f"- {h}" for h in hits[:10])
-                    + "\n\nIf these files already implement what this PR adds, "
-                    "the feature is a duplicate. VERDICT: BLOCK — 'already implemented'."
-                )
-                messages.insert(-1, {"role": "user", "content": existing_context})
-        except Exception:
-            pass
+        # Interdiff for re-review rounds
+        old_head_sha = pr.get("old_head_sha", "")
+        if old_head_sha and pr.get("review_rounds", 0) > 0:
+            try:
+                import ghost_git
+                new_head = ghost_git.get_head_sha(pr.get("branch", ""))
+                if new_head and old_head_sha != new_head:
+                    interdiff = ghost_git.get_interdiff(old_head_sha, new_head)
+                    if interdiff.strip():
+                        context += (
+                            "**CHANGES SINCE YOUR LAST REVIEW** "
+                            "(review these first — this is what the developer fixed):\n"
+                            f"```diff\n{interdiff[:8000]}\n```\n\n"
+                        )
+            except Exception:
+                pass
 
-        log.info("Review round 1/1 for PR %s", pr_id)
-        reviewer_text = self._chat(engine, messages)
-        if not reviewer_text:
-            log.warning("Reviewer produced no response — rejecting")
-            self.store.set_verdict(pr_id, "rejected",
-                "LLM failed to produce reviewer response")
+        # Previous inline comments for re-reviews
+        prev_comments = pr.get("inline_comments", [])
+        if prev_comments:
+            prev_round = pr.get("review_rounds", 1) - 1
+            old_comments = [c for c in prev_comments if c.get("round", 0) <= prev_round]
+            if old_comments:
+                comments_text = "\n".join(
+                    f"  [{c['severity'].upper()}] {c['file']}:{c['line']} — {c['message']}"
+                    for c in old_comments[-15:]
+                )
+                context += (
+                    f"**YOUR PREVIOUS COMMENTS ({len(old_comments)} total):**\n"
+                    f"{comments_text}\n\n"
+                    "Check if each of these was addressed by the developer.\n\n"
+                )
+
+        context += (
+            "## Your task\n"
+            "1. Call read_pr_diff() (no args) to see the file list.\n"
+            "2. Review each file with read_pr_diff(file='...').\n"
+            "3. Use read_pr_file to check surrounding code when needed.\n"
+            "4. Use grep_codebase to verify wiring and check for duplicates.\n"
+            "5. Leave comments with leave_comment for each issue found.\n"
+            "6. Use suggest_change when you can provide an exact fix.\n"
+            "7. When done, call submit_review with your verdict.\n"
+        )
+        return context
+
+    # ── Main review entry point ──────────────────────────────────────
+
+    def run_review(self, pr_id: str, engine) -> str:
+        """Run a GitHub-style code review via tool loop.
+
+        The reviewer agent browses diffs per-file, reads surrounding code,
+        leaves inline comments, suggests changes, and submits a verdict.
+
+        Returns: "approved", "rejected", or "blocked".
+        """
+        pr = self.store.get_pr(pr_id)
+        if not pr:
             return "rejected"
 
-        self.store.add_discussion(pr_id, "reviewer", reviewer_text, 1)
-        verdict = self._parse_verdict(reviewer_text)
-        log.info("Reviewer verdict: %s", verdict)
+        self.store.update_status(pr_id, "reviewing")
+        log.info("Starting review for PR %s: %s (round %d)",
+                 pr_id, pr["title"], pr.get("review_rounds", 1))
 
-        if verdict == "approve":
-            self.store.set_verdict(pr_id, "approved")
+        reviewer_tools_list = self._build_reviewer_tools(pr)
+        system_prompt = self._build_reviewer_prompt(pr)
+        context_message = self._build_review_context(pr)
+
+        from ghost_loop import ToolRegistry
+        reviewer_registry = ToolRegistry()
+        for tool_def in reviewer_tools_list:
+            reviewer_registry.register(tool_def)
+
+        try:
+            result = engine.run(
+                system_prompt=system_prompt,
+                user_message=context_message,
+                tool_registry=reviewer_registry,
+                max_steps=30,
+                temperature=0.3,
+                max_tokens=4096,
+            )
+        except Exception as exc:
+            log.error("Reviewer tool loop failed: %s", exc)
+            self.store.set_verdict(pr_id, "rejected",
+                                   f"Reviewer tool loop error: {exc}")
+            return "rejected"
+
+        updated_pr = self.store.get_pr(pr_id) or pr
+        verdict = updated_pr.get("verdict")
+
+        if not verdict:
+            log.warning("Reviewer did not call submit_review — extracting from text")
+            verdict = self._parse_verdict_from_text(result.text if result else "")
+            if verdict == "approve":
+                self.store.set_verdict(pr_id, "approved")
+            elif verdict == "block":
+                self.store.set_verdict(pr_id, "blocked", "Extracted from reviewer text")
+            else:
+                self.store.set_verdict(pr_id, "rejected", "Reviewer did not render explicit verdict")
+
+        log.info("PR %s verdict: %s", pr_id, verdict)
+
+        if verdict == "approved":
             return "approved"
-
-        if verdict == "block":
-            reason = self._extract_block_reason(reviewer_text)
-            self.store.set_verdict(pr_id, "blocked", reason)
+        elif verdict == "blocked":
             return "blocked"
+        else:
+            return "rejected"
 
-        reason = self._extract_change_requests(reviewer_text)
-        self.store.set_verdict(pr_id, "rejected", reason)
-        log.info("PR %s rejected: reviewer requested changes", pr_id)
-        return "rejected"
-
-    def _parse_verdict(self, response: str) -> str:
-        response_upper = response.upper()
-        if "VERDICT: APPROVE" in response_upper:
-            return "approve"
-        if "VERDICT: BLOCK" in response_upper:
-            return "block"
-        if "VERDICT: REQUEST_CHANGES" in response_upper:
+    @staticmethod
+    def _parse_verdict_from_text(text: str) -> str:
+        """Fallback: extract verdict from reviewer's text if submit_review wasn't called."""
+        if not text:
             return "request_changes"
-        if "VERDICT:" in response_upper:
-            after = response_upper.split("VERDICT:")[-1].strip()[:20]
-            if "APPROVE" in after:
-                return "approve"
-            if "BLOCK" in after:
-                return "block"
+        upper = text.upper()
+        if "VERDICT: APPROVE" in upper:
+            return "approve"
+        if "VERDICT: BLOCK" in upper:
+            return "block"
+        if "VERDICT: REQUEST_CHANGES" in upper:
+            return "request_changes"
         return "request_changes"
-
-    def _extract_block_reason(self, response: str) -> str:
-        lines = response.split("\n")
-        for i, line in enumerate(lines):
-            if "VERDICT: BLOCK" in line.upper():
-                rest = line.split("BLOCK")[-1].strip(" —-:")
-                if rest:
-                    return rest
-                if i + 1 < len(lines):
-                    return lines[i + 1].strip()
-        return "Blocked by reviewer"
-
-    def _extract_change_requests(self, response: str) -> str:
-        """Extract the reviewer's concerns as a concise rejection reason."""
-        lines = response.split("\n")
-        concerns = []
-        for line in lines:
-            stripped = line.strip()
-            if stripped and stripped[0:1].isdigit() and "." in stripped[:4]:
-                concerns.append(stripped)
-            elif stripped.startswith("- **") or stripped.startswith("* **"):
-                concerns.append(stripped)
-        if concerns:
-            return "\n".join(concerns[:10])
-        summary_line = lines[0].strip() if lines else ""
-        return summary_line[:500] or "Reviewer requested changes"
 
 
 # ── Singleton ────────────────────────────────────────────────────────

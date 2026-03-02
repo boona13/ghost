@@ -785,6 +785,95 @@ class EvolutionEngine:
 
         return issues
 
+    def resume_evolution(self, evolution_id):
+        """Resume a review_rejected evolution for fix-and-resubmit.
+
+        Checks out the preserved feature branch so the implementer can
+        apply targeted patches without rebuilding from scratch.
+
+        If Ghost restarted since the rejection, the evolution is no longer
+        in memory. In that case, we reconstruct it from the git branch and
+        PR data so the fix-and-resubmit flow still works across restarts.
+
+        Returns (ok, context_dict_or_error_string).
+        """
+        import ghost_git
+
+        evo = self._active_evolutions.get(evolution_id)
+
+        if not evo:
+            branch_name = f"evolve/{evolution_id}"
+            if not ghost_git.branch_exists(branch_name):
+                return False, (
+                    f"Evolution '{evolution_id}' not found and branch "
+                    f"'{branch_name}' does not exist. Start fresh with evolve_plan."
+                )
+            log.info("Reconstructing evolution %s from branch (post-restart resume)",
+                     evolution_id)
+            backup_path = self.create_backup(evolution_id, "Resume backup (post-restart)")
+            evo = {
+                "id": evolution_id,
+                "description": f"Resumed evolution {evolution_id}",
+                "files": [],
+                "level": 4,
+                "status": "review_rejected",
+                "needs_approval": False,
+                "approved": True,
+                "backup_path": backup_path,
+                "git_branch": branch_name,
+                "timestamp": time.time(),
+                "created_at": datetime.now().isoformat(),
+                "changes": [],
+                "test_results": None,
+            }
+            self._active_evolutions[evolution_id] = evo
+
+        if evo.get("status") != "review_rejected":
+            return False, (
+                f"Evolution '{evolution_id}' status is '{evo.get('status')}', "
+                "not 'review_rejected'. Cannot resume."
+            )
+
+        branch = evo.get("git_branch")
+        if not branch or not ghost_git.branch_exists(branch):
+            return False, (
+                f"Branch '{branch}' no longer exists. "
+                "Cannot resume — start fresh with evolve_plan."
+            )
+
+        evo["old_head_sha"] = ghost_git.get_head_sha(branch)
+
+        ok, msg = ghost_git.checkout(branch)
+        if not ok:
+            return False, f"Cannot checkout branch '{branch}': {msg}"
+
+        evo["status"] = "approved"
+        evo["test_results"] = None
+
+        pr_id = evo.get("pr_id", "")
+        last_feedback = ""
+        if pr_id:
+            try:
+                from ghost_pr import get_pr_store
+                pr = get_pr_store().get_pr(pr_id)
+                if pr:
+                    for d in reversed(pr.get("discussions", [])):
+                        if d.get("role") == "reviewer" and d.get("message"):
+                            last_feedback = d["message"]
+                            break
+            except Exception:
+                pass
+
+        return True, {
+            "evolution_id": evolution_id,
+            "branch": branch,
+            "old_head_sha": evo["old_head_sha"],
+            "pr_id": pr_id,
+            "review_round": evo.get("review_round", 1),
+            "files_changed": [c["file"] for c in evo.get("changes", [])],
+            "last_reviewer_feedback": last_feedback,
+        }
+
     def submit_pr(self, evolution_id, title, description, feature_id="", cfg=None):
         """Submit a PR for code review instead of deploying directly.
 
@@ -850,18 +939,22 @@ class EvolutionEngine:
         diff = ghost_git.get_diff("main", branch_name)
         changed_files = ghost_git.get_changed_files("main", branch_name)
 
-        # Reuse existing open/reviewing PR for this evolution+branch to
-        # prevent duplicate records if submit_pr is retried after an error.
+        # Reuse existing PR for this evolution+branch (GitHub-style: same PR
+        # stays open across fix-and-resubmit rounds).
         store = get_pr_store()
         pr = None
         for existing in store.list_prs():
             if (
                 existing.get("evolution_id") == evolution_id
                 and existing.get("branch") == branch_name
-                and existing.get("status") in {"open", "reviewing", "approved"}
+                and existing.get("status") in {"open", "reviewing", "approved", "rejected"}
             ):
                 pr = existing
                 store.update_diff(pr["pr_id"], diff, changed_files)
+                old_head_sha = evo.get("old_head_sha", "")
+                if old_head_sha:
+                    store.set_old_head_sha(pr["pr_id"], old_head_sha)
+                store.reopen_pr(pr["pr_id"])
                 break
         if pr is None:
             pr = store.create_pr(
@@ -926,12 +1019,31 @@ class EvolutionEngine:
                 pass
 
         if verdict == "approved":
+            main_sha = ghost_git.get_head_sha("main")
+            branch_sha = ghost_git.get_head_sha(branch_name)
+            if main_sha and branch_sha:
+                try:
+                    merge_base = subprocess.run(
+                        ["git", "merge-base", "main", branch_name],
+                        capture_output=True, text=True, timeout=10,
+                        cwd=str(PROJECT_DIR),
+                    )
+                    if merge_base.returncode == 0 and merge_base.stdout.strip() != main_sha:
+                        ok_update, update_msg = ghost_git.update_branch(branch_name)
+                        if not ok_update:
+                            ghost_git.stash_and_checkout("main")
+                            return False, f"Branch behind main and update failed (conflict): {update_msg}"
+                        _log.info("Updated branch %s with latest main before merge", branch_name)
+                except Exception as e:
+                    _log.warning("merge-base check failed, proceeding with merge: %s", e)
+
             ghost_git.checkout("main")
             ok, msg = ghost_git.merge(branch_name)
             if not ok:
                 ghost_git.stash_and_checkout("main")
                 return False, f"Merge failed after approval: {msg}"
             ghost_git.delete_branch(branch_name)
+            self._active_evolutions.pop(evolution_id, None)
             store.mark_merged(pr["pr_id"])
             return self.deploy(evolution_id, feature_id=feature_id)
 
@@ -953,15 +1065,21 @@ class EvolutionEngine:
                 f"Feature {feature_id} marked as rejected. Call task_complete."
             )
 
-        else:  # rejected
+        else:  # rejected — keep branch alive for fix-and-resubmit
             ghost_git.stash_and_checkout("main")
-            ghost_git.delete_branch(branch_name)
+
+            # Preserve the branch + evolution for the next attempt (GitHub-style)
+            evo["status"] = "review_rejected"
+            evo["pr_id"] = pr["pr_id"]
+
             retry_status = ""
             try:
                 from ghost_future_features import FutureFeaturesStore
                 if feature_id:
                     pr_after = store.get_pr(pr["pr_id"]) or pr
                     latest_reviewer_feedback = ""
+                    inline_comments = pr_after.get("inline_comments", [])
+                    suggested_changes = pr_after.get("suggested_changes", [])
                     for d in reversed(pr_after.get("discussions", [])):
                         if d.get("role") == "reviewer" and d.get("message"):
                             latest_reviewer_feedback = d["message"]
@@ -975,7 +1093,10 @@ class EvolutionEngine:
                     ok_retry, retry_status = FutureFeaturesStore().mark_review_rejected(
                         feature_id, reason,
                         max_retries=5,
-                        reviewer_feedback=latest_reviewer_feedback)
+                        reviewer_feedback=latest_reviewer_feedback,
+                        evolution_id=evolution_id,
+                        branch_name=branch_name,
+                        pr_id=pr["pr_id"])
                     if ok_retry and retry_status == "pending":
                         _delay = threading.Timer(905.0, _notify_queue_best_effort)
                         _delay.daemon = True
@@ -985,16 +1106,26 @@ class EvolutionEngine:
             pr_after = store.get_pr(pr["pr_id"]) or pr
             _log_reviewer_mistakes(pr_after, pr["pr_id"], title)
             from ghost_pr import MAX_REVIEW_ROUNDS
-            retry_msg = (
-                "Feature was re-queued to pending for another attempt."
-                if retry_status == "pending" else
-                "Feature was DEFERRED after max retry attempts."
-                if retry_status == "deferred" else
-                "Feature retry status unknown."
-            )
+            review_round = pr_after.get("review_rounds", 1)
+            evo["review_round"] = review_round
+            if review_round >= MAX_REVIEW_ROUNDS:
+                ghost_git.delete_branch(branch_name)
+                self._active_evolutions.pop(evolution_id, None)
+                retry_msg = "Feature was DEFERRED after max review rounds."
+            elif retry_status == "deferred":
+                ghost_git.delete_branch(branch_name)
+                self._active_evolutions.pop(evolution_id, None)
+                retry_msg = "Feature was DEFERRED after max retry attempts."
+            elif retry_status == "pending":
+                retry_msg = (
+                    "Feature re-queued for fix-and-resubmit. "
+                    "Branch preserved for targeted fixes."
+                )
+            else:
+                retry_msg = "Feature retry status unknown."
             return False, (
-                f"PR {pr['pr_id']} REJECTED. {retry_msg}\n"
-                f"{'You MUST call task_complete NOW — do NOT retry in this session.' if retry_status == 'deferred' else 'Call task_complete NOW. The feature has been re-queued and will be attempted in a FUTURE run with all rejection feedback accumulated.'}"
+                f"PR {pr['pr_id']} REJECTED (round {review_round}/{MAX_REVIEW_ROUNDS}). {retry_msg}\n"
+                f"{'You MUST call task_complete NOW — do NOT retry in this session.' if retry_status == 'deferred' or review_round >= MAX_REVIEW_ROUNDS else 'Call task_complete NOW. The feature has been re-queued and will be attempted in a FUTURE run with all rejection feedback accumulated.'}"
             )
 
     def deploy(self, evolution_id, feature_id=""):
@@ -1377,7 +1508,7 @@ class EvolutionEngine:
         for evo_id, evo in list(self._active_evolutions.items()):
             if only_ids is not None and evo_id not in only_ids:
                 continue
-            if evo.get("changes") and evo.get("status") != "deployed":
+            if evo.get("changes") and evo.get("status") not in ("deployed", "review_rejected"):
                 to_clean.append((evo_id, evo))
 
         for evo_id, evo in to_clean:
@@ -1665,6 +1796,26 @@ def build_evolve_tools(cfg):
             _feature_cooldowns[feature_id] = time.time()
         return msg
 
+    def evolve_resume_exec(evolution_id):
+        ok, result = engine.resume_evolution(evolution_id)
+        if not ok:
+            return f"Resume failed: {result}"
+        ctx = result
+        lines = [
+            f"Evolution {ctx['evolution_id']} resumed on branch {ctx['branch']}.",
+            f"Review round: {ctx['review_round']}",
+            f"Previous files: {', '.join(ctx['files_changed'])}",
+            f"PR ID: {ctx['pr_id']}",
+        ]
+        if ctx.get("last_reviewer_feedback"):
+            feedback = ctx["last_reviewer_feedback"][:2000]
+            lines.append(f"\nLAST REVIEWER FEEDBACK:\n{feedback}")
+        lines.append(
+            "\nYou are now on the feature branch. Apply TARGETED fixes "
+            "with evolve_apply, then evolve_test, then evolve_submit_pr."
+        )
+        return "\n".join(lines)
+
     def evolve_deploy_exec(evolution_id):
         ok, msg = engine.deploy(evolution_id)
         if ok:
@@ -1902,6 +2053,29 @@ def build_evolve_tools(cfg):
                 "required": ["evolution_id", "title", "feature_id"],
             },
             "execute": evolve_submit_pr_exec,
+        },
+        {
+            "name": "evolve_resume",
+            "description": (
+                "Resume a previously rejected evolution for fix-and-resubmit. "
+                "Call this instead of evolve_plan when a feature has "
+                "current_evolution_id and current_branch set (indicating a "
+                "previous PR was rejected but the branch is preserved). "
+                "This checks out the existing feature branch so you can "
+                "apply targeted patches to address reviewer feedback, then "
+                "re-test and re-submit to the same PR."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "evolution_id": {
+                        "type": "string",
+                        "description": "The evolution ID to resume (from the feature's current_evolution_id)",
+                    },
+                },
+                "required": ["evolution_id"],
+            },
+            "execute": evolve_resume_exec,
         },
         {
             "name": "evolve_deploy",
