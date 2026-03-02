@@ -1,7 +1,15 @@
 ---
 name: peekaboo
 description: "macOS UI automation via Peekaboo CLI: capture screens, click elements, type text, manage apps/windows"
-triggers: ["peekaboo", "ui", "window", "screen", "screenshot", "click", "automate", "automation"]
+triggers:
+  - peekaboo
+  - ui
+  - window
+  - screen
+  - screenshot
+  - click
+  - automate
+  - automation
 tools: ["shell_exec", "file_read"]
 priority: 5
 ---
