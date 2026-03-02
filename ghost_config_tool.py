@@ -124,6 +124,7 @@ CONFIG_SCHEMA = {
     "voice_chime": {"type": "boolean", "description": "Play chime on wake word detection"},
     "enable_security_audit": {"type": "boolean", "description": "Enable security audit tools"},
     "enable_session_memory": {"type": "boolean", "description": "Enable auto-save session memory"},
+    "strict_tool_registration": {"type": "boolean", "description": "Security: True prevents tool shadowing by plugins (CVE-2025-59536/21852 defense)"},
     "max_feed_items": {"type": "integer", "description": "Max items in feed (10-500)"},
     "rate_limit_seconds": {"type": "number", "description": "Rate limit between actions"},
     "growth_schedules": {"type": "object", "description": "Override cron schedules for growth routines"},

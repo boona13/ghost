@@ -297,7 +297,7 @@ DEFAULT_CONFIG = {
     "enable_skills": True,
     "enable_system_tools": True,
     "enable_browser_tools": True,
-    "strict_tool_registration": False,  # Security: True prevents tool shadowing
+    "strict_tool_registration": True,   # Security: True prevents tool shadowing (CVE-2025-59536/21852 defense)
     "enable_cron": True,
     "enable_evolve": True,
     "evolve_auto_approve": False,
