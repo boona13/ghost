@@ -766,14 +766,14 @@ class ReviewEngine:
         verdict = updated_pr.get("verdict")
 
         if not verdict:
-            log.warning("Reviewer did not call submit_review — extracting from text")
-            verdict = self._parse_verdict_from_text(result.text if result else "")
-            if verdict == "approve":
+            log.warning("Reviewer did not call submit_review — deriving verdict from comments")
+            verdict = self._derive_verdict_from_pr(updated_pr)
+            if verdict == "approved":
                 self.store.set_verdict(pr_id, "approved")
-            elif verdict == "block":
-                self.store.set_verdict(pr_id, "blocked", "Extracted from reviewer text")
+            elif verdict == "blocked":
+                self.store.set_verdict(pr_id, "blocked", "Auto-derived: critical issues found")
             else:
-                self.store.set_verdict(pr_id, "rejected", "Reviewer did not render explicit verdict")
+                self.store.set_verdict(pr_id, "rejected", "Auto-derived from reviewer comments")
 
         log.info("PR %s verdict: %s", pr_id, verdict)
 
@@ -785,18 +785,29 @@ class ReviewEngine:
             return "rejected"
 
     @staticmethod
-    def _parse_verdict_from_text(text: str) -> str:
-        """Fallback: extract verdict from reviewer's text if submit_review wasn't called."""
-        if not text:
-            return "request_changes"
-        upper = text.upper()
-        if "VERDICT: APPROVE" in upper:
-            return "approve"
-        if "VERDICT: BLOCK" in upper:
-            return "block"
-        if "VERDICT: REQUEST_CHANGES" in upper:
-            return "request_changes"
-        return "request_changes"
+    def _derive_verdict_from_pr(pr: dict) -> str:
+        """Deterministic verdict from PR metadata -- no LLM guessing.
+
+        Rules:
+        - Any comment with severity 'critical' -> blocked
+        - Any comment with severity 'high' or any suggestion -> rejected
+        - No comments and no suggestions -> approved
+        - Only 'low'/'info'/'note' severity comments -> approved
+        """
+        comments = pr.get("inline_comments", [])
+        suggestions = pr.get("suggested_changes", [])
+
+        if not comments and not suggestions:
+            return "approved"
+
+        severities = {c.get("severity", "info").lower() for c in comments}
+
+        if "critical" in severities:
+            return "blocked"
+        if "high" in severities or "warning" in severities or suggestions:
+            return "rejected"
+
+        return "approved"
 
 
 # ── Singleton ────────────────────────────────────────────────────────
