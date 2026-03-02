@@ -1953,6 +1953,14 @@ class GhostDaemon:
                 if name not in _EVOLVE_TOOL_NAMES
             ]
             inbound_registry = self.tool_registry.subset(inbound_names)
+            # Determine if any matched skill has a model override
+            skill_model = None
+            if matched_skills:
+                for skill in matched_skills:
+                    if skill.model:
+                        skill_model = skill.model
+                        break
+
             loop_result = self.engine.run(
                 system_prompt=system_prompt,
                 user_message=msg.text[:self.cfg.get("max_input_chars", 4000)],
@@ -1965,6 +1973,7 @@ class GhostDaemon:
                 history=channel_history,
                 force_tool=True,
                 tool_intent_security=self.tool_intent_security,
+                model_override=skill_model,
             )
             reply = loop_result.text
             self._tool_count += len(loop_result.tool_calls)
@@ -2064,6 +2073,14 @@ class GhostDaemon:
                     if valid_names:
                         tool_reg = tool_reg.subset(valid_names)
 
+            # Determine if any matched skill has a model override
+            skill_model = None
+            if matched_skills:
+                for skill in matched_skills:
+                    if skill.model:
+                        skill_model = skill.model
+                        break
+
             loop_result = self.engine.run(
                 system_prompt=system_prompt,
                 user_message=llm_input[:self.cfg.get("max_input_chars", 4000)],
@@ -2075,6 +2092,7 @@ class GhostDaemon:
                 force_tool=True,
                 hook_runner=self.hooks,
                 tool_intent_security=self.tool_intent_security,
+                model_override=skill_model,
             )
             result = loop_result.text
             self._tool_count += len(loop_result.tool_calls)
@@ -2170,6 +2188,14 @@ class GhostDaemon:
             valid = [n for n in set(tool_names) if n in available]
             tool_reg = self.tool_registry.subset(valid) if valid else None
 
+            # Determine if any matched skill has a model override
+            skill_model = None
+            if matched_skills:
+                for skill in matched_skills:
+                    if skill.model:
+                        skill_model = skill.model
+                        break
+
             loop_result = self.engine.run(
                 system_prompt=system_prompt,
                 user_message=ctx + "Analyze this image:",
@@ -2178,6 +2204,7 @@ class GhostDaemon:
                 image_b64=img_b64,
                 hook_runner=self.hooks,
                 tool_intent_security=self.tool_intent_security,
+                model_override=skill_model,
             )
             result = loop_result.text
             tools_used = [tc["tool"] for tc in loop_result.tool_calls]
@@ -2409,6 +2436,7 @@ class GhostDaemon:
                     max_tokens=2048,
                     hook_runner=self.hooks,
                     tool_intent_security=self.tool_intent_security,
+                    model_override=None,
                 )
                 result = loop_result.text
             else:

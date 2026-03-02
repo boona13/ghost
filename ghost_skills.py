@@ -24,10 +24,10 @@ SKILLS_USER_DIR.mkdir(parents=True, exist_ok=True)
 class Skill:
     """A loaded skill with metadata and instructions."""
     __slots__ = ("name", "description", "triggers", "tools",
-                 "body", "path", "priority", "os_filter", "requires")
+                 "body", "path", "priority", "os_filter", "requires", "model")
 
     def __init__(self, name, description, triggers, tools, body, path,
-                 priority=0, os_filter=None, requires=None):
+                 priority=0, os_filter=None, requires=None, model=None):
         self.name = name
         self.description = description
         self.triggers = triggers or []
@@ -37,6 +37,7 @@ class Skill:
         self.priority = priority
         self.os_filter = os_filter
         self.requires = requires or {}
+        self.model = model
 
     def matches(self, text, content_type=None):
         """Check if this skill should activate for the given text/type."""
@@ -127,6 +128,7 @@ def parse_skill_md(path):
         priority = 0
     os_filter = frontmatter.get("os", None)
     requires = frontmatter.get("requires", {})
+    model = frontmatter.get("model", None)
 
     return Skill(
         name=name,
@@ -138,6 +140,7 @@ def parse_skill_md(path):
         priority=priority,
         os_filter=os_filter,
         requires=requires,
+        model=model,
     )
 
 

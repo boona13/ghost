@@ -369,7 +369,9 @@ class ReviewEngine:
                 return f"File '{file}' not found in this PR. Available: {', '.join(diff_index.keys())}"
             return f"Diff for {fd['file']}:\n```diff\n{fd['diff']}\n```"
 
-        def read_pr_file(file: str, offset: int = 1, limit: int = 200, **kwargs) -> str:
+        def read_pr_file(file: str = "", offset: int = 1, limit: int = 200, **kwargs) -> str:
+            if not file:
+                return "Error: file parameter is required."
             abs_path = PROJECT_DIR / file
             if not abs_path.exists():
                 return f"File not found: {file}"
@@ -388,7 +390,9 @@ class ReviewEngine:
             except Exception as e:
                 return f"Error reading {file}: {e}"
 
-        def grep_codebase(pattern: str, include: str = "*.py", **kwargs) -> str:
+        def grep_codebase(pattern: str = "", include: str = "*.py", **kwargs) -> str:
+            if not pattern:
+                return "Error: pattern parameter is required."
             import subprocess
             try:
                 args = ["grep", "-rn", pattern, f"--include={include}", str(PROJECT_DIR)]
@@ -405,9 +409,13 @@ class ReviewEngine:
             except Exception as e:
                 return f"grep error: {e}"
 
-        def leave_comment(file: str, line: int, message: str,
+        def leave_comment(file: str = "", line: int = 0, message: str = "",
                          severity: str = "warning", **kwargs) -> str:
-            if severity not in ("critical", "warning", "suggestion", "note"):
+            file = file or ""
+            message = message or ""
+            if not file or not message:
+                return "Error: file and message are required."
+            if severity not in ("critical", "high", "warning", "suggestion", "note"):
                 severity = "warning"
             with self.store._lock:
                 current_pr = self.store._read_pr_unlocked(pr_id)
@@ -425,8 +433,13 @@ class ReviewEngine:
                 self.store._write_pr_unlocked(current_pr)
             return f"Comment added: [{severity}] {file}:{line} — {message[:80]}"
 
-        def suggest_change(file: str, old_code: str, new_code: str,
+        def suggest_change(file: str = "", old_code: str = "", new_code: str = "",
                           explanation: str = "", **kwargs) -> str:
+            file = file or ""
+            old_code = old_code or ""
+            new_code = new_code or ""
+            if not file or not old_code or not new_code:
+                return "Error: file, old_code, and new_code are required."
             with self.store._lock:
                 current_pr = self.store._read_pr_unlocked(pr_id)
                 if not current_pr:
@@ -446,7 +459,9 @@ class ReviewEngine:
 
         _review_submitted = {"done": False}
 
-        def submit_review(verdict: str, summary: str, **kwargs) -> str:
+        def submit_review(verdict: str = "REQUEST_CHANGES", summary: str = "", **kwargs) -> str:
+            verdict = verdict or "REQUEST_CHANGES"
+            summary = summary or ""
             verdict_upper = verdict.upper().strip()
             if verdict_upper in ("APPROVE", "APPROVED"):
                 verdict_key = "approved"
@@ -698,7 +713,10 @@ class ReviewEngine:
             "4. Use grep_codebase to verify wiring and check for duplicates.\n"
             "5. Leave comments with leave_comment for each issue found.\n"
             "6. Use suggest_change when you can provide an exact fix.\n"
-            "7. When done, call submit_review with your verdict.\n"
+            "7. 🔴 MANDATORY: Call submit_review(verdict, summary) EXACTLY ONCE to end the review.\n"
+            "   Your verdict MUST be one of: APPROVE, REQUEST_CHANGES, or BLOCK.\n"
+            "   If you do NOT call submit_review, your review defaults to REQUEST_CHANGES.\n"
+            "   Never just write your verdict in text — you MUST use the submit_review tool.\n"
         )
         return context
 
@@ -748,14 +766,14 @@ class ReviewEngine:
         verdict = updated_pr.get("verdict")
 
         if not verdict:
-            log.warning("Reviewer did not call submit_review — extracting from text")
-            verdict = self._parse_verdict_from_text(result.text if result else "")
-            if verdict == "approve":
+            log.warning("Reviewer did not call submit_review — deriving verdict from comments")
+            verdict = self._derive_verdict_from_pr(updated_pr)
+            if verdict == "approved":
                 self.store.set_verdict(pr_id, "approved")
-            elif verdict == "block":
-                self.store.set_verdict(pr_id, "blocked", "Extracted from reviewer text")
+            elif verdict == "blocked":
+                self.store.set_verdict(pr_id, "blocked", "Auto-derived: critical issues found")
             else:
-                self.store.set_verdict(pr_id, "rejected", "Reviewer did not render explicit verdict")
+                self.store.set_verdict(pr_id, "rejected", "Auto-derived from reviewer comments")
 
         log.info("PR %s verdict: %s", pr_id, verdict)
 
@@ -767,18 +785,29 @@ class ReviewEngine:
             return "rejected"
 
     @staticmethod
-    def _parse_verdict_from_text(text: str) -> str:
-        """Fallback: extract verdict from reviewer's text if submit_review wasn't called."""
-        if not text:
-            return "request_changes"
-        upper = text.upper()
-        if "VERDICT: APPROVE" in upper:
-            return "approve"
-        if "VERDICT: BLOCK" in upper:
-            return "block"
-        if "VERDICT: REQUEST_CHANGES" in upper:
-            return "request_changes"
-        return "request_changes"
+    def _derive_verdict_from_pr(pr: dict) -> str:
+        """Deterministic verdict from PR metadata -- no LLM guessing.
+
+        Rules:
+        - Any comment with severity 'critical' -> blocked
+        - Any comment with severity 'high' or any suggestion -> rejected
+        - No comments and no suggestions -> approved
+        - Only 'low'/'info'/'note' severity comments -> approved
+        """
+        comments = pr.get("inline_comments", [])
+        suggestions = pr.get("suggested_changes", [])
+
+        if not comments and not suggestions:
+            return "approved"
+
+        severities = {c.get("severity", "info").lower() for c in comments}
+
+        if "critical" in severities:
+            return "blocked"
+        if "high" in severities or "warning" in severities or suggestions:
+            return "rejected"
+
+        return "approved"
 
 
 # ── Singleton ────────────────────────────────────────────────────────

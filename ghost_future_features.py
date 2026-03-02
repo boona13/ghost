@@ -248,6 +248,7 @@ class FutureFeaturesStore:
 
         Returns (success: bool, error: str | None).
         Rejects if another feature is already in_progress, unless force=True.
+        Rejects if the feature is still in cooldown (retry_after not yet reached).
         """
         features = self._load()
 
@@ -262,6 +263,21 @@ class FutureFeaturesStore:
 
         for f in features:
             if f["id"] == feature_id:
+                retry_after = f.get("retry_after")
+                if retry_after and not force:
+                    try:
+                        cooldown_end = datetime.fromisoformat(retry_after)
+                        now = datetime.now()
+                        if cooldown_end > now:
+                            remaining_s = int((cooldown_end - now).total_seconds())
+                            remaining_min = max(1, remaining_s // 60)
+                            return False, (
+                                f"Feature is in cooldown (~{remaining_min} min remaining). "
+                                f"Pick a DIFFERENT feature from the list. This feature will "
+                                f"be available after {retry_after}."
+                            )
+                    except (ValueError, TypeError):
+                        pass
                 f["status"] = STATUS_IN_PROGRESS
                 f["updated_at"] = datetime.now().isoformat()
                 is_resume = bool(f.get("current_branch") and f.get("current_evolution_id"))
@@ -798,11 +814,13 @@ def build_future_features_tools(cfg, on_queue_change=None):
             if f.get("audit_notes"):
                 lines.append(f"Audit Notes: {f['audit_notes']}")
         if f.get("current_branch"):
-            lines.append(f"\n🔀 RESUME CONTEXT (fix-and-resubmit):")
+            lines.append(f"\n🔴🔴🔴 RESUME CONTEXT (fix-and-resubmit) — YOU MUST USE evolve_resume 🔴🔴🔴")
             lines.append(f"  Branch: {f.get('current_branch')}")
             lines.append(f"  Evolution ID: {f.get('current_evolution_id', 'unknown')}")
             lines.append(f"  PR ID: {f.get('current_pr_id', 'unknown')}")
             lines.append(f"  Review Round: {f.get('review_round', 0)}")
+            lines.append(f"  ACTION: Call start_future_feature THEN evolve_resume(evolution_id='{f.get('current_evolution_id')}')")
+            lines.append(f"  DO NOT call evolve_plan. DO NOT start fresh. Resume the existing branch.")
         if f.get("pr_rejections"):
             lines.append(f"\n⚠️  PAST PR REJECTIONS ({len(f['pr_rejections'])} total) — YOU MUST address ALL of these:")
             for i, rej in enumerate(f["pr_rejections"], 1):
@@ -823,11 +841,51 @@ def build_future_features_tools(cfg, on_queue_change=None):
         return f"Could not approve feature (may not exist or not require approval): {feature_id}"
 
     def _start_future_feature(feature_id: str):
-        """Mark a feature as in_progress (used by feature_implementer routine)."""
+        """Mark a feature as in_progress. Auto-resumes if branch exists."""
+        item = store.get_by_id(feature_id)
+        resume_evo = None
+        resume_branch = None
+        if item:
+            resume_evo = item.get("current_evolution_id")
+            resume_branch = item.get("current_branch")
         ok, error = store.mark_in_progress(feature_id)
-        if ok:
-            return f"Feature implementation started: {feature_id}"
-        return f"Cannot start feature: {error}"
+        if not ok:
+            return f"Cannot start feature: {error}"
+        if resume_evo and resume_branch:
+            try:
+                from ghost_evolve import get_engine
+                evo_engine = get_engine()
+                rok, result = evo_engine.resume_evolution(resume_evo)
+                if rok:
+                    ctx = result
+                    lines = [
+                        f"Feature started: {feature_id}",
+                        f"\n🔀 AUTO-RESUMED evolution {ctx['evolution_id']} on branch {ctx['branch']}.",
+                        f"Review round: {ctx['review_round']}",
+                        f"Previous files: {', '.join(ctx['files_changed'])}",
+                        f"PR ID: {ctx['pr_id']}",
+                    ]
+                    if ctx.get("last_reviewer_feedback"):
+                        feedback = ctx["last_reviewer_feedback"][:3000]
+                        lines.append(f"\nLAST REVIEWER FEEDBACK:\n{feedback}")
+                    lines.append(
+                        "\nYou are NOW on the feature branch. The code from the previous "
+                        "attempt is already here. Do NOT call evolve_plan. Do NOT start fresh.\n"
+                        "Apply TARGETED fixes via evolve_apply patches, then evolve_test, "
+                        "then evolve_submit_pr."
+                    )
+                    return "\n".join(lines)
+                else:
+                    return (
+                        f"Feature started: {feature_id}\n"
+                        f"Resume failed ({result}). Proceed with a fresh implementation."
+                    )
+            except Exception as exc:
+                return (
+                    f"Feature started: {feature_id}\n"
+                    f"Resume error ({exc}). Proceed with a fresh implementation."
+                )
+        return f"Feature started: {feature_id}"
 
     def _complete_future_feature(feature_id: str, implementation_summary: str = ""):
         """Mark a feature as completed and add to changelog (used by feature_implementer)."""
