@@ -866,33 +866,33 @@ class LoopDetector:
         detectors = self._cfg.detectors
 
         tool_total = self._tool_name_counts.get(tool_name, 0)
-        _NON_PRODUCTIVE_TOOLS = {"shell_exec", "file_read", "grep"}
-        if tool_name in _NON_PRODUCTIVE_TOOLS and tool_total >= 15:
+        _SHELL_ABUSE_WARN = 12
+        _SHELL_ABUSE_BLOCK = 20
+        if tool_name == "shell_exec" and tool_total >= _SHELL_ABUSE_WARN:
             self._warning_count += 1
-            if tool_total >= 25:
+            if tool_total >= _SHELL_ABUSE_BLOCK:
                 return LoopDetectionResult(
                     stuck=True, level="critical", detector="tool_saturation",
                     count=tool_total,
                     message=(
-                        f"BLOCKED: {tool_name} called {tool_total} times this session. "
+                        f"BLOCKED: shell_exec called {tool_total} times this session. "
                         "You are stuck in a non-productive loop. "
-                        "STOP using {tool_name} and either: "
-                        "(1) call evolve_test if your changes are complete, "
-                        "(2) call fail_future_feature if you cannot make progress, or "
-                        "(3) call task_complete to end the session."
+                        "STOP using shell_exec and either: "
+                        "(1) use file_read to inspect files, "
+                        "(2) call evolve_test if your changes are complete, "
+                        "(3) call fail_future_feature if you cannot make progress, or "
+                        "(4) call task_complete to end the session."
                     ),
                 )
-            if tool_total >= 15:
-                return LoopDetectionResult(
-                    stuck=True, level="warning", detector="tool_saturation",
-                    count=tool_total,
-                    message=(
-                        f"WARNING: {tool_name} called {tool_total} times. "
-                        "You appear stuck. If you need to patch a file, use "
-                        "file_read to get exact content then evolve_apply with patches. "
-                        "Do NOT keep using shell_exec to debug file content."
-                    ),
-                )
+            return LoopDetectionResult(
+                stuck=True, level="warning", detector="tool_saturation",
+                count=tool_total,
+                message=(
+                    f"WARNING: shell_exec called {tool_total} times. "
+                    "You appear stuck. Use file_read (not shell_exec) to inspect files. "
+                    "Use evolve_apply with patches (not shell commands) to modify files."
+                ),
+            )
 
         global_count = self._global_tool_counts.get(call_hash, 0)
         if global_count >= 5:
