@@ -894,8 +894,9 @@ class LoopDetector:
                 ),
             )
 
+        _REPEAT_EXEMPT_TOOLS = {"evolve_test", "evolve_apply", "file_read"}
         global_count = self._global_tool_counts.get(call_hash, 0)
-        if global_count >= 5:
+        if global_count >= 5 and tool_name not in _REPEAT_EXEMPT_TOOLS:
             self._warning_count += 1
             if global_count >= 8:
                 return LoopDetectionResult(

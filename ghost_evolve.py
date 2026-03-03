@@ -666,12 +666,14 @@ class EvolutionEngine:
                 )
                 ok = r.returncode == 0
                 if not ok:
-                    # Filter out benign RequestsDependencyWarning from urllib3 version mismatch
-                    filtered_stderr = re.sub(
-                        r".*RequestsDependencyWarning: urllib3 .* or chardet .* doesn't match.*\n?",
-                        "",
-                        r.stderr,
-                    )
+                    filtered_stderr = r.stderr
+                    for noise_pattern in [
+                        r".*RequestsDependencyWarning:.*\n?",
+                        r"\s*warnings\.warn\(.*\n?",
+                        r"INFO\s+\[.*\].*\n?",
+                        r"WARNING\s+\[.*\].*\n?",
+                    ]:
+                        filtered_stderr = re.sub(noise_pattern, "", filtered_stderr)
                     output = filtered_stderr.strip()[:300] if filtered_stderr.strip() else "Unknown error"
                 else:
                     output = "OK"
@@ -909,8 +911,7 @@ class EvolutionEngine:
                                             break
                                         for line_text in lines:
                                             if re.search(
-                                                rf'\b{re.escape(check_name)}\b.*\b{re.escape(cls_local)}\b'
-                                                rf'|\b{re.escape(cls_local)}\b.*\b{re.escape(check_name)}\b',
+                                                rf'\b{re.escape(check_name)}\b\s*[:=]\s*{re.escape(cls_local)}\b',
                                                 line_text
                                             ):
                                                 matches_class = True
