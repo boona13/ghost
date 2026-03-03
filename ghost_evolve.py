@@ -470,7 +470,13 @@ class EvolutionEngine:
 
         change_count = len(evo["changes"])
         msg = f"Applied change to {rel_path} ({len(new_content)} bytes). [{change_count} file(s) changed] "
-        msg += "Remember: call evolve_test then evolve_deploy when done."
+        if append:
+            msg += (
+                "CHUNK APPENDED. If you need to add more chunks, keep using append=True. "
+                "When all chunks are written, call file_read on this file BEFORE using "
+                "patches — the exact content may differ from what you expect."
+            )
+        msg += " Remember: call evolve_test then evolve_deploy when done."
         return True, msg
 
     def apply_config_change(self, evolution_id, updates):
@@ -1830,7 +1836,9 @@ def build_evolve_tools(cfg):
             "  2. evolve_apply(evo_id, 'path', content='<next ~100 lines>', append=True)\n"
             "  3. evolve_apply(evo_id, 'path', content='<next ~100 lines>', append=True)\n"
             "Each chunk must be valid partial Python (complete function/class bodies).\n"
-            "NEVER try to write an entire module in one call — it ALWAYS truncates."
+            "NEVER try to write an entire module in one call — it ALWAYS truncates.\n"
+            "After ALL chunks are written, call file_read on the new file before patching.\n\n"
+            "🔴 NEVER use shell_exec to read or inspect files. ALWAYS use file_read."
         )
         return "\n".join(parts)
 

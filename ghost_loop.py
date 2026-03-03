@@ -807,6 +807,7 @@ class LoopDetector:
         self._warning_buckets: dict[str, int] = {}
         self._call_counter = 0
         self._global_tool_counts: dict[str, int] = {}
+        self._tool_name_counts: dict[str, int] = {}
         self._warning_count = 0
 
     @staticmethod
@@ -843,6 +844,7 @@ class LoopDetector:
         if len(self._history) > self._cfg.history_size:
             self._history.pop(0)
         self._global_tool_counts[call_hash] = self._global_tool_counts.get(call_hash, 0) + 1
+        self._tool_name_counts[tool_name] = self._tool_name_counts.get(tool_name, 0) + 1
         return call_id
 
     def record_result(self, call_id, result):
@@ -862,6 +864,35 @@ class LoopDetector:
         call_hash = self._hash_args(tool_name, args)
         is_poll = self._is_poll_tool(tool_name, args)
         detectors = self._cfg.detectors
+
+        tool_total = self._tool_name_counts.get(tool_name, 0)
+        _NON_PRODUCTIVE_TOOLS = {"shell_exec", "file_read", "grep"}
+        if tool_name in _NON_PRODUCTIVE_TOOLS and tool_total >= 15:
+            self._warning_count += 1
+            if tool_total >= 25:
+                return LoopDetectionResult(
+                    stuck=True, level="critical", detector="tool_saturation",
+                    count=tool_total,
+                    message=(
+                        f"BLOCKED: {tool_name} called {tool_total} times this session. "
+                        "You are stuck in a non-productive loop. "
+                        "STOP using {tool_name} and either: "
+                        "(1) call evolve_test if your changes are complete, "
+                        "(2) call fail_future_feature if you cannot make progress, or "
+                        "(3) call task_complete to end the session."
+                    ),
+                )
+            if tool_total >= 15:
+                return LoopDetectionResult(
+                    stuck=True, level="warning", detector="tool_saturation",
+                    count=tool_total,
+                    message=(
+                        f"WARNING: {tool_name} called {tool_total} times. "
+                        "You appear stuck. If you need to patch a file, use "
+                        "file_read to get exact content then evolve_apply with patches. "
+                        "Do NOT keep using shell_exec to debug file content."
+                    ),
+                )
 
         global_count = self._global_tool_counts.get(call_hash, 0)
         if global_count >= 5:
