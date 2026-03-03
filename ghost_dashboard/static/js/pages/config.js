@@ -363,6 +363,58 @@ export async function render(container) {
     }).join('');
   }
 
+  // ── Skill Model Aliases ──────────────────────────────────────
+  const aliasContainer = container.querySelector('#skill-model-aliases-container');
+  const aliasNameInput = container.querySelector('#new-alias-name');
+  const aliasModelInput = container.querySelector('#new-alias-model');
+  const addAliasBtn = container.querySelector('#btn-add-alias');
+  let currentAliases = { ...(cfg.skill_model_aliases || {}) };
+
+  function renderAliases() {
+    if (!aliasContainer) return;
+    const entries = Object.entries(currentAliases);
+    if (entries.length === 0) {
+      aliasContainer.innerHTML = '<div class="text-[11px] text-zinc-600 col-span-full">No custom aliases defined. Add one below.</div>';
+      return;
+    }
+    aliasContainer.innerHTML = entries.map(([name, model]) => {
+      return '<div class="flex items-center gap-2 bg-surface-700/50 rounded px-2 py-1.5">' +
+        '<span class="text-xs text-ghost-400 font-medium">' + u.escapeHtml(name) + '</span>' +
+        '<span class="text-[10px] text-zinc-500 flex-1 truncate font-mono">' + u.escapeHtml(model) + '</span>' +
+        '<button class="btn btn-ghost btn-sm text-zinc-500 hover:text-red-400 remove-alias" data-alias="' + u.escapeHtml(name) + '" title="Remove">×</button>' +
+        '</div>';
+    }).join('');
+    // Attach remove handlers
+    aliasContainer.querySelectorAll('.remove-alias').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const aliasName = btn.dataset.alias;
+        delete currentAliases[aliasName];
+        renderAliases();
+      });
+    });
+  }
+
+  renderAliases();
+
+  if (addAliasBtn) {
+    addAliasBtn.addEventListener('click', () => {
+      const name = aliasNameInput?.value.trim();
+      const model = aliasModelInput?.value.trim();
+      if (!name || !model) {
+        u.toast('Both alias name and model ID are required', 'error');
+        return;
+      }
+      if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
+        u.toast('Alias name must be alphanumeric with hyphens/underscores only', 'error');
+        return;
+      }
+      currentAliases[name] = model;
+      if (aliasNameInput) aliasNameInput.value = '';
+      if (aliasModelInput) aliasModelInput.value = '';
+      renderAliases();
+    });
+  }
+
   // ── Toggles ──────────────────────────────────────────────────
   container.querySelectorAll('.toggle').forEach(el => {
     el.addEventListener('click', () => {
@@ -465,6 +517,9 @@ export async function render(container) {
       if (v) toolModels[inp.dataset.tmKey] = v;
     });
     updates.tool_models = toolModels;
+
+    // Include skill model aliases
+    updates.skill_model_aliases = currentAliases;
 
     const wakeWordsEl = document.getElementById('cfg-voice-wake-words');
     if (wakeWordsEl) updates.voice_wake_words = wakeWordsEl.value.split(',').map(s => s.trim()).filter(Boolean);
