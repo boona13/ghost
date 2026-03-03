@@ -1307,121 +1307,443 @@ def make_google_sheets_tool(cfg):
     }
 
 
+def _resolve_openrouter_key() -> Optional[str]:
+    """Resolve the OpenRouter API key from env, auth store, or config."""
+    key = os.environ.get("OPENROUTER_API_KEY", "")
+    if key and key != "__SETUP_PENDING__":
+        return key
+    try:
+        from ghost_auth_profiles import get_auth_store
+        store = get_auth_store()
+        key = store.get_api_key("openrouter")
+        if key and key != "__SETUP_PENDING__":
+            return key
+    except Exception:
+        pass
+    try:
+        cfg_file = GHOST_HOME / "config.json"
+        if cfg_file.exists():
+            data = json.loads(cfg_file.read_text())
+            k = data.get("api_key", "")
+            if k and k != "__SETUP_PENDING__":
+                return k
+    except Exception:
+        pass
+    return None
+
+
+def _get_grok_openrouter_model(cfg: Dict) -> str:
+    """Resolve the Grok model ID for OpenRouter from config."""
+    try:
+        from ghost_config_tool import get_tool_model
+        return get_tool_model("grok_openrouter", cfg)
+    except ImportError:
+        return cfg.get("tool_models", {}).get("grok_openrouter", "x-ai/grok-4-fast")
+
+
 def make_grok_tool(cfg):
-    """Create tool for Grok/X API operations."""
-    
-    def execute(action: str, **kwargs) -> str:
-        """
-        Execute Grok API operations.
-        
-        Actions:
-        - generate: Generate text (prompt, model, max_tokens)
-        - analyze_image: Analyze image (image_url, prompt)
-        - search_x: Search X/Twitter (query, max_results)
-        """
+    """Create tool for Grok/X AI operations.
+
+    Tries the direct xAI API first.  If no xAI key is configured, falls
+    back to routing through OpenRouter (which hosts Grok models).  The
+    OpenRouter model is configurable via ``tool_models.grok_openrouter``
+    in the Ghost config (default: ``x-ai/grok-4-fast``).
+
+    Capabilities:
+      - generate / create_content  (text, works via OpenRouter fallback)
+      - analyze_image              (vision, works via OpenRouter fallback)
+      - web_search / x_search      (live grounded search, xAI-only)
+      - generate_image / edit_image (Grok Imagine, xAI-only)
+    """
+
+    OPENROUTER_BASE = "https://openrouter.ai/api/v1"
+
+    def _require_xai(action_name: str):
+        """Return an error string if no direct xAI key, else None."""
         grok = GrokIntegration()
-        if not grok.is_connected():
-            return "Error: Grok API not connected. Add API key via Integrations page."
-        
+        if grok.is_connected():
+            return None
+        return (
+            f"Error: '{action_name}' requires a direct xAI API key. "
+            "This feature is not available via OpenRouter. "
+            "Add an xAI key on the Integrations page."
+        )
+
+    def _chat_completion(messages, model, max_tokens=4096):
+        """Route a chat/completions call to xAI or OpenRouter."""
+        grok = GrokIntegration()
+        if grok.is_connected():
+            data = {"model": model, "messages": messages, "max_tokens": max_tokens}
+            result = grok.api_request("chat/completions", method="POST", data=data)
+            return result, "xai"
+
+        or_key = _resolve_openrouter_key()
+        if or_key:
+            or_model = _get_grok_openrouter_model(cfg)
+            data = {"model": or_model, "messages": messages, "max_tokens": max_tokens}
+            resp = requests.post(
+                f"{OPENROUTER_BASE}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {or_key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://github.com/ghost-ai",
+                    "X-Title": "Ghost Grok Tool",
+                },
+                json=data,
+                timeout=60,
+            )
+            resp.raise_for_status()
+            return resp.json(), "openrouter"
+
+        raise ValueError(
+            "No Grok API key and no OpenRouter key available. "
+            "Add an xAI key on the Integrations page, or set up OpenRouter on the Models page."
+        )
+
+    def _responses_call(user_input: str, tools: list, model: str = "grok-3-fast"):
+        """Call xAI /v1/responses endpoint (xAI-only, no OpenRouter)."""
+        grok = GrokIntegration()
+        body = {
+            "model": model,
+            "input": [{"role": "user", "content": user_input}],
+            "tools": tools,
+        }
+        url = f"{GROK_API_BASE}/responses"
+        resp = requests.post(
+            url,
+            headers={
+                "Authorization": f"Bearer {grok.api_key}",
+                "Content-Type": "application/json",
+            },
+            json=body,
+            timeout=60,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def _extract_responses_content(data: dict) -> tuple:
+        """Extract text + citations from a /v1/responses result."""
+        content = ""
+        citations = []
+        for item in data.get("output", []):
+            if item.get("type") == "message":
+                for part in item.get("content", []):
+                    if part.get("type") == "output_text":
+                        content += part.get("text", "")
+                    elif part.get("type") == "cite":
+                        url = part.get("url", "")
+                        if url:
+                            citations.append(url)
+        if not content:
+            content = data.get("output_text", "")
+        url_citations = data.get("citations", [])
+        if url_citations:
+            citations = url_citations
+        return content, citations
+
+    def _format_with_citations(content: str, citations: list) -> str:
+        if not citations:
+            return content
+        lines = [content, "", "Sources:"]
+        for i, url in enumerate(citations[:10], 1):
+            lines.append(f"  {i}. {url}")
+        return "\n".join(lines)
+
+    # ── action handlers ─────────────────────────────────────────
+
+    def _do_generate(kwargs):
+        prompt = kwargs.get("prompt")
+        if not prompt:
+            return "Error: 'prompt' is required for generate."
+        model = kwargs.get("model", "grok-2-latest")
+        max_tokens = kwargs.get("max_tokens", 4096)
+        messages = [{"role": "user", "content": prompt}]
+        result, via = _chat_completion(messages, model, max_tokens)
+        content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+        return f"[via {via}] {content}" if via == "openrouter" else content
+
+    def _do_create_content(kwargs):
+        content_type = kwargs.get("content_type", "social_post")
+        topic = kwargs.get("topic") or kwargs.get("prompt")
+        if not topic:
+            return "Error: 'topic' (or 'prompt') is required for create_content."
+        tone = kwargs.get("tone", "witty")
+        max_tokens = kwargs.get("max_tokens", 4096)
+
+        type_instructions = {
+            "social_post": "Write a compelling social media post (Twitter/X length). Include relevant hashtags.",
+            "thread": "Write an engaging Twitter/X thread (5-8 tweets, numbered). Each tweet under 280 chars. Include a hook opener.",
+            "blog_draft": "Write a blog post draft with a catchy title, introduction, main sections with subheadings, and conclusion.",
+            "newsletter": "Write a newsletter segment: punchy subject line, brief intro, 3-5 key points with context, and a sign-off.",
+            "caption": "Write a short, engaging caption for an image/video post. Include relevant emojis and hashtags.",
+            "headline": "Generate 5-10 headline variations. Each should be punchy, curiosity-driving, and shareable.",
+            "summary": "Write a concise, engaging summary of the topic. Highlight key points, names, dates, and significance.",
+        }
+        instruction = type_instructions.get(content_type, type_instructions["social_post"])
+        system = (
+            "You are Grok, a witty and sharp AI created by xAI. You have a distinctive voice — "
+            "direct, clever, occasionally irreverent, always insightful. "
+            f"Tone: {tone}. "
+            f"Task: {instruction}"
+        )
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": topic},
+        ]
+        result, via = _chat_completion(messages, "grok-2-latest", max_tokens)
+        content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+        return f"[via {via}] {content}" if via == "openrouter" else content
+
+    def _do_analyze_image(kwargs):
+        image_url = kwargs.get("image_url")
+        if not image_url:
+            return "Error: 'image_url' is required for analyze_image."
+        prompt = kwargs.get("prompt", "Describe this image in detail")
+        messages = [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": image_url}},
+            ],
+        }]
+        result, via = _chat_completion(messages, "grok-2-vision-latest", 4096)
+        content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+        return f"[via {via}] {content}" if via == "openrouter" else content
+
+    def _do_web_search(kwargs):
+        err = _require_xai("web_search")
+        if err:
+            return err
+        query = kwargs.get("query")
+        if not query:
+            return "Error: 'query' is required for web_search."
+        tool_def = {"type": "web_search"}
+        allowed = kwargs.get("allowed_domains")
+        excluded = kwargs.get("excluded_domains")
+        if allowed:
+            tool_def["allowed_domains"] = allowed[:5]
+        if excluded:
+            tool_def["excluded_domains"] = excluded[:5]
+        data = _responses_call(query, [tool_def])
+        content, citations = _extract_responses_content(data)
+        return _format_with_citations(content, citations)
+
+    def _do_x_search(kwargs):
+        err = _require_xai("x_search")
+        if err:
+            return err
+        query = kwargs.get("query")
+        if not query:
+            return "Error: 'query' is required for x_search."
+        tool_def = {"type": "x_search"}
+        handles = kwargs.get("allowed_x_handles")
+        excluded_handles = kwargs.get("excluded_x_handles")
+        from_date = kwargs.get("from_date")
+        to_date = kwargs.get("to_date")
+        if handles:
+            tool_def["allowed_x_handles"] = handles[:10]
+        if excluded_handles:
+            tool_def["excluded_x_handles"] = excluded_handles[:10]
+        if from_date:
+            tool_def["from_date"] = from_date
+        if to_date:
+            tool_def["to_date"] = to_date
+        data = _responses_call(query, [tool_def])
+        content, citations = _extract_responses_content(data)
+        return _format_with_citations(content, citations)
+
+    def _do_generate_image(kwargs):
+        err = _require_xai("generate_image")
+        if err:
+            return err
+        prompt = kwargs.get("prompt")
+        if not prompt:
+            return "Error: 'prompt' is required for generate_image."
+        grok = GrokIntegration()
+        body = {
+            "model": "grok-imagine-image",
+            "prompt": prompt,
+        }
+        n = kwargs.get("n")
+        if n and n > 1:
+            body["n"] = min(int(n), 4)
+        aspect = kwargs.get("aspect_ratio")
+        if aspect:
+            body["aspect_ratio"] = aspect
+        resp = requests.post(
+            f"{GROK_API_BASE}/images/generations",
+            headers={
+                "Authorization": f"Bearer {grok.api_key}",
+                "Content-Type": "application/json",
+            },
+            json=body,
+            timeout=120,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        images = data.get("data", [])
+        if not images:
+            return "No images generated."
+        lines = [f"Generated {len(images)} image(s):"]
+        for i, img in enumerate(images, 1):
+            url = img.get("url", "")
+            lines.append(f"  {i}. {url}")
+        return "\n".join(lines)
+
+    def _do_edit_image(kwargs):
+        err = _require_xai("edit_image")
+        if err:
+            return err
+        prompt = kwargs.get("prompt")
+        image_url = kwargs.get("image_url")
+        if not prompt:
+            return "Error: 'prompt' is required for edit_image."
+        if not image_url:
+            return "Error: 'image_url' is required for edit_image."
+        grok = GrokIntegration()
+        body = {
+            "model": "grok-imagine-image",
+            "prompt": prompt,
+            "image": {"url": image_url, "type": "image_url"},
+        }
+        aspect = kwargs.get("aspect_ratio")
+        if aspect:
+            body["aspect_ratio"] = aspect
+        resp = requests.post(
+            f"{GROK_API_BASE}/images/edits",
+            headers={
+                "Authorization": f"Bearer {grok.api_key}",
+                "Content-Type": "application/json",
+            },
+            json=body,
+            timeout=120,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        images = data.get("data", [])
+        if not images:
+            return "No images generated."
+        return f"Edited image: {images[0].get('url', '')}"
+
+    # ── dispatcher ──────────────────────────────────────────────
+
+    ACTION_MAP = {
+        "generate": _do_generate,
+        "create_content": _do_create_content,
+        "analyze_image": _do_analyze_image,
+        "web_search": _do_web_search,
+        "x_search": _do_x_search,
+        "search_x": _do_x_search,  # backward compat alias
+        "generate_image": _do_generate_image,
+        "edit_image": _do_edit_image,
+    }
+
+    def execute(action: str, **kwargs) -> str:
+        handler = ACTION_MAP.get(action)
+        if not handler:
+            return f"Unknown action: {action}. Available: {', '.join(ACTION_MAP)}"
         try:
-            if action == "generate":
-                prompt = kwargs.get("prompt")
-                if not prompt:
-                    return "Error: 'prompt' is required for generate."
-                model = kwargs.get("model", "grok-2-latest")
-                max_tokens = kwargs.get("max_tokens", 4096)
-                
-                data = {
-                    "model": model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": max_tokens,
-                }
-                
-                result = grok.api_request("chat/completions", method="POST", data=data)
-                content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-                return content
-            
-            elif action == "analyze_image":
-                image_url = kwargs.get("image_url")
-                if not image_url:
-                    return "Error: 'image_url' is required for analyze_image."
-                prompt = kwargs.get("prompt", "Describe this image")
-                
-                data = {
-                    "model": "grok-2-vision-latest",
-                    "messages": [{
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {"type": "image_url", "image_url": {"url": image_url}}
-                        ]
-                    }],
-                    "max_tokens": 4096,
-                }
-                
-                result = grok.api_request("chat/completions", method="POST", data=data)
-                content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-                return content
-            
-            elif action == "search_x":
-                query = kwargs.get("query")
-                if not query:
-                    return "Error: 'query' is required for search_x."
-                max_results = kwargs.get("max_results", 10)
-                
-                prompt = f"Search X (Twitter) for: {query}. Return up to {max_results} relevant results with context."
-                
-                data = {
-                    "model": "grok-2-latest",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 4096,
-                    "tools": [{"type": "web_search"}],
-                }
-                
-                result = grok.api_request("chat/completions", method="POST", data=data)
-                content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-                return content
-            
-            else:
-                return f"Unknown action: {action}"
-                
+            return handler(kwargs)
         except Exception as e:
-            return f"Grok error: {e}"
-    
+            return f"Grok error ({action}): {e}"
+
     return {
         "name": "grok_api",
-        "description": "Access Grok/X AI - generate text, analyze images, search X/Twitter",
+        "description": (
+            "Access Grok / X AI — generate text, create content, search the web and X/Twitter "
+            "with live grounding and citations, generate and edit images, analyze images. "
+            "Text actions (generate, create_content, analyze_image) work via OpenRouter fallback "
+            "when no xAI key is configured. Search and image actions require a direct xAI key."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["generate", "analyze_image", "search_x"],
-                    "description": "Grok action to perform"
+                    "enum": [
+                        "generate", "create_content", "analyze_image",
+                        "web_search", "x_search",
+                        "generate_image", "edit_image",
+                    ],
+                    "description": (
+                        "Action to perform. "
+                        "generate: general text generation. "
+                        "create_content: content creation (social posts, threads, blogs, newsletters, captions, headlines, summaries). "
+                        "analyze_image: describe/analyze an image. "
+                        "web_search: live web search with citations (xAI key required). "
+                        "x_search: live X/Twitter search with citations and handle/date filters (xAI key required). "
+                        "generate_image: create images from text prompts (xAI key required). "
+                        "edit_image: edit an existing image with natural language instructions (xAI key required)."
+                    ),
                 },
                 "prompt": {
                     "type": "string",
-                    "description": "Text prompt for generate or analyze_image."
+                    "description": "Text prompt. Used by: generate, create_content (as 'topic'), analyze_image, generate_image, edit_image.",
                 },
-                "model": {
+                "topic": {
                     "type": "string",
-                    "description": "Grok model to use (default: 'grok-2-latest'). For images: 'grok-2-vision-latest'."
+                    "description": "Topic for create_content. Alias for 'prompt'.",
                 },
-                "max_tokens": {
-                    "type": "integer",
-                    "description": "Max tokens in response (default: 4096)."
-                },
-                "image_url": {
+                "content_type": {
                     "type": "string",
-                    "description": "URL of image to analyze (for analyze_image)."
+                    "enum": ["social_post", "thread", "blog_draft", "newsletter", "caption", "headline", "summary"],
+                    "description": "Type of content to create (default: social_post). Only for create_content.",
+                },
+                "tone": {
+                    "type": "string",
+                    "description": "Tone for create_content (default: 'witty'). E.g. 'professional', 'humorous', 'serious', 'casual', 'inspirational'.",
                 },
                 "query": {
                     "type": "string",
-                    "description": "Search query for search_x."
+                    "description": "Search query for web_search or x_search.",
                 },
-                "max_results": {
+                "allowed_domains": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "For web_search: limit results to these domains (max 5). E.g. ['bbc.com', 'reuters.com'].",
+                },
+                "excluded_domains": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "For web_search: exclude these domains (max 5).",
+                },
+                "allowed_x_handles": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "For x_search: only include posts from these X handles (max 10). E.g. ['elonmusk', 'xaboratory'].",
+                },
+                "excluded_x_handles": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "For x_search: exclude posts from these X handles (max 10).",
+                },
+                "from_date": {
+                    "type": "string",
+                    "description": "For x_search: start date in ISO8601 (e.g. '2026-01-01').",
+                },
+                "to_date": {
+                    "type": "string",
+                    "description": "For x_search: end date in ISO8601 (e.g. '2026-03-01').",
+                },
+                "image_url": {
+                    "type": "string",
+                    "description": "Image URL for analyze_image or edit_image.",
+                },
+                "aspect_ratio": {
+                    "type": "string",
+                    "description": "For generate_image/edit_image: e.g. '1:1', '16:9', '9:16', '4:3', 'auto'. Default: auto.",
+                },
+                "n": {
                     "type": "integer",
-                    "description": "Max results for search_x (default: 10)."
+                    "description": "For generate_image: number of images to generate (1-4). Default: 1.",
+                },
+                "model": {
+                    "type": "string",
+                    "description": "Grok model override for generate (default: grok-2-latest). Ignored when using OpenRouter fallback.",
+                },
+                "max_tokens": {
+                    "type": "integer",
+                    "description": "Max tokens for text actions (default: 4096).",
                 },
             },
             "required": ["action"],

@@ -1605,3 +1605,55 @@ select.form-input option {
   50% { opacity: 0.7; box-shadow: 0 0 0 4px rgba(16, 185, 129, 0); }
 }
 
+/* ── Provider Chain Sortable ──────────────────────────────────── */
+.chain-list { display: flex; flex-direction: column; gap: 2px; }
+.chain-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-radius: 6px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  transition: background 150ms, border-color 150ms, opacity 150ms, transform 150ms;
+  user-select: none; cursor: grab;
+}
+.chain-item:hover { background: rgba(255,255,255,0.06); border-color: rgba(124,58,237,0.3); }
+.chain-item.dragging { opacity: 0.4; transform: scale(0.97); }
+.chain-item.drag-over { border-color: #7c3aed; background: rgba(124,58,237,0.08); }
+.chain-item.disabled { opacity: 0.35; }
+.chain-item .grip {
+  color: rgba(255,255,255,0.2); font-size: 14px; cursor: grab;
+  flex-shrink: 0; width: 16px; text-align: center; line-height: 1;
+}
+.chain-item:hover .grip { color: rgba(255,255,255,0.5); }
+.chain-item .pos {
+  width: 18px; height: 18px; border-radius: 50%;
+  background: rgba(124,58,237,0.15); color: #a78bfa;
+  font-size: 10px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.chain-item.disabled .pos { background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.25); }
+.chain-item .provider-name { flex: 1; font-size: 12px; color: #d4d4d8; }
+.chain-item.disabled .provider-name { color: rgba(255,255,255,0.3); text-decoration: line-through; }
+.chain-item .chain-toggle {
+  width: 28px; height: 16px; border-radius: 8px; position: relative;
+  background: rgba(255,255,255,0.1); cursor: pointer; flex-shrink: 0;
+  transition: background 150ms;
+}
+.chain-item .chain-toggle.on { background: #7c3aed; }
+.chain-item .chain-toggle .dot {
+  position: absolute; top: 2px; left: 2px;
+  width: 12px; height: 12px; border-radius: 50%;
+  background: white; transition: transform 150ms;
+}
+.chain-item .chain-toggle.on .dot { transform: translateX(12px); }
+.chain-card-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 8px;
+}
+.chain-card-header h4 { font-size: 12px; font-weight: 600; color: white; margin: 0; }
+.chain-card-header .chain-reset {
+  font-size: 10px; color: rgba(255,255,255,0.3); cursor: pointer;
+  background: none; border: none; padding: 2px 6px;
+  transition: color 150ms;
+}
+.chain-card-header .chain-reset:hover { color: #a78bfa; }
+

@@ -288,6 +288,12 @@ def analyze_image(image: str, prompt: str = "Describe this image in detail.",
         return {"error": f"Failed to load image: {e}"}
 
     providers_to_try = _apply_model_overrides(VISION_PROVIDERS, cfg)
+
+    chain = (cfg or {}).get("provider_chains", {}).get("vision")
+    if chain:
+        id_order = {pid: i for i, pid in enumerate(chain)}
+        providers_to_try.sort(key=lambda p: id_order.get(p["id"], 999))
+
     if preferred_provider:
         providers_to_try.sort(key=lambda p: 0 if p["id"] == preferred_provider else 1)
 

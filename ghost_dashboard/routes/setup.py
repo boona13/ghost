@@ -170,7 +170,7 @@ def complete_setup():
 
 @bp.route("/api/setup/provider-order", methods=["PUT"])
 def set_provider_order():
-    """Set the fallback order of providers."""
+    """Set the fallback order of providers and rebuild the live chain."""
     data = request.get_json(silent=True) or {}
     order = data.get("order", [])
     if not isinstance(order, list):
@@ -179,6 +179,19 @@ def set_provider_order():
     from ghost_auth_profiles import get_auth_store
     store = get_auth_store()
     store.provider_order = order
+
+    from ghost_dashboard import get_daemon
+    daemon = get_daemon()
+    if daemon and hasattr(daemon, 'engine'):
+        from ghost import load_config, DEFAULT_CONFIG
+        cfg = daemon.cfg
+        model = cfg.get("model", DEFAULT_CONFIG["model"])
+        fallback_models = cfg.get("fallback_models", [])
+        new_chain = daemon._build_provider_chain(model, fallback_models)
+        daemon.engine.fallback_chain.set_provider_chain(new_chain)
+        if getattr(daemon, 'chat_engine', None):
+            daemon.chat_engine.fallback_chain.set_provider_chain(list(new_chain))
+
     return jsonify({"ok": True, "order": order})
 
 

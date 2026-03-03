@@ -167,10 +167,13 @@ def text_to_speech(text: str, voice: str = "", provider: str = "",
     keys = _resolve_keys(auth_store)
     errors = []
 
+    default_chain = (cfg or {}).get("provider_chains", {}).get(
+        "tts", ["edge", "openai", "elevenlabs"])
+
     providers_to_try = []
     if provider:
         providers_to_try.append(provider)
-    providers_to_try.extend(["edge", "openai", "elevenlabs"])
+    providers_to_try.extend(default_chain)
     seen = set()
     ordered = []
     for p in providers_to_try:

@@ -63,6 +63,14 @@ stop the next one. Check EVERY section below.
 - Optional params MUST have defaults (e.g. `_=None`, `limit=50`)
 - If schema says `"required": ["x"]`, execute MUST accept `x` as keyword arg
 
+### Interface Compatibility (caused ghost_subagents crash — 3 hallucinated methods)
+- New code imports a class from ghost_*.py = use grep_codebase to find the class definition
+- Verify EVERY method called on that class actually exists in the source module
+- LLMs hallucinate plausible method names for internal classes they haven't seen before
+- Known hallucinations: run_once (real: run), list_tools (real: get_all/names), get_skill (real: .get)
+- If the new code calls a method that does NOT exist on the imported class = BLOCK
+- Check: does the constructor signature match how the class is instantiated?
+
 ### Thread Safety and File I/O (caused PR rejections)
 - Shared files (log.json, config.json, growth_log.json) need locking or atomic writes
 - Write to new paths = `Path.mkdir(parents=True, exist_ok=True)` first
@@ -84,6 +92,78 @@ stop the next one. Check EVERY section below.
 ### Scope
 - PR should do ONE thing. Flag unrelated changes.
 - Multi-scope changes = REQUEST_CHANGES to split them.
+
+### Cross-Platform Compatibility
+- File paths MUST use pathlib.Path, never hardcoded `/` or `\\`
+- No system-level dependencies (brew install, apt install)
+- subprocess.run() with argument lists, not shell strings
+- Platform-specific code must handle Darwin, Linux, AND Windows
+
+## GHOST SYSTEM MAP (know the codebase so you can verify wiring)
+
+### Backend Modules (ghost_*.py in project root)
+ghost.py          — Main daemon, GhostDaemon class, tool registration
+ghost_loop.py     — ToolLoopEngine, ToolRegistry, LoopDetector
+ghost_tools.py    — Core tools: shell_exec, file_read/write, web_fetch, notify
+ghost_browser.py  — Playwright browser automation
+ghost_memory.py   — SQLite FTS5 memory (save/search/prune)
+ghost_cron.py     — CronService, build_cron_tools()
+ghost_skills.py   — SkillLoader, trigger matching, prompt injection
+ghost_plugins.py  — PluginLoader, HookRunner
+ghost_evolve.py   — EvolutionEngine, build_evolve_tools()
+ghost_autonomy.py — Growth routines, action items, self-repair
+ghost_mcp.py      — MCP client, build_mcp_tools()
+ghost_integrations.py — Google APIs + Grok/X
+ghost_credentials.py  — Encrypted credential storage
+ghost_web_search.py   — Multi-provider web search
+ghost_code_intel.py   — AST-based code analysis
+ghost_supervisor.py   — Process supervisor (PROTECTED — cannot modify)
+
+### Dashboard Routes (ghost_dashboard/routes/)
+chat.py, status.py, config.py, models.py, identity.py, skills.py,
+cron.py, memory.py, feed.py, daemon.py, evolve.py, integrations.py,
+autonomy.py, mcp.py, webhooks.py, setup.py, accounts.py
+New blueprints MUST be registered in routes/__init__.py
+
+### Frontend (ghost_dashboard/static/js/)
+app.js  — SPA router, sidebar, navigate()
+api.js  — window.GhostAPI: get/post/put/patch/del wrappers
+Pages in pages/*.js — each exports render(container)
+New pages MUST have: route in app.js, sidebar link in index.html
+
+## CORE API REFERENCE (use this to verify method calls in PRs)
+These are the EXACT public methods on the most-imported classes.
+If the PR calls a method NOT listed here, use grep_codebase to verify
+it exists. LLM-generated code frequently hallucinates plausible method
+names that don't exist.
+
+ToolLoopEngine (ghost_loop.py):
+  __init__(api_key, model, base_url=..., fallback_models=None, auth_store=None, provider_chain=None, usage_tracker=None)
+  .run(system_prompt, user_message, tool_registry=None, max_steps=20, temperature=0.3, max_tokens=..., ...)
+  .single_shot(system_prompt, user_message, temperature=0.2, max_tokens=1024, image_b64=None, images=None)
+  Known hallucinations: .run_once(), .step(), .execute() — these DO NOT exist
+
+ToolRegistry (ghost_loop.py):
+  .register(tool_def)  .unregister(name)  .get(name)  .get_all() -> dict
+  .names() -> list  .execute(name, args) -> str  .to_openai_schema() -> list
+  .subset(names) -> ToolRegistry  .is_reserved(name) -> bool
+  Known hallucinations: .list_tools(), .list(), .find() — these DO NOT exist
+
+SkillLoader (ghost_skills.py):
+  .skills -> Dict[str, Skill]  .reload()  .check_reload(interval=30)
+  .match(text, content_type=None, disabled=None) -> list[Skill]
+  .get(name) -> Skill|None  .list_all() -> list[Skill]
+  Known hallucinations: .get_skill(), .load() — these DO NOT exist
+
+## Review Strategy
+- Be SYSTEMATIC: review integration files first (ghost.py, routes/__init__.py,
+  app.js, index.html), then new modules, then patches to existing files.
+- Be THOROUGH: use grep_codebase to verify every claim the diff makes.
+  If the diff adds `from ghost_foo import Bar`, grep to confirm Bar exists.
+- Be SPECIFIC: file names, line numbers, exact code references. Never vague.
+- Be ACTIONABLE: every REQUEST_CHANGES must have a clear fix path.
+- Use suggest_change when the fix is obvious — saves the developer a round trip.
+- Leave comments AS YOU GO, not all at the end. One concern per comment.
 
 **Response format as REVIEWER:**
 1. Brief summary (1-2 sentences)
@@ -458,6 +538,74 @@ class ReviewEngine:
                 self.store._write_pr_unlocked(current_pr)
             return f"Suggestion added for {file}: {explanation[:80]}"
 
+        def get_my_comments(**kwargs) -> str:
+            """Read back all comments left so far in this review round."""
+            current_pr = self.store.get_pr(pr_id)
+            if not current_pr:
+                return "PR not found"
+            current_round = current_pr.get("review_rounds", 1)
+            comments = current_pr.get("inline_comments", [])
+            this_round = [c for c in comments if c.get("round", 0) == current_round]
+            suggestions = current_pr.get("suggested_changes", [])
+            this_round_sug = [s for s in suggestions if s.get("round", 0) == current_round]
+
+            if not this_round and not this_round_sug:
+                return "No comments or suggestions left yet in this review round."
+
+            lines = [f"Your comments this round ({len(this_round)} comments, {len(this_round_sug)} suggestions):\n"]
+            for c in this_round:
+                lines.append(
+                    f"  [{c['severity'].upper()}] {c['file']}:{c['line']} — {c['message']}"
+                )
+            for s in this_round_sug:
+                lines.append(
+                    f"  [SUGGEST] {s['file']} — {s.get('explanation', '')[:80]}"
+                )
+            return "\n".join(lines)
+
+        def get_review_history(**kwargs) -> str:
+            """Read the full PR discussion history and past rejection feedback."""
+            current_pr = self.store.get_pr(pr_id)
+            if not current_pr:
+                return "PR not found"
+            lines = []
+
+            discussions = current_pr.get("discussions", [])
+            if discussions:
+                lines.append(f"=== DISCUSSION HISTORY ({len(discussions)} messages) ===")
+                for d in discussions:
+                    role = d.get("role", "?").upper()
+                    rnd = d.get("round", "?")
+                    ts = d.get("timestamp", "")[:16]
+                    msg = d.get("message", "")[:1200]
+                    lines.append(f"\n[Round {rnd} | {role} | {ts}]\n{msg}")
+
+            all_comments = current_pr.get("inline_comments", [])
+            all_suggestions = current_pr.get("suggested_changes", [])
+            current_round = current_pr.get("review_rounds", 1)
+            prev_comments = [c for c in all_comments if c.get("round", 0) < current_round]
+            prev_suggestions = [s for s in all_suggestions if s.get("round", 0) < current_round]
+
+            if prev_comments or prev_suggestions:
+                lines.append(f"\n=== PREVIOUS COMMENTS ({len(prev_comments)} comments, "
+                             f"{len(prev_suggestions)} suggestions) ===")
+                for c in prev_comments:
+                    rnd = c.get("round", "?")
+                    lines.append(
+                        f"  [Round {rnd}] [{c['severity'].upper()}] "
+                        f"{c['file']}:{c['line']} — {c['message']}"
+                    )
+                for s in prev_suggestions:
+                    rnd = s.get("round", "?")
+                    lines.append(
+                        f"  [Round {rnd}] [SUGGEST] {s['file']} — "
+                        f"{s.get('explanation', '')[:120]}"
+                    )
+
+            if not lines:
+                return "No prior review history for this PR."
+            return "\n".join(lines)
+
         _review_submitted = {"done": False}
 
         def submit_review(verdict: str = "REQUEST_CHANGES", summary: str = "", **kwargs) -> str:
@@ -585,6 +733,34 @@ class ReviewEngine:
                 "execute": suggest_change,
             },
             {
+                "name": "get_my_comments",
+                "description": (
+                    "Read back all comments and suggestions you have left so far "
+                    "in this review round. Use this to refresh your memory before "
+                    "calling submit_review — especially after reviewing many files, "
+                    "since older tool results may have been compacted."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                },
+                "execute": get_my_comments,
+            },
+            {
+                "name": "get_review_history",
+                "description": (
+                    "Read the full PR discussion history: all past reviewer verdicts "
+                    "and summaries, implementer responses, and previous inline comments "
+                    "from all rounds. Use this on re-reviews to understand what was "
+                    "rejected before and why."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                },
+                "execute": get_review_history,
+            },
+            {
                 "name": "submit_review",
                 "description": (
                     "Submit your final review verdict. MUST be called exactly once "
@@ -653,7 +829,24 @@ class ReviewEngine:
             f"**Files changed ({len(file_diffs)}):**\n{file_list}\n\n"
         )
 
-        # Injection history for re-reviews
+        # ── PR discussion history (reviewer summaries + implementer responses) ──
+        discussions = pr.get("discussions", [])
+        if discussions:
+            current_round = pr.get("review_rounds", 1)
+            prev_discussions = [d for d in discussions if d.get("round", 0) < current_round]
+            if prev_discussions:
+                disc_lines = []
+                for d in prev_discussions[-6:]:
+                    role = d.get("role", "unknown").upper()
+                    rnd = d.get("round", "?")
+                    msg = d.get("message", "")[:800]
+                    disc_lines.append(f"  [Round {rnd} — {role}] {msg}")
+                context += (
+                    f"**REVIEW DISCUSSION HISTORY** ({len(prev_discussions)} messages):\n"
+                    + "\n".join(disc_lines) + "\n\n"
+                )
+
+        # ── Rejection history from feature store ──
         if pr.get("feature_id"):
             try:
                 from ghost_future_features import FutureFeaturesStore
@@ -661,7 +854,7 @@ class ReviewEngine:
                 rejections = feat.get("pr_rejections", []) if feat else []
                 if rejections:
                     history_text = "\n".join(
-                        f"- Attempt {r.get('attempt', i+1)}: {r.get('feedback', 'unknown')[:300]}"
+                        f"- Attempt {r.get('attempt', i+1)}: {r.get('feedback', 'unknown')[:800]}"
                         for i, r in enumerate(rejections[-3:])
                     )
                     context += (
@@ -673,7 +866,7 @@ class ReviewEngine:
             except Exception:
                 pass
 
-        # Interdiff for re-review rounds
+        # ── Interdiff for re-review rounds ──
         old_head_sha = pr.get("old_head_sha", "")
         if old_head_sha and pr.get("review_rounds", 0) > 0:
             try:
@@ -682,15 +875,17 @@ class ReviewEngine:
                 if new_head and old_head_sha != new_head:
                     interdiff = ghost_git.get_interdiff(old_head_sha, new_head)
                     if interdiff.strip():
+                        trimmed = interdiff[:4000]
+                        overflow = " (truncated — use read_pr_diff for full diffs)" if len(interdiff) > 4000 else ""
                         context += (
                             "**CHANGES SINCE YOUR LAST REVIEW** "
-                            "(review these first — this is what the developer fixed):\n"
-                            f"```diff\n{interdiff[:8000]}\n```\n\n"
+                            f"(review these first — this is what the developer fixed){overflow}:\n"
+                            f"```diff\n{trimmed}\n```\n\n"
                         )
             except Exception:
                 pass
 
-        # Previous inline comments for re-reviews
+        # ── Previous inline comments for re-reviews ──
         prev_comments = pr.get("inline_comments", [])
         if prev_comments:
             prev_round = pr.get("review_rounds", 1) - 1
@@ -706,15 +901,25 @@ class ReviewEngine:
                     "Check if each of these was addressed by the developer.\n\n"
                 )
 
+        is_rereview = pr.get("review_rounds", 1) > 1
+        context += "## Your task\n"
+        if is_rereview:
+            context += (
+                "⚠️ This is a RE-REVIEW (round {round}). The developer made changes "
+                "to address your previous feedback.\n"
+                "0. Call get_review_history() FIRST to see your past verdicts, comments,\n"
+                "   and rejection reasons. This is critical — do NOT skip it.\n"
+            ).format(round=pr.get("review_rounds", 1))
         context += (
-            "## Your task\n"
             "1. Call read_pr_diff() (no args) to see the file list.\n"
             "2. Review each file with read_pr_diff(file='...').\n"
             "3. Use read_pr_file to check surrounding code when needed.\n"
             "4. Use grep_codebase to verify wiring and check for duplicates.\n"
             "5. Leave comments with leave_comment for each issue found.\n"
             "6. Use suggest_change when you can provide an exact fix.\n"
-            "7. 🔴 MANDATORY: Call submit_review(verdict, summary) EXACTLY ONCE to end the review.\n"
+            "7. BEFORE submitting: call get_my_comments to refresh your memory of all\n"
+            "   issues found — older comments may have been compacted from your context.\n"
+            "8. 🔴 MANDATORY: Call submit_review(verdict, summary) EXACTLY ONCE to end.\n"
             "   Your verdict MUST be one of: APPROVE, REQUEST_CHANGES, or BLOCK.\n"
             "   If you do NOT call submit_review, your review defaults to REQUEST_CHANGES.\n"
             "   Never just write your verdict in text — you MUST use the submit_review tool.\n"
@@ -743,6 +948,15 @@ class ReviewEngine:
         system_prompt = self._build_reviewer_prompt(pr)
         context_message = self._build_review_context(pr)
 
+        try:
+            from ghost_loop import EvolveContextLogger
+            ctx_log = EvolveContextLogger.get()
+            ctx_log.set_session(session_id=pr_id, caller="pr_reviewer")
+            if pr.get("feature_id"):
+                ctx_log.set_feature(pr["feature_id"], pr.get("title", ""))
+        except Exception:
+            pass
+
         from ghost_loop import ToolRegistry
         reviewer_registry = ToolRegistry()
         for tool_def in reviewer_tools_list:
@@ -762,6 +976,21 @@ class ReviewEngine:
             self.store.set_verdict(pr_id, "rejected",
                                    f"Reviewer tool loop error: {exc}")
             return "rejected"
+
+        try:
+            from ghost_loop import EvolveContextLogger
+            is_rereview = pr.get("review_rounds", 1) > 1
+            EvolveContextLogger.get().log_skill_compliance(
+                role="reviewer",
+                tool_calls=result.tool_calls,
+                extra={
+                    "is_rereview": is_rereview,
+                    "review_round": pr.get("review_rounds", 1),
+                    "pr_id": pr_id,
+                },
+            )
+        except Exception:
+            pass
 
         updated_pr = self.store.get_pr(pr_id) or pr
         verdict = updated_pr.get("verdict")

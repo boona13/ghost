@@ -222,11 +222,17 @@ def _build_chat_history(daemon, max_turns=10):
         chat_items = chat_items[-max_turns:]
 
         history = []
+        max_assistant_chars = 1500
         for item in chat_items:
             user_msg = item.get("source", "").strip()
             assistant_msg = (item.get("result") or "").strip()
             if user_msg and assistant_msg:
                 history.append({"role": "user", "content": user_msg})
+                if len(assistant_msg) > max_assistant_chars:
+                    assistant_msg = (
+                        assistant_msg[:max_assistant_chars]
+                        + "\n...[previous response truncated for context budget]"
+                    )
                 history.append({"role": "assistant", "content": assistant_msg})
         return history
     except Exception:

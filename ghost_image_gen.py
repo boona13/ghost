@@ -156,34 +156,40 @@ def _resolve_image_providers(auth_store=None, cfg=None) -> list[dict]:
     """Build ordered list of available image generation providers."""
     from ghost_config_tool import get_tool_model
 
-    providers = []
-
-    or_key = _resolve_key("openrouter", auth_store, cfg)
-    if or_key:
-        providers.append({
-            "name": "openrouter",
-            "fn": _generate_openrouter,
-            "key": or_key,
+    candidates = {
+        "openrouter": lambda: {
+            "name": "openrouter", "fn": _generate_openrouter,
+            "key": _resolve_key("openrouter", auth_store, cfg),
             "model": get_tool_model("image_gen_openrouter", cfg),
-        })
-
-    gemini_key = _resolve_key("google", auth_store, cfg)
-    if gemini_key:
-        providers.append({
-            "name": "google-gemini",
-            "fn": _generate_gemini,
-            "key": gemini_key,
+        },
+        "google": lambda: {
+            "name": "google-gemini", "fn": _generate_gemini,
+            "key": _resolve_key("google", auth_store, cfg),
             "model": get_tool_model("image_gen_gemini", cfg),
-        })
-
-    openai_key = _resolve_key("openai", auth_store, cfg)
-    if openai_key:
-        providers.append({
-            "name": "openai",
-            "fn": _generate_openai,
-            "key": openai_key,
+        },
+        "openai": lambda: {
+            "name": "openai", "fn": _generate_openai,
+            "key": _resolve_key("openai", auth_store, cfg),
             "model": get_tool_model("image_gen_openai", cfg),
-        })
+        },
+    }
+
+    chain = (cfg or {}).get("provider_chains", {}).get("image_gen",
+             ["openrouter", "google", "openai"])
+
+    providers = []
+    seen = set()
+    for pid in chain:
+        if pid in candidates and pid not in seen:
+            seen.add(pid)
+            p = candidates[pid]()
+            if p["key"]:
+                providers.append(p)
+    for pid, factory in candidates.items():
+        if pid not in seen:
+            p = factory()
+            if p["key"]:
+                providers.append(p)
 
     return providers
 

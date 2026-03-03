@@ -499,53 +499,73 @@ def _search_gemini(query: str, count: int = 5, freshness: str = "") -> dict:
 
 PROVIDERS = [
     {
+        "id": "perplexity_openrouter",
         "name": "perplexity (openrouter)",
         "fn": _search_perplexity_openrouter,
         "key_fn": _get_openrouter_key,
     },
     {
+        "id": "perplexity_direct",
         "name": "perplexity (direct)",
         "fn": _search_perplexity_direct,
         "key_fn": _get_perplexity_key,
     },
     {
+        "id": "grok",
         "name": "grok",
         "fn": _search_grok,
         "key_fn": _get_grok_key,
     },
     {
+        "id": "openai",
         "name": "openai",
         "fn": _search_openai,
         "key_fn": _get_openai_key,
     },
     {
+        "id": "brave",
         "name": "brave",
         "fn": _search_brave,
         "key_fn": _get_brave_key,
     },
     {
+        "id": "gemini",
         "name": "gemini",
         "fn": _search_gemini,
         "key_fn": _get_gemini_key,
     },
 ]
 
+_PROVIDER_BY_ID = {p["id"]: p for p in PROVIDERS}
 
-def get_available_providers() -> list[dict]:
+
+def _get_ordered_providers(cfg: dict | None = None) -> list[dict]:
+    """Return PROVIDERS reordered by the user's configured chain."""
+    if cfg:
+        chain = (cfg.get("provider_chains") or {}).get("web_search")
+        if chain:
+            ordered = [_PROVIDER_BY_ID[pid] for pid in chain if pid in _PROVIDER_BY_ID]
+            seen = {p["id"] for p in ordered}
+            ordered.extend(p for p in PROVIDERS if p["id"] not in seen)
+            return ordered
+    return list(PROVIDERS)
+
+
+def get_available_providers(cfg: dict = None) -> list[dict]:
     """Return list of providers with availability status."""
     result = []
-    for p in PROVIDERS:
+    for p in _get_ordered_providers(cfg):
         has_key = bool(p["key_fn"]())
         result.append({"name": p["name"], "available": has_key})
     return result
 
 
 def search(query: str, count: int = 5, freshness: str = "",
-           provider: str = "") -> dict:
+           provider: str = "", cfg: dict = None) -> dict:
     """Run a web search with automatic fallback across providers.
     
     If provider is specified, only that provider is tried.
-    Otherwise, tries each available provider in order until one succeeds.
+    Otherwise, tries each available provider in the configured order.
     """
     ck = _cache_key(provider or "auto", query, count=count, freshness=freshness)
     cached = _cache_get(ck)
@@ -554,13 +574,14 @@ def search(query: str, count: int = 5, freshness: str = "",
         return cached
 
     errors = []
+    ordered = _get_ordered_providers(cfg)
 
     if provider:
-        targets = [p for p in PROVIDERS if provider.lower() in p["name"].lower()]
+        targets = [p for p in ordered if provider.lower() in p["name"].lower()]
         if not targets:
-            return {"error": f"Unknown provider '{provider}'. Available: {[p['name'] for p in PROVIDERS]}"}
+            return {"error": f"Unknown provider '{provider}'. Available: {[p['name'] for p in ordered]}"}
     else:
-        targets = [p for p in PROVIDERS if p["key_fn"]()]
+        targets = [p for p in ordered if p["key_fn"]()]
 
     if not targets:
         return {
@@ -606,7 +627,7 @@ def build_web_search_tools(cfg: dict = None) -> list[dict]:
 
     def web_search_exec(query: str, count: int = 5, freshness: str = "",
                         provider: str = ""):
-        result = search(query, count=count, freshness=freshness, provider=provider)
+        result = search(query, count=count, freshness=freshness, provider=provider, cfg=cfg)
 
         if "error" in result:
             return result["error"]
@@ -631,7 +652,7 @@ def build_web_search_tools(cfg: dict = None) -> list[dict]:
         return "\n".join(lines)
 
     def web_search_providers_exec():
-        providers = get_available_providers()
+        providers = get_available_providers(cfg)
         lines = ["Web Search Providers:"]
         for p in providers:
             icon = "active" if p["available"] else "no API key"

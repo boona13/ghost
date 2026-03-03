@@ -640,65 +640,81 @@ class VoiceEngine:
     # ── STT ──────────────────────────────────────────────────────
 
     def _transcribe(self, audio_path: str) -> str:
-        """Transcribe audio using the configured provider chain.
-
-        Auto order: moonshine → openrouter → openai → groq → vosk
-        """
+        """Transcribe audio using the configured provider chain."""
         provider = self.stt_provider
         tried = []
 
-        if provider in ("auto", "moonshine"):
-            try:
-                return _transcribe_moonshine(audio_path)
-            except ImportError:
-                tried.append("moonshine: not installed")
-            except Exception as exc:
-                tried.append(f"moonshine: {exc}")
-                log.warning("Moonshine STT failed: %s", exc)
+        default_chain = ["moonshine", "openrouter", "whisper", "groq", "vosk"]
+        chain = (self.cfg.get("provider_chains") or {}).get("voice_stt", default_chain)
 
-        if provider in ("auto", "openrouter"):
-            key = self._get_key("openrouter")
-            if key:
-                try:
-                    return _transcribe_openrouter(audio_path, key)
-                except Exception as exc:
-                    tried.append(f"openrouter: {exc}")
-                    log.warning("OpenRouter Whisper failed: %s", exc)
-            elif provider == "auto":
-                tried.append("openrouter: no key")
+        stt_dispatch = {
+            "moonshine": self._try_moonshine,
+            "openrouter": self._try_openrouter,
+            "whisper": self._try_whisper,
+            "groq": self._try_groq,
+            "vosk": self._try_vosk,
+        }
 
-        if provider in ("auto", "whisper"):
-            key = self._get_key("openai")
-            if key:
-                try:
-                    return _transcribe_whisper_api(audio_path, key)
-                except Exception as exc:
-                    tried.append(f"whisper: {exc}")
-                    log.warning("Whisper API failed: %s", exc)
-            elif provider == "auto":
-                tried.append("whisper: no key")
-
-        if provider in ("auto", "groq"):
-            key = self._get_key("groq")
-            if key:
-                try:
-                    return _transcribe_groq(audio_path, key)
-                except Exception as exc:
-                    tried.append(f"groq: {exc}")
-                    log.warning("Groq Whisper failed: %s", exc)
-            elif provider == "auto":
-                tried.append("groq: no key")
-
-        if provider in ("auto", "vosk"):
-            try:
-                return _transcribe_vosk(audio_path)
-            except Exception as exc:
-                tried.append(f"vosk: {exc}")
-                log.warning("Vosk STT failed: %s", exc)
+        order = chain if provider == "auto" else [provider]
+        for pid in order:
+            fn = stt_dispatch.get(pid)
+            if not fn:
+                continue
+            result, err = fn(audio_path)
+            if result is not None:
+                return result
+            if err:
+                tried.append(f"{pid}: {err}")
 
         log.error("All STT providers failed for %s — %s", audio_path,
                   "; ".join(tried))
         return ""
+
+    def _try_moonshine(self, audio_path):
+        try:
+            return _transcribe_moonshine(audio_path), None
+        except ImportError:
+            return None, "not installed"
+        except Exception as exc:
+            log.warning("Moonshine STT failed: %s", exc)
+            return None, str(exc)
+
+    def _try_openrouter(self, audio_path):
+        key = self._get_key("openrouter")
+        if not key:
+            return None, "no key"
+        try:
+            return _transcribe_openrouter(audio_path, key), None
+        except Exception as exc:
+            log.warning("OpenRouter Whisper failed: %s", exc)
+            return None, str(exc)
+
+    def _try_whisper(self, audio_path):
+        key = self._get_key("openai")
+        if not key:
+            return None, "no key"
+        try:
+            return _transcribe_whisper_api(audio_path, key), None
+        except Exception as exc:
+            log.warning("Whisper API failed: %s", exc)
+            return None, str(exc)
+
+    def _try_groq(self, audio_path):
+        key = self._get_key("groq")
+        if not key:
+            return None, "no key"
+        try:
+            return _transcribe_groq(audio_path, key), None
+        except Exception as exc:
+            log.warning("Groq Whisper failed: %s", exc)
+            return None, str(exc)
+
+    def _try_vosk(self, audio_path):
+        try:
+            return _transcribe_vosk(audio_path), None
+        except Exception as exc:
+            log.warning("Vosk STT failed: %s", exc)
+            return None, str(exc)
 
     def _get_key(self, provider: str) -> str:
         env_map = {

@@ -99,8 +99,16 @@ def get_integrations():
         "ghost_credentials_configured": has_ghost_google_credentials(),
     }
     
+    or_fallback = False
+    if not grok.is_connected():
+        try:
+            from ghost_integrations import _resolve_openrouter_key
+            or_fallback = bool(_resolve_openrouter_key())
+        except Exception:
+            pass
     grok_status = {
         "connected": grok.is_connected(),
+        "openrouter_fallback": or_fallback,
     }
     
     web_search_providers = get_search_providers()

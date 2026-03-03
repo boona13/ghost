@@ -853,6 +853,15 @@ def build_future_features_tools(cfg, on_queue_change=None):
         ok, error = store.mark_in_progress(feature_id)
         if not ok:
             return f"Cannot start feature: {error}"
+
+        try:
+            from ghost_loop import EvolveContextLogger
+            EvolveContextLogger.get().set_feature(
+                feature_id=feature_id,
+                feature_title=(item.get("title", "") if item else ""),
+            )
+        except Exception:
+            pass
         if resume_evo and resume_branch:
             try:
                 from ghost_evolve import get_engine
@@ -920,6 +929,11 @@ def build_future_features_tools(cfg, on_queue_change=None):
             )
         except Exception:
             pass
+        try:
+            from ghost_loop import EvolveContextLogger
+            EvolveContextLogger.get().clear()
+        except Exception:
+            pass
         return f"Feature completed: [{feature_id}] {item['title']}"
 
     def _fail_future_feature(feature_id: str, error: str = ""):
@@ -927,6 +941,11 @@ def build_future_features_tools(cfg, on_queue_change=None):
         ok = store.mark_failed(feature_id, error)
         if ok:
             _notify_queue()
+            try:
+                from ghost_loop import EvolveContextLogger
+                EvolveContextLogger.get().clear()
+            except Exception:
+                pass
             return f"Feature marked as failed: {feature_id}"
         return f"Feature not found: {feature_id}"
 

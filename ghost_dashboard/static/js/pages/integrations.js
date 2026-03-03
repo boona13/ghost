@@ -144,15 +144,77 @@ export async function render(container) {
               </div>
               <div>
                 <h3 class="font-semibold text-white">Grok / X AI</h3>
-                <p class="text-sm text-zinc-400">API key configured</p>
+                <p class="text-sm text-zinc-400">Full access (direct xAI key)</p>
               </div>
             </div>
             <span class="px-2 py-1 text-xs bg-emerald-500/20 text-emerald-400 rounded">Connected</span>
+          </div>
+
+          <div class="grid grid-cols-2 md:grid-cols-3 gap-2 mb-4">
+            ${['Text Gen', 'Content Creation', 'Web Search', 'X Search', 'Image Gen', 'Image Edit', 'Vision'].map(s =>
+              `<div class="flex items-center gap-2 p-2 rounded bg-surface-700/50 text-emerald-400">
+                <span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:#10b981;flex-shrink:0"><svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
+                <span class="text-xs">${s}</span>
+              </div>`
+            ).join('')}
           </div>
           
           <div class="flex gap-2">
             <button id="btn-grok-test" class="btn btn-secondary btn-sm">Test API</button>
             <button id="btn-grok-disconnect" class="btn btn-danger btn-sm">Remove Key</button>
+          </div>
+        </div>
+      `;
+    } else if (grok.openrouter_fallback) {
+      const caps = [
+        {name: 'Text Gen',         on: true},
+        {name: 'Content Creation', on: true},
+        {name: 'Vision',           on: true},
+        {name: 'Web Search',       on: false},
+        {name: 'X Search',         on: false},
+        {name: 'Image Gen',        on: false},
+        {name: 'Image Edit',       on: false},
+      ];
+      return `
+        <div class="stat-card border-l-4 border-amber-500">
+          <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-lg bg-zinc-800 flex items-center justify-center">
+                <svg class="w-6 h-6 text-white" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M18.6 8.4l-3.4 6.8h-1.8l3.4-6.8H12V6h8v2.4h-1.4zM6 6h5v2.4H7.6l3.4 6.8h-1.8L5.6 8.4H4V6h2z"/>
+                </svg>
+              </div>
+              <div>
+                <h3 class="font-semibold text-white">Grok / X AI</h3>
+                <p class="text-sm text-zinc-400">Partial access via OpenRouter</p>
+              </div>
+            </div>
+            <span class="px-2 py-1 text-xs bg-amber-500/20 text-amber-400 rounded">Fallback</span>
+          </div>
+
+          <div class="grid grid-cols-2 md:grid-cols-3 gap-2 mb-4">
+            ${caps.map(c => {
+              const icon = c.on
+                ? '<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:#10b981;flex-shrink:0"><svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>'
+                : '<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:#52525b;flex-shrink:0"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>';
+              return `<div class="flex items-center gap-2 p-2 rounded bg-surface-700/50 ${c.on ? 'text-emerald-400' : 'text-zinc-600'}">
+                ${icon}
+                <span class="text-xs">${c.name}</span>
+              </div>`;
+            }).join('')}
+          </div>
+          
+          <p class="text-xs text-zinc-500 mb-3">
+            Model: configurable in <a href="#config" class="text-ghost-400 hover:underline">Config &rarr; Models</a>.
+            Add an xAI key to unlock search, image gen/edit.
+          </p>
+
+          <div class="space-y-3">
+            <input type="password" id="grok-api-key" placeholder="xAI API Key (starts with xai-)" class="form-input w-full text-sm">
+            <button id="btn-grok-connect" class="btn btn-primary w-full">Add xAI Key for Full Access</button>
+            <p class="text-xs text-zinc-500">
+              Get your key from <a href="https://console.x.ai" target="_blank" class="text-ghost-400 hover:underline">xAI Console</a>
+            </p>
           </div>
         </div>
       `;
@@ -175,7 +237,8 @@ export async function render(container) {
             <input type="password" id="grok-api-key" placeholder="xAI API Key (starts with xai-)" class="form-input w-full text-sm">
             <button id="btn-grok-connect" class="btn btn-primary w-full">Save API Key</button>
             <p class="text-xs text-zinc-500">
-              Get your API key from <a href="https://console.x.ai" target="_blank" class="text-ghost-400 hover:underline">xAI Console</a>
+              Get your API key from <a href="https://console.x.ai" target="_blank" class="text-ghost-400 hover:underline">xAI Console</a>.
+              Or set up OpenRouter on the <a href="#models" class="text-ghost-400 hover:underline">Models page</a> to use Grok via OpenRouter.
             </p>
           </div>
         </div>
@@ -338,7 +401,7 @@ export async function render(container) {
         </div>
         <div class="p-3 rounded bg-surface-700/50">
           <div class="font-medium text-white text-sm">grok_api</div>
-          <div class="text-xs text-zinc-500 mt-1">AI generation, X search</div>
+          <div class="text-xs text-zinc-500 mt-1">Text, content creation, X/web search, image gen/edit</div>
         </div>
         <div class="p-3 rounded bg-surface-700/50">
           <div class="font-medium text-white text-sm">web_search</div>

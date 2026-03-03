@@ -915,11 +915,9 @@ def _build_embedding_provider(api_key: str | None = None,
         gemini_model = ""
         ollama_model = ""
 
-    providers: list[EmbeddingProvider] = []
-
+    candidates = {}
     if api_key:
-        providers.append(OpenRouterEmbeddingProvider(api_key, model=or_model))
-
+        candidates["openrouter"] = OpenRouterEmbeddingProvider(api_key, model=or_model)
     gemini_key = os.environ.get("GOOGLE_AI_API_KEY", "")
     if not gemini_key and auth_store:
         try:
@@ -927,9 +925,20 @@ def _build_embedding_provider(api_key: str | None = None,
         except Exception:
             pass
     if gemini_key:
-        providers.append(GeminiEmbeddingProvider(gemini_key, model=gemini_model))
+        candidates["gemini"] = GeminiEmbeddingProvider(gemini_key, model=gemini_model)
+    candidates["ollama"] = OllamaEmbeddingProvider(model=ollama_model)
 
-    providers.append(OllamaEmbeddingProvider(model=ollama_model))
+    chain = (cfg or {}).get("provider_chains", {}).get(
+        "embeddings", ["openrouter", "gemini", "ollama"])
+    providers: list[EmbeddingProvider] = []
+    seen = set()
+    for pid in chain:
+        if pid in candidates and pid not in seen:
+            seen.add(pid)
+            providers.append(candidates[pid])
+    for pid, prov in candidates.items():
+        if pid not in seen:
+            providers.append(prov)
 
     if not providers:
         return SimpleEmbeddingProvider()

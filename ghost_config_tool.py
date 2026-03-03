@@ -95,6 +95,8 @@ CONFIG_SCHEMA = {
     "enable_plugins": {"type": "boolean", "description": "Enable plugin system"},
     "enable_skills": {"type": "boolean", "description": "Enable skills system"},
     "enable_browser_tools": {"type": "boolean", "description": "Enable browser automation"},
+    "enable_browser_use": {"type": "boolean", "description": "Enable AI-native browser automation (browser-use)"},
+    "enable_channels": {"type": "boolean", "description": "Enable messaging channels (Telegram, Discord, etc.)"},
     "enable_cron": {"type": "boolean", "description": "Enable cron scheduler"},
     "enable_evolve": {"type": "boolean", "description": "Enable self-evolution"},
     "enable_future_features": {"type": "boolean", "description": "Enable autonomous feature implementation (evolve loop)"},
@@ -155,6 +157,11 @@ CONFIG_SCHEMA = {
         "description": "Compression ratio for Claude 4.6+ context window (0.0-1.0, default 0.5). Higher = more aggressive compression. Only applies when anthropic_context_compaction is enabled.",
     },
     "strict_tool_registration": {"type": "boolean", "description": "Security: True prevents tool shadowing by plugins (CVE-2025-59536/21852 defense)"},
+    "enable_langfuse": {"type": "boolean", "description": "Enable Langfuse observability (LLM tracing, monitoring, cost analytics)"},
+    "langfuse_host": {"type": "string", "description": "Langfuse server URL (default: https://cloud.langfuse.com)"},
+    "langfuse_public_key": {"type": "string", "description": "Langfuse public key for authentication"},
+    "langfuse_secret_key": {"type": "string", "description": "Langfuse secret key for authentication"},
+    "langfuse_project_id": {"type": "string", "description": "Langfuse project ID"},
     "enable_mcp": {"type": "boolean", "description": "Enable MCP (Model Context Protocol) client for external tool servers"},
     "mcp_servers": {
         "type": "object",
@@ -175,8 +182,12 @@ CONFIG_SCHEMA = {
     },
     "max_feed_items": {"type": "integer", "description": "Max items in feed (10-500)"},
     "rate_limit_seconds": {"type": "number", "description": "Rate limit between actions"},
+    "web_fetch_max_chars": {"type": "integer", "description": "Max characters to keep from web fetch results (default: 50000)"},
+    "web_fetch_timeout_seconds": {"type": "integer", "description": "Timeout for web fetch requests in seconds (default: 30)"},
+    "max_shell_sessions": {"type": "integer", "description": "Max concurrent shell sessions (default: 5)"},
+    "max_background_processes": {"type": "integer", "description": "Max background processes allowed (default: 10)"},
     "growth_schedules": {"type": "object", "description": "Override cron schedules for growth routines"},
-    "dashboard_port": {"type": "integer", "description": "Dashboard HTTP port"},
+    "dashboard_port": {"type": "integer", "description": "Dashboard HTTP port (1024-65535, default: 3333)"},
     "disabled_skills": {"type": "array", "description": "List of skill names to disable"},
     "tool_models": {
         "type": "object",
@@ -195,6 +206,7 @@ CONFIG_SCHEMA = {
             "web_search_grok": "grok-3-fast",
             "web_search_openai": "gpt-4.1-mini",
             "web_search_gemini": "gemini-2.5-flash",
+            "grok_openrouter": "x-ai/grok-4-fast",
             "tts_openai": "tts-1",
             "tts_elevenlabs": "eleven_multilingual_v2",
             "embedding_openrouter": "openai/text-embedding-3-small",
@@ -206,6 +218,18 @@ CONFIG_SCHEMA = {
         "type": "object",
         "description": "Model aliases for per-skill model overrides. Keys are alias names, values are provider/model strings. Built-in aliases: cheap, fast, capable, smart, vision, code. User-defined aliases override defaults.",
         "additionalProperties": {"type": "string"},
+    },
+    "provider_chains": {
+        "type": "object",
+        "description": "Configurable provider fallback order for each capability. Each key is a capability name, value is an ordered array of provider IDs.",
+        "properties": {
+            "web_search": {"type": "array", "items": {"type": "string"}, "description": "Web search provider fallback order"},
+            "image_gen": {"type": "array", "items": {"type": "string"}, "description": "Image generation provider fallback order"},
+            "vision": {"type": "array", "items": {"type": "string"}, "description": "Vision/image analysis provider fallback order"},
+            "tts": {"type": "array", "items": {"type": "string"}, "description": "Text-to-speech provider fallback order"},
+            "embeddings": {"type": "array", "items": {"type": "string"}, "description": "Embedding provider fallback order"},
+            "voice_stt": {"type": "array", "items": {"type": "string"}, "description": "Voice speech-to-text provider fallback order"},
+        },
     },
 }
 
@@ -224,6 +248,7 @@ TOOL_MODEL_DEFAULTS = {
     "web_search_grok": "grok-3-fast",
     "web_search_openai": "gpt-4.1-mini",
     "web_search_gemini": "gemini-2.5-flash",
+    "grok_openrouter": "x-ai/grok-4-fast",
     "tts_openai": "tts-1",
     "tts_elevenlabs": "eleven_multilingual_v2",
     "embedding_openrouter": "openai/text-embedding-3-small",
@@ -319,7 +344,58 @@ def _validate_patch(patch: dict) -> tuple[bool, str]:
         val = patch["dashboard_port"]
         if not isinstance(val, int) or val < 1024 or val > 65535:
             return False, "dashboard_port must be 1024-65535"
-    
+
+    if "web_fetch_max_chars" in patch:
+        val = patch["web_fetch_max_chars"]
+        if not isinstance(val, int) or val < 1000 or val > 200000:
+            return False, "web_fetch_max_chars must be 1000-200000"
+
+    if "web_fetch_timeout_seconds" in patch:
+        val = patch["web_fetch_timeout_seconds"]
+        if not isinstance(val, int) or val < 5 or val > 120:
+            return False, "web_fetch_timeout_seconds must be 5-120"
+
+    if "max_shell_sessions" in patch:
+        val = patch["max_shell_sessions"]
+        if not isinstance(val, int) or val < 1 or val > 20:
+            return False, "max_shell_sessions must be 1-20"
+
+    if "max_background_processes" in patch:
+        val = patch["max_background_processes"]
+        if not isinstance(val, int) or val < 1 or val > 50:
+            return False, "max_background_processes must be 1-50"
+
+    if "anthropic_effort" in patch:
+        val = patch["anthropic_effort"]
+        if val not in ("low", "medium", "high"):
+            return False, "anthropic_effort must be 'low', 'medium', or 'high'"
+
+    if "anthropic_context_compaction_ratio" in patch:
+        val = patch["anthropic_context_compaction_ratio"]
+        if not isinstance(val, (int, float)) or val < 0 or val > 1:
+            return False, "anthropic_context_compaction_ratio must be 0.0-1.0"
+
+    if "provider_chains" in patch:
+        val = patch["provider_chains"]
+        if not isinstance(val, dict):
+            return False, "provider_chains must be an object"
+        VALID_PROVIDERS = {
+            "web_search": {"perplexity_openrouter", "perplexity_direct", "grok", "openai", "brave", "gemini"},
+            "image_gen": {"openrouter", "google", "openai"},
+            "vision": {"openai", "openrouter", "google", "anthropic", "ollama"},
+            "tts": {"edge", "openai", "elevenlabs"},
+            "embeddings": {"openrouter", "gemini", "ollama"},
+            "voice_stt": {"moonshine", "openrouter", "whisper", "groq", "vosk"},
+        }
+        for chain_key, chain_val in val.items():
+            if chain_key not in VALID_PROVIDERS:
+                return False, f"Unknown provider chain: {chain_key}"
+            if not isinstance(chain_val, list):
+                return False, f"provider_chains.{chain_key} must be an array"
+            for pid in chain_val:
+                if pid not in VALID_PROVIDERS[chain_key]:
+                    return False, f"Unknown provider '{pid}' in {chain_key} chain. Valid: {', '.join(sorted(VALID_PROVIDERS[chain_key]))}"
+
     if "dangerous_command_policy" in patch:
         ok, err = _validate_dangerous_command_policy(patch["dangerous_command_policy"])
         if not ok:

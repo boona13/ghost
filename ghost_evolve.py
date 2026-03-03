@@ -783,6 +783,98 @@ class EvolutionEngine:
                                 "message": "File write without preceding Path.mkdir(parents=True, exist_ok=True)",
                             })
 
+            # Rule 5: missing-method — calls to non-existent methods on imported ghost_* classes
+            try:
+                tree = ast.parse(source, filename=fpath)
+            except SyntaxError:
+                tree = None
+            if tree is not None:
+                imported_classes = {}
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("ghost_"):
+                        src_mod = PROJECT_DIR / f"{node.module}.py"
+                        if not src_mod.exists():
+                            continue
+                        for alias in node.names:
+                            name = alias.name
+                            if name and name[0].isupper():
+                                imported_classes[alias.asname or name] = (node.module, name, src_mod)
+
+                if imported_classes:
+                    class_methods_cache = {}
+                    for cls_local, (mod_name, cls_real, src_path) in imported_classes.items():
+                        cache_key = f"{mod_name}.{cls_real}"
+                        if cache_key not in class_methods_cache:
+                            try:
+                                src_tree = ast.parse(src_path.read_text(), filename=str(src_path))
+                            except (SyntaxError, OSError):
+                                continue
+                            methods = set()
+                            for snode in ast.walk(src_tree):
+                                if isinstance(snode, ast.ClassDef) and snode.name == cls_real:
+                                    for item in snode.body:
+                                        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                                            methods.add(item.name)
+                                    break
+                            if methods:
+                                class_methods_cache[cache_key] = methods
+                        methods = class_methods_cache.get(cache_key)
+                        if not methods:
+                            continue
+
+                        for call_node in ast.walk(tree):
+                            if not isinstance(call_node, ast.Call):
+                                continue
+                            func = call_node.func
+                            if not isinstance(func, ast.Attribute):
+                                continue
+                            method_name = func.attr
+                            if method_name.startswith("_"):
+                                continue
+                            call_line = getattr(func, "lineno", 0)
+                            if changed_lines is not None and call_line not in changed_lines:
+                                continue
+
+                            called_on = func.value
+                            matches_class = False
+                            if isinstance(called_on, ast.Name) and called_on.id == cls_local:
+                                matches_class = True
+                            elif isinstance(called_on, ast.Attribute):
+                                type_hint = getattr(called_on, "attr", "")
+                                if type_hint and type_hint[0].isupper() and type_hint == cls_local:
+                                    matches_class = True
+                            if not matches_class:
+                                if isinstance(called_on, ast.Attribute):
+                                    var_name = called_on.attr
+                                elif isinstance(called_on, ast.Name):
+                                    var_name = called_on.id
+                                else:
+                                    var_name = None
+                                if var_name:
+                                    names_to_check = [var_name]
+                                    if var_name.startswith("_"):
+                                        names_to_check.append(var_name.lstrip("_"))
+                                    for check_name in names_to_check:
+                                        if matches_class:
+                                            break
+                                        for line_text in lines:
+                                            if re.search(
+                                                rf'\b{re.escape(check_name)}\b.*\b{re.escape(cls_local)}\b'
+                                                rf'|\b{re.escape(cls_local)}\b.*\b{re.escape(check_name)}\b',
+                                                line_text
+                                            ):
+                                                matches_class = True
+                                                break
+
+                            if matches_class and method_name not in methods:
+                                issues.append({
+                                    "file": rel, "line": call_line, "rule": "missing-method",
+                                    "message": (
+                                        f"'{cls_real}.{method_name}()' does not exist in {mod_name}.py. "
+                                        f"Available methods: {', '.join(sorted(m for m in methods if not m.startswith('_')))}"
+                                    ),
+                                })
+
         return issues
 
     def resume_evolution(self, evolution_id):

@@ -71,26 +71,84 @@ export async function render(container) {
       </div>
 
       <div class="stat-card">
-        <div class="text-xs text-zinc-500 mb-2">Fallback Chain <span class="text-zinc-600">(★ = primary provider)</span></div>
-        <div class="flex flex-wrap gap-1" id="chain-display">
-          ${(chain.chain || []).map((entry, i) => {
-            const isActive = entry === chain.active;
-            const isPrimary = i === 0;
-            const failed = chain.failures && chain.failures[entry];
-            let color = 'bg-surface-800 text-zinc-400 border-surface-600/30';
-            if (isActive) color = 'bg-ghost-900/30 text-ghost-400 border-ghost-500/40';
-            else if (failed) color = 'bg-red-900/20 text-red-400/60 border-red-500/20';
-            return `
-              <div class="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-mono border ${color}">
-                ${isPrimary ? '<span class="text-ghost-400">★</span>' : ''}
-                ${u.escapeHtml(entry)}
-                ${isActive ? '<span class="text-ghost-400">●</span>' : ''}
-                ${failed ? `<span class="text-red-400/50">(${failed}s ago)</span>` : ''}
-              </div>
-              ${i < (chain.chain || []).length - 1 ? '<span class="text-zinc-600 text-xs">→</span>' : ''}
-            `;
-          }).join('')}
+        <div class="chain-card-header">
+          <div>
+            <div class="text-xs text-zinc-500 mb-0.5">LLM Provider Fallback Order</div>
+            <div class="text-[10px] text-zinc-600">Drag to reorder. First configured provider is tried first. ★ = primary.</div>
+          </div>
+          <button class="btn btn-primary btn-sm" id="btn-save-provider-order" style="font-size:10px;padding:3px 10px">Save Order</button>
         </div>
+        <div class="chain-list" id="llm-provider-chain">
+          ${(() => {
+            const chainProviders = (chain.chain || []).map(e => e.split(':')[0]);
+            const allProvIds = providerData.map(p => p.id);
+            const seen = new Set();
+            const ordered = [];
+            for (const pid of chainProviders) { if (!seen.has(pid) && allProvIds.includes(pid)) { seen.add(pid); ordered.push(pid); } }
+            for (const pid of allProvIds) { if (!seen.has(pid)) { seen.add(pid); ordered.push(pid); } }
+            return ordered.map((pid, i) => {
+              const prov = providerData.find(p => p.id === pid);
+              const name = prov ? prov.name : pid;
+              const configured = prov ? prov.configured : false;
+              const isPrimary = pid === primaryProvider;
+              const activeEntry = (chain.chain || []).find(e => e.startsWith(pid + ':'));
+              const activeModel = activeEntry ? activeEntry.split(':').slice(1).join(':') : '';
+              const failed = chain.failures ? Object.entries(chain.failures).find(([k]) => k.startsWith(pid + ':')) : null;
+              return '<div class="chain-item' + (configured ? '' : ' disabled') + '" draggable="true" data-provider="' + pid + '">' +
+                '<span class="grip">⠿</span>' +
+                '<span class="pos">' + (i + 1) + '</span>' +
+                '<span class="provider-name" style="text-decoration:none">' +
+                  (isPrimary ? '<span style="color:#a78bfa;margin-right:4px">★</span>' : '') +
+                  u.escapeHtml(name) +
+                  (configured ? '<span style="color:#34d399;margin-left:6px;font-size:9px">●</span>' : '<span style="color:rgba(255,255,255,0.2);margin-left:6px;font-size:9px">○</span>') +
+                '</span>' +
+                (activeModel ? '<span style="font-size:9px;color:rgba(255,255,255,0.25);font-family:monospace;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + u.escapeHtml(activeModel) + '">' + u.escapeHtml(activeModel) + '</span>' : '') +
+                (failed ? '<span style="font-size:9px;color:rgba(239,68,68,0.5)">fail</span>' : '') +
+                '</div>';
+            }).join('');
+          })()}
+        </div>
+      </div>
+    </div>
+
+    <!-- OpenRouter Model Fallback Chain -->
+    <div class="stat-card mb-6" id="or-fallback-section">
+      <div class="chain-card-header">
+        <div>
+          <div class="text-xs text-zinc-500 mb-0.5">OpenRouter Model Fallback Chain</div>
+          <div class="text-[10px] text-zinc-600">Drag to reorder. When the primary model fails, Ghost tries these in order.</div>
+        </div>
+        <button class="btn btn-primary btn-sm" id="btn-save-or-fallback" style="font-size:10px;padding:3px 10px">Save</button>
+      </div>
+      <div class="chain-list" id="or-model-chain">
+        ${(() => {
+          const orChainEntries = (chain.chain || []).filter(e => e.startsWith('openrouter:'));
+          const orPrimary = orChainEntries.length > 0
+            ? orChainEntries[0].split(':').slice(1).join(':')
+            : (providerModels['openrouter'] || cfg.model || current || '');
+          const fbModels = cfg.fallback_models || [];
+          const allOrModels = [orPrimary, ...fbModels.filter(m => m !== orPrimary)];
+          return allOrModels.map((mid, i) => {
+            const isPrimary = i === 0;
+            const isActive = chain.active && chain.active.startsWith('openrouter:') && chain.active.split(':').slice(1).join(':') === mid;
+            const hasFail = chain.failures ? Object.keys(chain.failures).some(k => k === 'openrouter:' + mid) : false;
+            return '<div class="chain-item" draggable="true" data-model="' + u.escapeHtml(mid) + '">' +
+              '<span class="grip">⠿</span>' +
+              '<span class="pos">' + (i + 1) + '</span>' +
+              '<span class="provider-name" style="text-decoration:none;font-family:ui-monospace,monospace;font-size:11px">' +
+                (isPrimary ? '<span style="color:#a78bfa;margin-right:4px">★</span>' : '') +
+                u.escapeHtml(mid) +
+                (isActive ? '<span style="color:#34d399;margin-left:6px;font-size:9px">● active</span>' : '') +
+                (hasFail ? '<span style="color:rgba(239,68,68,0.5);margin-left:6px;font-size:9px">fail</span>' : '') +
+              '</span>' +
+              (i > 0 ? '<button class="or-remove-model" data-model="' + u.escapeHtml(mid) + '" style="background:none;border:none;color:rgba(255,255,255,0.2);cursor:pointer;font-size:14px;padding:0 4px;line-height:1" title="Remove">×</button>' : '') +
+              '</div>';
+          }).join('');
+        })()}
+      </div>
+      <div class="flex gap-2 mt-3">
+        <input id="or-add-model-input" type="text" class="form-input flex-1 font-mono" style="font-size:11px" placeholder="Add model ID (e.g. anthropic/claude-sonnet-4)">
+        <button id="btn-or-add-model" class="btn btn-ghost btn-sm" style="font-size:10px">+ Add</button>
       </div>
     </div>
 
@@ -282,6 +340,182 @@ export async function render(container) {
     keyInput.value = '';
     render(container);
   });
+
+  // ── LLM Provider Chain drag-to-reorder ────────────────────────
+  const llmChain = document.getElementById('llm-provider-chain');
+  if (llmChain) {
+    let dragItem = null;
+
+    llmChain.querySelectorAll('.chain-item').forEach(item => {
+      item.addEventListener('dragstart', e => {
+        dragItem = item;
+        item.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', item.dataset.provider);
+      });
+      item.addEventListener('dragend', () => {
+        item.classList.remove('dragging');
+        llmChain.querySelectorAll('.chain-item').forEach(el => el.classList.remove('drag-over'));
+        dragItem = null;
+      });
+      item.addEventListener('dragover', e => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        if (dragItem && item !== dragItem) {
+          llmChain.querySelectorAll('.chain-item').forEach(el => el.classList.remove('drag-over'));
+          item.classList.add('drag-over');
+        }
+      });
+      item.addEventListener('dragleave', () => { item.classList.remove('drag-over'); });
+      item.addEventListener('drop', e => {
+        e.preventDefault();
+        if (!dragItem || item === dragItem) return;
+        const items = [...llmChain.querySelectorAll('.chain-item')];
+        const fromIdx = items.indexOf(dragItem);
+        const toIdx = items.indexOf(item);
+        if (fromIdx < toIdx) {
+          item.parentNode.insertBefore(dragItem, item.nextSibling);
+        } else {
+          item.parentNode.insertBefore(dragItem, item);
+        }
+        llmChain.querySelectorAll('.chain-item').forEach((el, i) => {
+          const posEl = el.querySelector('.pos');
+          if (posEl) posEl.textContent = i + 1;
+        });
+      });
+    });
+
+    document.getElementById('btn-save-provider-order')?.addEventListener('click', async () => {
+      const btn = document.getElementById('btn-save-provider-order');
+      const newOrder = [...llmChain.querySelectorAll('.chain-item')].map(el => el.dataset.provider);
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+      try {
+        await api.put('/api/setup/provider-order', { order: newOrder });
+        const newPrimary = newOrder[0];
+        if (newPrimary !== primaryProvider) {
+          await api.put('/api/primary-provider', { provider: newPrimary });
+        }
+        u.toast('Provider order saved');
+        render(container);
+      } catch (e) {
+        u.toast('Failed: ' + e.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Save Order';
+      }
+    });
+  }
+
+  // ── OpenRouter Model Fallback Chain ─────────────────────────────
+  const orChain = document.getElementById('or-model-chain');
+  if (orChain) {
+    let orDragItem = null;
+
+    function attachOrDrag() {
+      orChain.querySelectorAll('.chain-item').forEach(item => {
+        item.addEventListener('dragstart', e => {
+          orDragItem = item;
+          item.classList.add('dragging');
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', item.dataset.model);
+        });
+        item.addEventListener('dragend', () => {
+          item.classList.remove('dragging');
+          orChain.querySelectorAll('.chain-item').forEach(el => el.classList.remove('drag-over'));
+          orDragItem = null;
+        });
+        item.addEventListener('dragover', e => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          if (orDragItem && item !== orDragItem) {
+            orChain.querySelectorAll('.chain-item').forEach(el => el.classList.remove('drag-over'));
+            item.classList.add('drag-over');
+          }
+        });
+        item.addEventListener('dragleave', () => { item.classList.remove('drag-over'); });
+        item.addEventListener('drop', e => {
+          e.preventDefault();
+          if (!orDragItem || item === orDragItem) return;
+          const items = [...orChain.querySelectorAll('.chain-item')];
+          const fromIdx = items.indexOf(orDragItem);
+          const toIdx = items.indexOf(item);
+          if (fromIdx < toIdx) {
+            item.parentNode.insertBefore(orDragItem, item.nextSibling);
+          } else {
+            item.parentNode.insertBefore(orDragItem, item);
+          }
+          orChain.querySelectorAll('.chain-item').forEach((el, i) => {
+            const posEl = el.querySelector('.pos');
+            if (posEl) posEl.textContent = i + 1;
+            const star = el.querySelector('.provider-name span[style*="color:#a78bfa"]');
+            if (i === 0 && !star) {
+              const nameEl = el.querySelector('.provider-name');
+              if (nameEl) nameEl.insertAdjacentHTML('afterbegin', '<span style="color:#a78bfa;margin-right:4px">★</span>');
+            } else if (i > 0 && star) {
+              star.remove();
+            }
+          });
+        });
+      });
+
+      orChain.querySelectorAll('.or-remove-model').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const row = btn.closest('.chain-item');
+          if (row) {
+            row.remove();
+            orChain.querySelectorAll('.chain-item').forEach((el, i) => {
+              const posEl = el.querySelector('.pos');
+              if (posEl) posEl.textContent = i + 1;
+            });
+          }
+        });
+      });
+    }
+
+    attachOrDrag();
+
+    document.getElementById('btn-or-add-model')?.addEventListener('click', () => {
+      const input = document.getElementById('or-add-model-input');
+      const mid = (input?.value || '').trim();
+      if (!mid) return;
+      const existing = [...orChain.querySelectorAll('.chain-item')].map(el => el.dataset.model);
+      if (existing.includes(mid)) { u.toast('Model already in chain', 'error'); return; }
+      const idx = existing.length + 1;
+      const html = '<div class="chain-item" draggable="true" data-model="' + u.escapeHtml(mid) + '">' +
+        '<span class="grip">⠿</span>' +
+        '<span class="pos">' + idx + '</span>' +
+        '<span class="provider-name" style="text-decoration:none;font-family:ui-monospace,monospace;font-size:11px">' + u.escapeHtml(mid) + '</span>' +
+        '<button class="or-remove-model" data-model="' + u.escapeHtml(mid) + '" style="background:none;border:none;color:rgba(255,255,255,0.2);cursor:pointer;font-size:14px;padding:0 4px;line-height:1" title="Remove">×</button>' +
+        '</div>';
+      orChain.insertAdjacentHTML('beforeend', html);
+      input.value = '';
+      attachOrDrag();
+    });
+
+    document.getElementById('or-add-model-input')?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); document.getElementById('btn-or-add-model')?.click(); }
+    });
+
+    document.getElementById('btn-save-or-fallback')?.addEventListener('click', async () => {
+      const btn = document.getElementById('btn-save-or-fallback');
+      const models = [...orChain.querySelectorAll('.chain-item')].map(el => el.dataset.model);
+      if (models.length === 0) { u.toast('Chain cannot be empty', 'error'); return; }
+      const newPrimary = models[0];
+      const newFallbacks = models.slice(1);
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+      try {
+        await api.put('/api/config', { fallback_models: newFallbacks });
+        await api.put('/api/models', { model: newPrimary, provider: 'openrouter' });
+        u.toast('OpenRouter fallback chain saved');
+        render(container);
+      } catch (e) {
+        u.toast('Failed: ' + e.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Save';
+      }
+    });
+  }
 }
 
 async function loadProviderModels(providerId, current, container, u, api) {

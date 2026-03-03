@@ -29,6 +29,13 @@ def _notify_daemon():
                 daemon.engine.model = new_model
             if new_model and getattr(daemon, 'chat_engine', None):
                 daemon.chat_engine.model = new_model
+            if hasattr(daemon, 'engine') and hasattr(daemon.engine, 'fallback_chain'):
+                model = fresh.get("model", DEFAULT_CONFIG["model"])
+                fallback_models = fresh.get("fallback_models", [])
+                new_chain = daemon._build_provider_chain(model, fallback_models)
+                daemon.engine.fallback_chain.set_provider_chain(new_chain)
+                if getattr(daemon, 'chat_engine', None):
+                    daemon.chat_engine.fallback_chain.set_provider_chain(list(new_chain))
     except Exception:
         log.warning("Failed to reload config in daemon", exc_info=True)
 

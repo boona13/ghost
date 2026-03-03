@@ -66,6 +66,25 @@ export async function render(container) {
           <div class="text-[10px] text-zinc-600 mt-1">Change on the Models page</div>
         </div>
       </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
+        <div class="stat-card">
+          <h3 class="text-sm font-semibold text-white mb-3">Web Fetch</h3>
+          <div class="grid grid-cols-2 gap-3">
+            ${numInput('web_fetch_max_chars', 'Max Chars', 1000, 200000, 1000)}
+            ${numInput('web_fetch_timeout_seconds', 'Timeout (s)', 5, 120, 5)}
+          </div>
+        </div>
+        <div class="stat-card">
+          <h3 class="text-sm font-semibold text-white mb-3">Process Limits</h3>
+          <div class="grid grid-cols-2 gap-3">
+            ${numInput('max_shell_sessions', 'Shell Sessions', 1, 20, 1)}
+            ${numInput('max_background_processes', 'Background Procs', 1, 50, 1)}
+            ${numInput('dashboard_port', 'Dashboard Port', 1024, 65535, 1)}
+          </div>
+          <div class="text-[10px] text-zinc-600 mt-2">Dashboard port change requires restart</div>
+        </div>
+      </div>
     </div>
 
     <!-- ── Features ─────────────────────────────────────────── -->
@@ -73,8 +92,58 @@ export async function render(container) {
       <div class="stat-card">
         <h3 class="text-sm font-semibold text-white mb-3">Feature Toggles</h3>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8">
-          ${['enable_tool_loop','enable_memory_db','enable_plugins','enable_skills','enable_system_tools','enable_browser_tools','enable_cron','enable_evolve','enable_future_features','enable_integrations','enable_web_search','enable_web_fetch','enable_image_gen','enable_vision','enable_tts','enable_canvas','enable_security_audit','enable_session_memory'].map(k => toggle(k)).join('')}
+          ${['enable_tool_loop','enable_memory_db','enable_plugins','enable_skills','enable_system_tools','enable_browser_tools','enable_browser_use','enable_channels','enable_cron','enable_evolve','enable_future_features','enable_integrations','enable_web_search','enable_web_fetch','enable_image_gen','enable_vision','enable_tts','enable_canvas','enable_security_audit','enable_session_memory','enable_mcp','enable_langfuse'].map(k => toggle(k)).join('')}
         </div>
+      </div>
+
+      <!-- Session Maintenance -->
+      <div class="stat-card mt-4">
+        <h3 class="text-sm font-semibold text-white mb-1">Session Maintenance &amp; Auto-Cleanup</h3>
+        <div class="text-[10px] text-zinc-600 mb-3">Controls automatic cleanup of old session files. Requires <em>enable_session_memory</em>.</div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="flex items-center justify-between py-2">
+            <div>
+              <span class="text-sm text-zinc-300">Auto-cleanup</span>
+              <div class="text-[10px] text-zinc-600 mt-0.5">Periodically prune old/excess sessions</div>
+            </div>
+            <div class="toggle ${cfg.session_auto_cleanup !== false ? 'on' : ''}" data-toggle="session_auto_cleanup"><span class="toggle-dot"></span></div>
+          </div>
+          ${numInput('session_max_count', 'Max Sessions', 10, 10000, 10)}
+          ${numInput('session_max_age_days', 'Max Age (days)', 1, 365, 1)}
+          ${numInput('session_disk_budget_mb', 'Disk Budget (MB)', 50, 10000, 50)}
+        </div>
+      </div>
+
+      <!-- Langfuse Observability -->
+      <div class="stat-card mt-4">
+        <h3 class="text-sm font-semibold text-white mb-1">Langfuse Observability</h3>
+        <div class="text-[10px] text-zinc-600 mb-3">LLM tracing, monitoring, and cost analytics. Requires <em>enable_langfuse</em> toggle above.</div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="form-label">Host URL</label>
+            <input type="text" class="form-input w-full text-xs font-mono" data-key="langfuse_host" value="${u.escapeHtml(cfg.langfuse_host || 'https://cloud.langfuse.com')}" placeholder="https://cloud.langfuse.com">
+          </div>
+          <div>
+            <label class="form-label">Project ID</label>
+            <input type="text" class="form-input w-full text-xs font-mono" data-key="langfuse_project_id" value="${u.escapeHtml(cfg.langfuse_project_id || '')}" placeholder="(optional)">
+          </div>
+          <div>
+            <label class="form-label">Public Key</label>
+            <input type="text" class="form-input w-full text-xs font-mono" data-key="langfuse_public_key" value="${u.escapeHtml(cfg.langfuse_public_key || '')}" placeholder="pk-lf-...">
+          </div>
+          <div>
+            <label class="form-label">Secret Key</label>
+            <input type="password" class="form-input w-full text-xs font-mono" data-key="langfuse_secret_key" value="${u.escapeHtml(cfg.langfuse_secret_key || '')}" placeholder="sk-lf-...">
+          </div>
+        </div>
+        <div class="text-[10px] text-zinc-500 mt-2">Get keys from <a href="https://cloud.langfuse.com" target="_blank" class="text-ghost-400 hover:underline">cloud.langfuse.com</a> or self-host. Changes require restart.</div>
+      </div>
+
+      <!-- MCP -->
+      <div class="stat-card mt-4">
+        <h3 class="text-sm font-semibold text-white mb-1">MCP (Model Context Protocol)</h3>
+        <div class="text-[10px] text-zinc-600 mb-2">Connect Ghost to external MCP tool servers. Enable the toggle above, then configure servers in <code class="bg-surface-700 px-1 rounded">~/.ghost/config.json</code> under <code class="bg-surface-700 px-1 rounded">mcp_servers</code>.</div>
+        <div class="text-[10px] text-zinc-500">See the <a href="#mcp" class="text-ghost-400 hover:underline">MCP page</a> for server management and status.</div>
       </div>
     </div>
 
@@ -262,6 +331,35 @@ export async function render(container) {
     <!-- ── Models ───────────────────────────────────────────── -->
     <div class="cfg-tab-panel" data-panel="models">
       <div class="stat-card mb-4">
+        <h3 class="text-sm font-semibold text-white mb-1">Anthropic (Claude) Settings</h3>
+        <div class="text-[10px] text-zinc-600 mb-3">These settings only apply when using the direct Anthropic API provider.</div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label class="form-label">Reasoning Effort</label>
+            <select class="form-input w-full text-xs" id="cfg-anthropic-effort">
+              <option value="low" ${(cfg.anthropic_effort||'high')==='low'?'selected':''}>Low (fastest)</option>
+              <option value="medium" ${(cfg.anthropic_effort||'high')==='medium'?'selected':''}>Medium (balanced)</option>
+              <option value="high" ${(cfg.anthropic_effort||'high')==='high'?'selected':''}>High (best quality)</option>
+            </select>
+            <div class="text-[10px] text-zinc-600 mt-1">Claude 4.6+ thinking depth</div>
+          </div>
+          <div>
+            <div class="flex items-center justify-between py-2">
+              <div>
+                <span class="text-sm text-zinc-300">Context Compaction</span>
+                <div class="text-[10px] text-zinc-600 mt-0.5">Auto-compress long contexts</div>
+              </div>
+              <div class="toggle ${cfg.anthropic_context_compaction ? 'on' : ''}" data-toggle="anthropic_context_compaction"><span class="toggle-dot"></span></div>
+            </div>
+          </div>
+          <div>
+            <label class="form-label">Compaction Ratio</label>
+            <input type="number" class="form-input w-full text-xs" data-key="anthropic_context_compaction_ratio" value="${cfg.anthropic_context_compaction_ratio ?? 0.5}" min="0" max="1" step="0.05">
+            <div class="text-[10px] text-zinc-600 mt-1">0.0–1.0 (higher = more aggressive)</div>
+          </div>
+        </div>
+      </div>
+      <div class="stat-card mb-4">
         <h3 class="text-sm font-semibold text-white mb-1">Skill Model Aliases</h3>
         <div class="text-[10px] text-zinc-600 mb-3">Model aliases used by skills for per-skill model overrides. Built-in aliases: cheap, fast, capable, smart, vision, code. Changes take effect on next restart.</div>
         <div id="skill-model-aliases-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3"></div>
@@ -277,6 +375,12 @@ export async function render(container) {
         <h3 class="text-sm font-semibold text-white mb-1">Tool Models</h3>
         <div class="text-[10px] text-zinc-600 mb-3">Override the model IDs used by each tool. Leave blank to use defaults. Changes take effect on next restart.</div>
         <div id="tool-models-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3"></div>
+      </div>
+
+      <div class="stat-card mt-4">
+        <h3 class="text-sm font-semibold text-white mb-1">Provider Fallback Chains</h3>
+        <div class="text-[10px] text-zinc-600 mb-3">Drag to reorder provider priority for each capability. First available provider wins. Toggle off to skip a provider.</div>
+        <div id="provider-chains-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
       </div>
     </div>
 
@@ -341,6 +445,7 @@ export async function render(container) {
     {key: 'web_search_grok', label: 'Search (Grok)', def: 'grok-3-fast'},
     {key: 'web_search_openai', label: 'Search (OpenAI)', def: 'gpt-4.1-mini'},
     {key: 'web_search_gemini', label: 'Search (Gemini)', def: 'gemini-2.5-flash'},
+    {key: 'grok_openrouter', label: 'Grok via OpenRouter', def: 'x-ai/grok-4-fast'},
     {key: 'tts_openai', label: 'TTS (OpenAI)', def: 'tts-1'},
     {key: 'tts_elevenlabs', label: 'TTS (ElevenLabs)', def: 'eleven_multilingual_v2'},
     {key: 'embedding_openrouter', label: 'Embedding (OpenRouter)', def: 'openai/text-embedding-3-small'},
@@ -413,6 +518,192 @@ export async function render(container) {
       if (aliasModelInput) aliasModelInput.value = '';
       renderAliases();
     });
+  }
+
+  // ── Provider Fallback Chains (drag-to-reorder) ───────────────
+  const CHAIN_DEFS = {
+    web_search: {
+      label: 'Web Search',
+      desc: 'Search engine fallback order',
+      providers: {
+        perplexity_openrouter: 'Perplexity (OpenRouter)',
+        perplexity_direct: 'Perplexity (direct)',
+        grok: 'Grok / xAI',
+        openai: 'OpenAI',
+        brave: 'Brave Search',
+        gemini: 'Gemini (Google)',
+      },
+    },
+    image_gen: {
+      label: 'Image Generation',
+      desc: 'Image gen provider fallback',
+      providers: {
+        openrouter: 'OpenRouter',
+        google: 'Google Gemini',
+        openai: 'OpenAI (DALL-E)',
+      },
+    },
+    vision: {
+      label: 'Vision / Image Analysis',
+      desc: 'Image analysis fallback',
+      providers: {
+        openai: 'OpenAI (GPT-4o)',
+        openrouter: 'OpenRouter',
+        google: 'Google Gemini',
+        anthropic: 'Anthropic (Claude)',
+        ollama: 'Ollama (local)',
+      },
+    },
+    tts: {
+      label: 'Text-to-Speech',
+      desc: 'TTS provider fallback',
+      providers: {
+        edge: 'Edge TTS (free)',
+        openai: 'OpenAI TTS',
+        elevenlabs: 'ElevenLabs',
+      },
+    },
+    embeddings: {
+      label: 'Embeddings',
+      desc: 'Embedding model fallback',
+      providers: {
+        openrouter: 'OpenRouter',
+        gemini: 'Google Gemini',
+        ollama: 'Ollama (local)',
+      },
+    },
+    voice_stt: {
+      label: 'Voice STT',
+      desc: 'Speech-to-text fallback',
+      providers: {
+        moonshine: 'Moonshine (on-device)',
+        openrouter: 'OpenRouter (Whisper)',
+        whisper: 'OpenAI Whisper',
+        groq: 'Groq Whisper',
+        vosk: 'Vosk (offline)',
+      },
+    },
+  };
+
+  const savedChains = cfg.provider_chains || defs.provider_chains || {};
+  const currentChains = {};
+  for (const [chainKey, def] of Object.entries(CHAIN_DEFS)) {
+    const allIds = Object.keys(def.providers);
+    const saved = savedChains[chainKey] || allIds;
+    const enabled = saved.filter(id => allIds.includes(id));
+    const disabled = allIds.filter(id => !enabled.includes(id));
+    currentChains[chainKey] = { enabled, disabled };
+  }
+
+  function renderChain(chainKey) {
+    const def = CHAIN_DEFS[chainKey];
+    const state = currentChains[chainKey];
+    const all = [...state.enabled, ...state.disabled];
+    let html = '<div class="chain-card-header">' +
+      '<h4>' + u.escapeHtml(def.label) + '<span style="font-weight:400;color:rgba(255,255,255,0.3);margin-left:6px;font-size:10px">' + u.escapeHtml(def.desc) + '</span></h4>' +
+      '<button class="chain-reset" data-chain-reset="' + chainKey + '">Reset</button>' +
+      '</div><div class="chain-list" data-chain="' + chainKey + '">';
+    let pos = 1;
+    for (const id of all) {
+      const isEnabled = state.enabled.includes(id);
+      html += '<div class="chain-item' + (isEnabled ? '' : ' disabled') + '" draggable="true" data-provider="' + id + '">' +
+        '<span class="grip">⠿</span>' +
+        '<span class="pos">' + (isEnabled ? pos++ : '—') + '</span>' +
+        '<span class="provider-name">' + u.escapeHtml(def.providers[id] || id) + '</span>' +
+        '<div class="chain-toggle' + (isEnabled ? ' on' : '') + '"><span class="dot"></span></div>' +
+        '</div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  const chainsContainer = container.querySelector('#provider-chains-container');
+  if (chainsContainer) {
+    chainsContainer.innerHTML = Object.keys(CHAIN_DEFS).map(k =>
+      '<div class="bg-surface-700/30 rounded p-3" data-chain-card="' + k + '">' + renderChain(k) + '</div>'
+    ).join('');
+
+    function refreshChainCard(chainKey) {
+      const card = chainsContainer.querySelector('[data-chain-card="' + chainKey + '"]');
+      if (card) card.innerHTML = renderChain(chainKey);
+      attachChainEvents(chainKey);
+    }
+
+    function attachChainEvents(chainKey) {
+      const list = chainsContainer.querySelector('.chain-list[data-chain="' + chainKey + '"]');
+      if (!list) return;
+      let dragItem = null;
+
+      list.querySelectorAll('.chain-item').forEach(item => {
+        item.addEventListener('dragstart', e => {
+          dragItem = item;
+          item.classList.add('dragging');
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', item.dataset.provider);
+        });
+        item.addEventListener('dragend', () => {
+          item.classList.remove('dragging');
+          list.querySelectorAll('.chain-item').forEach(el => el.classList.remove('drag-over'));
+          dragItem = null;
+        });
+        item.addEventListener('dragover', e => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          if (dragItem && item !== dragItem) {
+            list.querySelectorAll('.chain-item').forEach(el => el.classList.remove('drag-over'));
+            item.classList.add('drag-over');
+          }
+        });
+        item.addEventListener('dragleave', () => { item.classList.remove('drag-over'); });
+        item.addEventListener('drop', e => {
+          e.preventDefault();
+          if (!dragItem || item === dragItem) return;
+          const items = [...list.querySelectorAll('.chain-item')];
+          const fromIdx = items.indexOf(dragItem);
+          const toIdx = items.indexOf(item);
+          if (fromIdx < 0 || toIdx < 0) return;
+          const state = currentChains[chainKey];
+          const allIds = [...state.enabled, ...state.disabled];
+          const [moved] = allIds.splice(fromIdx, 1);
+          allIds.splice(toIdx, 0, moved);
+          state.enabled = allIds.filter(id => !state.disabled.includes(id));
+          state.disabled = allIds.filter(id => state.disabled.includes(id));
+          refreshChainCard(chainKey);
+        });
+
+        const toggle = item.querySelector('.chain-toggle');
+        if (toggle) {
+          toggle.addEventListener('click', e => {
+            e.stopPropagation();
+            const id = item.dataset.provider;
+            const state = currentChains[chainKey];
+            if (state.enabled.includes(id)) {
+              state.enabled = state.enabled.filter(x => x !== id);
+              state.disabled.push(id);
+            } else {
+              state.disabled = state.disabled.filter(x => x !== id);
+              state.enabled.push(id);
+            }
+            refreshChainCard(chainKey);
+          });
+        }
+      });
+
+      const resetBtn = chainsContainer.querySelector('[data-chain-reset="' + chainKey + '"]');
+      if (resetBtn) {
+        resetBtn.addEventListener('click', () => {
+          const allIds = Object.keys(CHAIN_DEFS[chainKey].providers);
+          const defaultOrder = (defs.provider_chains || {})[chainKey] || allIds;
+          currentChains[chainKey] = {
+            enabled: defaultOrder.filter(id => allIds.includes(id)),
+            disabled: allIds.filter(id => !defaultOrder.includes(id)),
+          };
+          refreshChainCard(chainKey);
+        });
+      }
+    }
+
+    Object.keys(CHAIN_DEFS).forEach(k => attachChainEvents(k));
   }
 
   // ── Toggles ──────────────────────────────────────────────────
@@ -520,6 +811,16 @@ export async function render(container) {
 
     // Include skill model aliases
     updates.skill_model_aliases = currentAliases;
+
+    // Include provider chains (only enabled providers, in order)
+    const chains = {};
+    for (const [chainKey, state] of Object.entries(currentChains)) {
+      chains[chainKey] = state.enabled;
+    }
+    updates.provider_chains = chains;
+
+    const anthropicEffortEl = document.getElementById('cfg-anthropic-effort');
+    if (anthropicEffortEl) updates.anthropic_effort = anthropicEffortEl.value;
 
     const wakeWordsEl = document.getElementById('cfg-voice-wake-words');
     if (wakeWordsEl) updates.voice_wake_words = wakeWordsEl.value.split(',').map(s => s.trim()).filter(Boolean);

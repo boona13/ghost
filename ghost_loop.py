@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import random
+import re as _re
 import time
 import hashlib
 import uuid
@@ -347,6 +348,330 @@ class ToolLoopDebugLogger:
 
 
 _debug_logger = ToolLoopDebugLogger()
+
+
+# ── Evolve Context Debug Logger ────────────────────────────────────
+# Separate JSONL log dedicated to context-management events during
+# evolution loops.  Each record is tagged with feature_id so you can
+# grep for a single feature and see the full compaction story.
+
+EVOLVE_CTX_LOG = GHOST_HOME / "logs" / "evolve_context_debug.jsonl"
+_MAX_EVOLVE_CTX_LOG = 5 * 1024 * 1024  # 5 MB before rotation
+
+
+class EvolveContextLogger:
+    """Debug logger for context management during evolution/tool loops.
+
+    Usage:
+        ctx_log = EvolveContextLogger.get()
+        ctx_log.set_feature("feat-abc123", "Add dark mode toggle")
+        ctx_log.log_compaction(step=15, ...)
+    """
+
+    _instance = None
+
+    def __init__(self):
+        self._feature_id: str = ""
+        self._feature_title: str = ""
+        self._session_id: str = ""
+        self._caller: str = ""
+        try:
+            DEBUG_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+
+    @classmethod
+    def get(cls) -> "EvolveContextLogger":
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    # ── Context setters ──────────────────────────────────────────
+
+    def set_feature(self, feature_id: str, feature_title: str = ""):
+        self._feature_id = feature_id or ""
+        self._feature_title = feature_title or ""
+
+    def set_session(self, session_id: str, caller: str = ""):
+        self._session_id = session_id or ""
+        self._caller = caller or ""
+
+    def clear(self):
+        self._feature_id = ""
+        self._feature_title = ""
+        self._session_id = ""
+        self._caller = ""
+
+    # ── Internal ─────────────────────────────────────────────────
+
+    def _base(self) -> dict:
+        return {
+            "time": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "feature_id": self._feature_id,
+            "feature_title": self._feature_title[:80],
+            "session_id": self._session_id,
+            "caller": self._caller,
+        }
+
+    def _write(self, record: dict):
+        try:
+            if EVOLVE_CTX_LOG.exists() and EVOLVE_CTX_LOG.stat().st_size > _MAX_EVOLVE_CTX_LOG:
+                rotated = EVOLVE_CTX_LOG.with_suffix(".jsonl.1")
+                EVOLVE_CTX_LOG.rename(rotated)
+            with open(str(EVOLVE_CTX_LOG), "a") as f:
+                f.write(json.dumps(record, default=str) + "\n")
+        except Exception:
+            pass
+
+    # ── Event loggers ────────────────────────────────────────────
+
+    def log_compaction(self, step: int, msgs_before: int, msgs_after: int,
+                       tokens_before: int, tokens_after: int,
+                       method: str, llm_summary_used: bool):
+        """Log a context compaction event.
+
+        method: "normal", "emergency_1", "emergency_2", "emergency_3"
+        """
+        rec = self._base()
+        rec.update({
+            "event": "compaction",
+            "step": step,
+            "messages_before": msgs_before,
+            "messages_after": msgs_after,
+            "tokens_before": tokens_before,
+            "tokens_after": tokens_after,
+            "reduction_pct": round(100 * (1 - tokens_after / max(tokens_before, 1)), 1),
+            "method": method,
+            "llm_summary_used": llm_summary_used,
+        })
+        self._write(rec)
+
+    def log_overflow_recovery(self, step: int, attempt: int, error_snippet: str):
+        """Log a context overflow detection + recovery attempt."""
+        rec = self._base()
+        rec.update({
+            "event": "overflow_recovery",
+            "step": step,
+            "attempt": attempt,
+            "max_attempts": _MAX_OVERFLOW_RECOVERY_ATTEMPTS,
+            "error": error_snippet[:200],
+        })
+        self._write(rec)
+
+    def log_adaptive_limit(self, step: int, tokens_estimated: int, limit_applied: int):
+        """Log when the adaptive tool-result limit kicks in."""
+        rec = self._base()
+        rec.update({
+            "event": "adaptive_limit",
+            "step": step,
+            "tokens_estimated": tokens_estimated,
+            "limit_applied": limit_applied,
+        })
+        self._write(rec)
+
+    def log_context_snapshot(self, step: int, total_messages: int,
+                             tokens_estimated: int, model: str):
+        """Periodic snapshot of context size for trend analysis."""
+        rec = self._base()
+        rec.update({
+            "event": "context_snapshot",
+            "step": step,
+            "total_messages": total_messages,
+            "tokens_estimated": tokens_estimated,
+            "model": model,
+        })
+        self._write(rec)
+
+    def log_llm_summary_result(self, step: int, success: bool,
+                                input_chars: int, output_chars: int,
+                                error: str = ""):
+        """Log the outcome of an LLM summarization attempt."""
+        rec = self._base()
+        rec.update({
+            "event": "llm_summary",
+            "step": step,
+            "success": success,
+            "input_chars": input_chars,
+            "output_chars": output_chars,
+            "error": error[:200],
+        })
+        self._write(rec)
+
+    def log_review_compaction(self, pr_id: str, step: int,
+                               comments_count: int, tokens_estimated: int):
+        """Log compaction event during a PR review loop."""
+        rec = self._base()
+        rec.update({
+            "event": "review_compaction",
+            "pr_id": pr_id,
+            "step": step,
+            "comments_so_far": comments_count,
+            "tokens_estimated": tokens_estimated,
+        })
+        self._write(rec)
+
+    # ── Skill compliance ─────────────────────────────────────────
+
+    def log_skill_compliance(self, role: str, tool_calls: list,
+                              extra: dict | None = None):
+        """Analyze tool call patterns and log whether the agent followed its skills.
+
+        role: "implementer" or "reviewer"
+        tool_calls: list of dicts with "tool", "args", "step", "result" keys
+        extra: role-specific metadata (e.g. is_rereview for reviewer)
+        """
+        extra = extra or {}
+        if role == "implementer":
+            checks = self._check_implementer_skills(tool_calls)
+        elif role == "reviewer":
+            checks = self._check_reviewer_skills(tool_calls, extra)
+        else:
+            return
+
+        passed = sum(1 for v in checks.values() if v)
+        total = len(checks)
+        rec = self._base()
+        rec.update({
+            "event": "skill_compliance",
+            "role": role,
+            "passed": passed,
+            "total": total,
+            "score": f"{passed}/{total}",
+            "checks": checks,
+            "extra": extra,
+        })
+        self._write(rec)
+
+    @staticmethod
+    def _check_implementer_skills(tc: list) -> dict:
+        """Check whether the implementer followed its trained skills."""
+        tools_used = [t["tool"] for t in tc]
+        tool_set = set(tools_used)
+
+        has_evolve_apply = "evolve_apply" in tool_set
+        has_evolve_plan = "evolve_plan" in tool_set
+        has_submit_pr = "evolve_submit_pr" in tool_set
+
+        # 1. Mistake check: called memory_search before coding
+        mistake_check = False
+        for t in tc:
+            if t["tool"] == "memory_search":
+                args_str = json.dumps(t.get("args", {}))
+                if "mistake" in args_str.lower():
+                    mistake_check = True
+                    break
+
+        # 2. Already-implemented check: grep/file_search BEFORE start_future_feature
+        already_impl_check = False
+        start_idx = next(
+            (i for i, t in enumerate(tc) if t["tool"] == "start_future_feature"),
+            len(tc)
+        )
+        search_before_start = any(
+            t["tool"] in ("grep", "file_search", "glob")
+            for t in tc[:start_idx]
+        )
+        already_impl_check = search_before_start or start_idx == len(tc)
+
+        # 3. Re-read dependencies: file_read AFTER evolve_plan but BEFORE evolve_apply
+        reread_deps = False
+        if has_evolve_plan and has_evolve_apply:
+            plan_idx = next(i for i, t in enumerate(tc) if t["tool"] == "evolve_plan")
+            apply_idx = next(i for i, t in enumerate(tc) if t["tool"] == "evolve_apply")
+            reread_deps = any(
+                t["tool"] == "file_read"
+                for t in tc[plan_idx + 1:apply_idx]
+            )
+
+        # 4. Testing: called evolve_test before submit_pr
+        tested_before_pr = False
+        if has_submit_pr:
+            pr_idx = next(i for i, t in enumerate(tc) if t["tool"] == "evolve_submit_pr")
+            tested_before_pr = any(
+                t["tool"] == "evolve_test"
+                for t in tc[:pr_idx]
+            )
+
+        # 5. Delegate verification: used delegate_task after evolve_apply
+        delegate_verify = False
+        if has_evolve_apply:
+            apply_idx = next(i for i, t in enumerate(tc) if t["tool"] == "evolve_apply")
+            delegate_verify = any(
+                t["tool"] == "delegate_task"
+                for t in tc[apply_idx:]
+            )
+
+        # 6. Explore phase: read files during explore (between start_feature and evolve_plan)
+        explored = False
+        if has_evolve_plan:
+            plan_idx = next(i for i, t in enumerate(tc) if t["tool"] == "evolve_plan")
+            explored = any(
+                t["tool"] in ("file_read", "grep", "file_search", "glob")
+                for t in tc[:plan_idx]
+            )
+
+        return {
+            "mistake_memory_search": mistake_check,
+            "already_implemented_check": already_impl_check,
+            "reread_deps_before_apply": reread_deps,
+            "tested_before_pr": tested_before_pr,
+            "delegate_verification": delegate_verify,
+            "explored_before_plan": explored,
+        }
+
+    @staticmethod
+    def _check_reviewer_skills(tc: list, extra: dict) -> dict:
+        """Check whether the reviewer followed its trained skills."""
+        tool_set = set(t["tool"] for t in tc)
+        tools_used = [t["tool"] for t in tc]
+        is_rereview = extra.get("is_rereview", False)
+
+        # 1. Read overview first: read_pr_diff with no file arg as first tool call
+        overview_first = False
+        if tc:
+            first = tc[0]
+            if first["tool"] == "read_pr_diff":
+                file_arg = (first.get("args") or {}).get("file", "")
+                overview_first = not file_arg
+
+        # 2. Used grep to verify wiring/interfaces
+        used_grep = "grep_codebase" in tool_set
+
+        # 3. Left inline comments (actually doing the review work)
+        left_comments = "leave_comment" in tool_set
+
+        # 4. Called submit_review (mandatory)
+        submitted_review = "submit_review" in tool_set
+
+        # 5. Called get_my_comments before submit_review
+        refreshed_memory = False
+        if submitted_review:
+            submit_idx = next(i for i, t in enumerate(tc) if t["tool"] == "submit_review")
+            refreshed_memory = any(
+                t["tool"] == "get_my_comments"
+                for t in tc[:submit_idx]
+            )
+
+        # 6. On re-review: called get_review_history
+        checked_history = True
+        if is_rereview:
+            checked_history = "get_review_history" in tool_set
+
+        # 7. Used read_pr_file for deeper inspection
+        checked_surrounding_code = "read_pr_file" in tool_set
+
+        return {
+            "overview_first": overview_first,
+            "used_grep_verify": used_grep,
+            "left_comments": left_comments,
+            "submitted_review": submitted_review,
+            "refreshed_memory_before_submit": refreshed_memory,
+            "checked_history_on_rereview": checked_history,
+            "checked_surrounding_code": checked_surrounding_code,
+        }
+
+
+_ctx_logger = EvolveContextLogger()
 
 KNOWN_POLL_TOOLS = {"shell_exec", "browser"}
 KNOWN_POLL_ACTIONS = {"snapshot", "content", "screenshot", "poll", "log", "status"}
@@ -708,6 +1033,177 @@ class LoopDetector:
         return streak, no_progress
 
 
+_SIG_RE = _re.compile(
+    r'^[ \t]*((?:async\s+)?def\s+\w+\s*\([^)]*\)|class\s+\w+[^:]*:)',
+    _re.MULTILINE,
+)
+
+_CONTEXT_OVERFLOW_RE = _re.compile(
+    r"context.length|too.long|token.limit|prompt.too.long|"
+    r"max.context|context.window|reduce.the.length|"
+    r"maximum.+tokens|exceeds.+limit|input.too.large|"
+    r"request.too.large",
+    _re.IGNORECASE,
+)
+_MAX_OVERFLOW_RECOVERY_ATTEMPTS = 3
+
+
+_HEAD_CHARS = 300
+_TAIL_CHARS = 300
+
+_CHARS_PER_TOKEN_ESTIMATE = 4
+_COMPACT_TOKEN_THRESHOLD = 80_000
+
+
+def _adaptive_tool_result_limit(messages: list) -> int:
+    """Scale tool-result cap based on current context usage.
+
+    Early in the session (small context): allow larger results so the LLM
+    gets richer context during the explore phase.
+    Later (large context): shrink results to preserve budget and delay
+    compaction.  Mirrors OpenClaw's per-result context share pattern.
+    """
+    tokens = _estimate_context_tokens(messages)
+    if tokens < 20_000:
+        return 10_000
+    if tokens < 50_000:
+        return 6_000
+    if tokens < 70_000:
+        return 4_000
+    return 2_000
+
+
+def _estimate_context_tokens(messages: list) -> int:
+    """Rough token estimate from message content (chars / 4)."""
+    total_chars = 0
+    for m in messages:
+        content = m.get("content") or ""
+        if isinstance(content, str):
+            total_chars += len(content)
+        elif isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict):
+                    total_chars += len(str(part.get("text", "")))
+        for tc in (m.get("tool_calls") or []):
+            total_chars += len(json.dumps(tc.get("function", {}), default=str))
+    return total_chars // _CHARS_PER_TOKEN_ESTIMATE
+
+
+_COMPACTION_SYSTEM_PROMPT = (
+    "You are a context compactor for an AI coding agent in a long tool-loop session. "
+    "The older messages are about to be replaced by YOUR summary to free context space. "
+    "Produce a structured summary that preserves EXACTLY:\n"
+    "1. API signatures discovered (e.g. 'ToolLoopEngine has: run(), single_shot()')\n"
+    "2. File paths read and their key structures\n"
+    "3. Decisions made and current plan\n"
+    "4. Rules or constraints mentioned\n"
+    "5. Current task state and what still needs to be done\n\n"
+    "Be concise. Use bullet points. Preserve EXACT method/function names — "
+    "these are the #1 thing that gets lost during context compaction and causes bugs."
+)
+
+_MAX_SUMMARY_INPUT_CHARS = 12000
+_MAX_SUMMARY_TOKENS = 1024
+
+
+def _smart_compact_tool_result(content: str, limit: int = 600) -> str:
+    """Compact a tool result preserving the most useful information.
+
+    Strategy (mirrors OpenClaw/OpenCode patterns):
+      1. Code content (file_read): extract class/function signatures.
+      2. Non-code content: head+tail trim — keep the beginning AND end,
+         since conclusions, return values, and final output are often at
+         the tail (OpenClaw's pruner keeps first 1500 + last 1500 chars).
+    """
+    if not content or len(content) <= limit:
+        return content
+
+    signatures = _SIG_RE.findall(content)
+    if signatures:
+        head = content[:150].rstrip()
+        sig_block = "\n".join(s.rstrip() for s in signatures)
+        compact = f"{head}\n...(compacted — key signatures preserved)\n{sig_block}"
+        if len(compact) > limit * 2:
+            compact = compact[: limit * 2] + "\n...(signatures truncated)"
+        return compact
+
+    head = content[:_HEAD_CHARS].rstrip()
+    tail = content[-_TAIL_CHARS:].lstrip()
+    note = (
+        f"\n[Compacted: kept first {_HEAD_CHARS} and last {_TAIL_CHARS} "
+        f"chars of {len(content)} total.]\n"
+    )
+    return head + "\n..." + note + "..." + tail
+
+
+def _build_deterministic_summary(old_messages: list) -> str:
+    """Build a structured context summary without an LLM call.
+
+    Extracts tool-call names, key arguments, and signature-preserved results
+    from the messages being evicted.  Used as the fast fallback when LLM
+    summarization is unavailable or fails.
+    """
+    parts: list[str] = []
+    for m in old_messages:
+        role = m.get("role", "")
+        content = m.get("content") or ""
+
+        if role == "assistant":
+            tcs = m.get("tool_calls") or []
+            if tcs:
+                for tc in tcs:
+                    fn = tc.get("function", {})
+                    name = fn.get("name", "?")
+                    raw_args = fn.get("arguments", "")
+                    if isinstance(raw_args, str):
+                        try:
+                            raw_args = json.loads(raw_args)
+                        except Exception:
+                            raw_args = {}
+                    key_parts = []
+                    for k, v in (raw_args if isinstance(raw_args, dict) else {}).items():
+                        key_parts.append(f"{k}={str(v)[:60]}")
+                    parts.append(f"• {name}({', '.join(key_parts)})")
+
+        elif role == "tool":
+            compacted = _smart_compact_tool_result(content, 400)
+            if compacted:
+                parts.append(f"  → {compacted[:400]}")
+
+        elif role == "user":
+            if "[Context Summary" in content:
+                parts.append(content[:2000])
+            else:
+                parts.append(f"• User: {content[:150]}")
+
+    return "\n".join(parts)[:6000]
+
+
+def _condense_for_llm_summary(old_messages: list) -> str:
+    """Condense old messages into a text block for the LLM summarizer."""
+    parts: list[str] = []
+    for m in old_messages:
+        role = m.get("role", "")
+        content = m.get("content") or ""
+
+        if role == "assistant":
+            tcs = m.get("tool_calls") or []
+            if tcs:
+                names = [tc.get("function", {}).get("name", "?") for tc in tcs]
+                parts.append(f"Assistant called: {', '.join(names)}")
+            elif content:
+                parts.append(f"Assistant: {content[:200]}")
+
+        elif role == "tool":
+            compacted = _smart_compact_tool_result(content, 500)
+            parts.append(f"Tool result: {compacted[:500]}")
+
+        elif role == "user":
+            parts.append(f"User: {content[:300]}")
+
+    return "\n".join(parts)[:_MAX_SUMMARY_INPUT_CHARS]
+
+
 class ToolLoopEngine:
     """Autonomous multi-turn LLM <-> tool execution loop."""
 
@@ -792,6 +1288,166 @@ class ToolLoopEngine:
                 if isinstance(content, str) and content.strip():
                     return content.strip()
         return "(Task completed — results were delivered through tool actions above)"
+
+    def _compact_messages(self, messages: list, step: int = -1) -> list:
+        """Two-phase context compaction mirroring OpenClaw/OpenCode/Cursor.
+
+        Phase 1 (always): Build a deterministic structured summary from old
+                 messages, preserving tool call names and code signatures.
+        Phase 2 (best-effort): Ask the LLM for a richer summary that captures
+                 intent, decisions, and API details.  Falls back to phase 1
+                 if the LLM call fails.
+
+        Old messages are replaced with a SINGLE summary message so the
+        context window stays bounded regardless of session length.
+        """
+        tokens_before = _estimate_context_tokens(messages)
+        msgs_before = len(messages)
+
+        system_msg = messages[0]
+        recent = messages[-20:]
+
+        # Find the actual user message — the request that started this run.
+        # When chat/channel history is provided, messages[1] is the first
+        # history turn (oldest, least relevant).  We want the LAST user
+        # message before tool calls started (the real request).
+        user_msg_idx = 1
+        for i in range(1, len(messages)):
+            m = messages[i]
+            if m.get("role") == "assistant" and m.get("tool_calls"):
+                break
+            if m.get("role") == "user" and "[Context Summary" not in (m.get("content") or ""):
+                user_msg_idx = i
+
+        # If the user message is already in the recent zone, don't duplicate it.
+        recent_start = len(messages) - 20
+        if user_msg_idx >= recent_start:
+            old = [m for j, m in enumerate(messages) if 0 < j < recent_start]
+            if not old:
+                return messages
+            det_summary = _build_deterministic_summary(old)
+            preserved = [system_msg]
+        else:
+            user_msg = messages[user_msg_idx]
+            old = [m for j, m in enumerate(messages)
+                   if j != 0 and j != user_msg_idx and j < recent_start]
+            if not old:
+                return messages
+            det_summary = _build_deterministic_summary(old)
+            preserved = [system_msg, user_msg]
+
+        has_prior_summary = any(
+            "[Context Summary" in (m.get("content") or "")
+            for m in old if m.get("role") == "user"
+        )
+
+        summary = det_summary
+        condensed = ""
+        try:
+            condensed = _condense_for_llm_summary(old)
+            # Only spend an LLM call when there's substantial new content to
+            # summarize (first compaction or large delta).  Rolling compactions
+            # of ~3 messages don't justify the latency/cost.
+            worth_llm = (
+                condensed
+                and len(condensed) > 3000
+                and not has_prior_summary
+            )
+            if worth_llm:
+                payload = {
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": _COMPACTION_SYSTEM_PROMPT},
+                        {"role": "user", "content": condensed},
+                    ],
+                    "temperature": 0.1,
+                    "max_tokens": _MAX_SUMMARY_TOKENS,
+                }
+                data, error = self._call_llm(payload, timeout=30)
+                if not error:
+                    choices = data.get("choices", [])
+                    if choices:
+                        text = (choices[0].get("message", {}).get("content") or "").strip()
+                        if text and len(text) > 50:
+                            summary = text
+                            _ctx_logger.log_llm_summary_result(
+                                step=step, success=True,
+                                input_chars=len(condensed), output_chars=len(text),
+                            )
+                        else:
+                            _ctx_logger.log_llm_summary_result(
+                                step=step, success=False,
+                                input_chars=len(condensed), output_chars=len(text) if text else 0,
+                                error="LLM returned too-short summary",
+                            )
+                else:
+                    _ctx_logger.log_llm_summary_result(
+                        step=step, success=False,
+                        input_chars=len(condensed), output_chars=0,
+                        error=str(error)[:200],
+                    )
+        except Exception as exc:
+            log.debug("LLM context summarization failed, using deterministic: %s", exc)
+            _ctx_logger.log_llm_summary_result(
+                step=step, success=False,
+                input_chars=len(condensed) if condensed else 0, output_chars=0,
+                error=str(exc)[:200],
+            )
+
+        summary_msg = {
+            "role": "user",
+            "content": (
+                f"[Context Summary — older messages compacted to free context space]\n"
+                f"{summary}"
+            ),
+        }
+        result = preserved + [summary_msg] + recent
+        tokens_after = _estimate_context_tokens(result)
+        _ctx_logger.log_compaction(
+            step=step, msgs_before=msgs_before, msgs_after=len(result),
+            tokens_before=tokens_before, tokens_after=tokens_after,
+            method="normal", llm_summary_used=(summary != det_summary),
+        )
+        return result
+
+    def _emergency_compact(self, messages: list, attempt: int, step: int = -1) -> list:
+        """Aggressive compaction for context overflow recovery.
+
+        Called when the API rejects our request as too large.  Each attempt
+        is more aggressive than the last (mirrors OpenClaw's overflow
+        recovery loop):
+          Attempt 1: Force normal compaction (even if < 30 messages).
+          Attempt 2: Shrink recent window to 10 and truncate tool results.
+          Attempt 3: Keep only system + user + last 5 messages.
+        """
+        tokens_before = _estimate_context_tokens(messages)
+        msgs_before = len(messages)
+
+        if attempt <= 1:
+            return self._compact_messages(messages, step=step)
+
+        system_msg = messages[0]
+
+        if attempt == 2:
+            recent = messages[-10:]
+            for i, m in enumerate(recent):
+                if m.get("role") == "tool" and len(m.get("content") or "") > 1000:
+                    recent[i] = {**m, "content": _smart_compact_tool_result(m["content"], 400)}
+            result = [system_msg, {"role": "user", "content": "[Context aggressively compacted due to overflow]"}] + recent
+        else:
+            recent = messages[-5:]
+            for i, m in enumerate(recent):
+                if m.get("role") == "tool" and len(m.get("content") or "") > 500:
+                    recent[i] = {**m, "content": (m["content"])[:300] + "\n...(emergency trim)"}
+            result = [system_msg, {"role": "user", "content": "[Emergency compaction — most context dropped]"}] + recent
+
+        tokens_after = _estimate_context_tokens(result)
+        _ctx_logger.log_compaction(
+            step=step, msgs_before=msgs_before, msgs_after=len(result),
+            tokens_before=tokens_before, tokens_after=tokens_after,
+            method=f"emergency_{attempt}", llm_summary_used=False,
+        )
+        return result
 
     def _resolve_provider_call(self, provider_id: str, model: str, payload: dict):
         """Resolve base_url, headers, and adapted payload for a provider."""
@@ -879,7 +1535,8 @@ class ToolLoopEngine:
                         log.error("Codex %s:%s returned HTTP %d: %s | Payload keys: %s",
                                   provider_id, model, resp.status_code, body,
                                   list(adapted_payload.keys()))
-                        last_err = f"HTTP {resp.status_code} on {provider_id}:{model}: {body[:100]}"
+                        err_body = body[:200] if resp.status_code == 400 else body[:100]
+                        last_err = f"HTTP {resp.status_code} on {provider_id}:{model}: {err_body}"
                         break
 
                     resp.raise_for_status()
@@ -930,7 +1587,8 @@ class ToolLoopEngine:
                         time.sleep(wait)
                         last_err = f"HTTP {status} on {provider_id}:{model}: {body[:100]}"
                         continue
-                    last_err = f"HTTP {status} on {provider_id}:{model}: {body[:100]}"
+                    err_body = body[:200] if status == 400 else body[:100]
+                    last_err = f"HTTP {status} on {provider_id}:{model}: {err_body}"
                     break
                 except requests.exceptions.Timeout:
                     if attempt < MAX_RETRIES:
@@ -1067,11 +1725,16 @@ class ToolLoopEngine:
         # Use model_override if provided, otherwise fall back to default model
         effective_model = model_override if model_override else self.model
         
+        caller_name = traceback.extract_stack()[-2].name if len(traceback.extract_stack()) >= 2 else ""
         _debug_logger.session_start(
             user_message=user_message[:500] if isinstance(user_message, str) else str(user_message)[:500],
             model=effective_model,
             max_steps=max_steps,
-            caller=traceback.extract_stack()[-2].name if len(traceback.extract_stack()) >= 2 else "",
+            caller=caller_name,
+        )
+        _ctx_logger.set_session(
+            session_id=_debug_logger._session_id or "",
+            caller=caller_name,
         )
 
         consecutive_task_completes = 0
@@ -1082,11 +1745,20 @@ class ToolLoopEngine:
         # Load Anthropic config once before the loop (not on every iteration)
         anthropic_cfg = _load_config() if self._fallback_chain.active_provider == "anthropic" else {}
 
+        overflow_recovery_attempts = 0
+
         for step in range(max_steps):
             if cancel_check and cancel_check():
                 final_text = "(Stopped by user)"
                 exit_reason = "cancelled"
                 break
+
+            if step % 10 == 0:
+                _ctx_logger.log_context_snapshot(
+                    step=step, total_messages=len(messages),
+                    tokens_estimated=_estimate_context_tokens(messages),
+                    model=effective_model,
+                )
 
             if consecutive_task_completes >= MAX_CONSECUTIVE_TASK_COMPLETES:
                 _debug_logger.step_error(step,
@@ -1141,6 +1813,25 @@ class ToolLoopEngine:
             if error:
                 consecutive_errors += 1
                 _debug_logger.step_error(step, f"LLM error ({consecutive_errors}/3): {error}")
+
+                if _CONTEXT_OVERFLOW_RE.search(error):
+                    overflow_recovery_attempts += 1
+                    _ctx_logger.log_overflow_recovery(
+                        step=step, attempt=overflow_recovery_attempts,
+                        error_snippet=error,
+                    )
+                    if consecutive_errors <= _MAX_OVERFLOW_RECOVERY_ATTEMPTS:
+                        log.warning(
+                            "Context overflow at step %d (attempt %d/%d) — compacting and retrying",
+                            step, consecutive_errors, _MAX_OVERFLOW_RECOVERY_ATTEMPTS,
+                        )
+                        messages = self._emergency_compact(messages, consecutive_errors, step=step)
+                        continue
+                    log.error("Context overflow persists after %d compaction attempts", consecutive_errors)
+                    final_text = f"Context overflow — could not reduce context after {consecutive_errors} attempts"
+                    exit_reason = "context_overflow"
+                    break
+
                 if consecutive_errors >= 3:
                     final_text = error
                     exit_reason = "llm_error"
@@ -1351,10 +2042,17 @@ class ToolLoopEngine:
                         except Exception:
                             pass
 
+                    result_limit = _adaptive_tool_result_limit(messages)
+                    if result_limit < 6000:
+                        _ctx_logger.log_adaptive_limit(
+                            step=step,
+                            tokens_estimated=_estimate_context_tokens(messages),
+                            limit_applied=result_limit,
+                        )
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc_id,
-                        "content": tool_result[:DEFAULT_TOOL_RESULT_LIMIT],
+                        "content": tool_result[:result_limit],
                     })
 
                 if exit_reason in ("task_complete", "cancelled"):
@@ -1366,15 +2064,12 @@ class ToolLoopEngine:
                     exit_reason = "cancelled"
                     break
 
-                if len(messages) > 30:
-                    system_msg = messages[0]
-                    user_msg = messages[1]
-                    keep = messages[2:-20]
-                    for i, m in enumerate(keep):
-                        if m.get("role") == "tool" and len(m.get("content") or "") > 500:
-                            keep[i] = {**m, "content": (m.get("content") or "")[:300] + "\n...(trimmed)"}
-                    recent = messages[-20:]
-                    messages = [system_msg, user_msg] + keep + recent
+                needs_compact = (
+                    len(messages) > 30
+                    or _estimate_context_tokens(messages) > _COMPACT_TOKEN_THRESHOLD
+                )
+                if needs_compact and len(messages) > 22:
+                    messages = self._compact_messages(messages, step=step)
             else:
                 text_content = (msg.get("content") or "").strip()
                 if not tool_calls_log:
@@ -1471,13 +2166,23 @@ class ToolLoopEngine:
                 pass
 
         unique_tools = list(set(tc["tool"] for tc in tool_calls_log)) if tool_calls_log else []
+        steps_used = len(set(tc["step"] for tc in tool_calls_log)) if tool_calls_log else 0
         _debug_logger.session_end(
-            steps_used=len(set(tc["step"] for tc in tool_calls_log)) if tool_calls_log else 0,
+            steps_used=steps_used,
             tools_used=unique_tools,
             total_tokens=total_tokens,
             exit_reason=exit_reason,
             final_text=final_text,
         )
+        _ctx_logger.log_context_snapshot(
+            step=steps_used, total_messages=len(messages),
+            tokens_estimated=_estimate_context_tokens(messages),
+            model=effective_model,
+        )
+        if _ctx_logger._feature_id and tool_calls_log:
+            _ctx_logger.log_skill_compliance(
+                role="implementer", tool_calls=tool_calls_log,
+            )
 
         return ToolLoopResult(
             text=final_text,

@@ -369,6 +369,12 @@ DEFAULT_CONFIG = {
     # Persistent Shell Sessions
     "max_shell_sessions": 5,
     "max_background_processes": 10,
+    # Dashboard
+    "dashboard_port": 3333,
+    # Anthropic-specific
+    "anthropic_effort": "high",
+    "anthropic_context_compaction": False,
+    "anthropic_context_compaction_ratio": 0.5,
     # MCP (Model Context Protocol) - disabled by default for security
     "enable_mcp": False,
     "mcp_servers": {},
@@ -389,6 +395,15 @@ DEFAULT_CONFIG = {
         "smart": "openrouter/anthropic/claude-opus-4-6",
         "vision": "openrouter/anthropic/claude-sonnet-4-6",
         "code": "openrouter/openai/gpt-5.3-codex",
+    },
+    # Provider fallback chains — user-reorderable priority for each capability
+    "provider_chains": {
+        "web_search": ["perplexity_openrouter", "perplexity_direct", "grok", "openai", "brave", "gemini"],
+        "image_gen": ["openrouter", "google", "openai"],
+        "vision": ["openai", "openrouter", "google", "anthropic", "ollama"],
+        "tts": ["edge", "openai", "elevenlabs"],
+        "embeddings": ["openrouter", "gemini", "ollama"],
+        "voice_stt": ["moonshine", "openrouter", "whisper", "groq", "vosk"],
     },
 }
 
@@ -1308,20 +1323,19 @@ class GhostDaemon:
             except Exception as e:
                 print(f"  [mcp] Failed to initialize: {e}")
 
-        # Sub-Agents — Task Delegation and Parallel Execution
+        # Focused Delegation — fresh-context research and verification
         if cfg.get("enable_subagents", True):
             try:
                 for tool_def in build_subagent_tools(
                     cfg=cfg,
                     tool_registry=self.tool_registry,
-                    skill_loader=self.skill_loader,
                     auth_store=self.auth_store,
                     provider_chain=self.provider_chain,
                 ):
                     self.tool_registry.register(tool_def)
-                print("  [subagents] Initialized task delegation system")
+                print("  [delegate] Initialized focused delegation tool")
             except Exception as e:
-                print(f"  [subagents] Failed to initialize: {e}")
+                print(f"  [delegate] Failed to initialize: {e}")
 
         # Langfuse Observability — LLM Tracing and Monitoring
         if cfg.get("enable_langfuse", False):
@@ -1867,6 +1881,7 @@ class GhostDaemon:
             channel_items = channel_items[-max_turns:]
 
             history = []
+            max_assistant_chars = 1500
             for item in channel_items:
                 user_msg = item.get("source", "")
                 prefix = f"[{channel_id}:"
@@ -1876,6 +1891,11 @@ class GhostDaemon:
                 assistant_msg = (item.get("result") or "").strip()
                 if user_msg and assistant_msg:
                     history.append({"role": "user", "content": user_msg})
+                    if len(assistant_msg) > max_assistant_chars:
+                        assistant_msg = (
+                            assistant_msg[:max_assistant_chars]
+                            + "\n...[previous response truncated for context budget]"
+                        )
                     history.append({"role": "assistant", "content": assistant_msg})
             return history
         except Exception as e:
