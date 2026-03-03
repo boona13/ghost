@@ -2291,19 +2291,30 @@ class ToolLoopEngine:
         )
 
         # Only log implementer compliance when this run() IS the implementer
-        # (has evolve_plan in tool_calls). Use the saved feature_id since
-        # complete_future_feature may have cleared the logger by now.
+        # (has evolve_plan in tool_calls).
         has_evolve_tools = any(
             tc["tool"] in ("evolve_plan", "evolve_apply")
             for tc in tool_calls_log
         ) if tool_calls_log else False
+        # Feature ID may have been set during run() (start_future_feature)
+        # and cleared during run() (complete_future_feature). Extract from
+        # tool_calls_log as last resort.
         feature_for_compliance = _prev_ctx_feature_id or _ctx_logger._feature_id
+        if not feature_for_compliance and tool_calls_log:
+            for tc in tool_calls_log:
+                if tc["tool"] == "start_future_feature":
+                    result = tc.get("result", "")
+                    import re as _re
+                    m = _re.search(r'\[([a-f0-9]{10})\]', result)
+                    if m:
+                        feature_for_compliance = m.group(1)
+                    break
+        feature_title_for_compliance = _prev_ctx_feature_title or _ctx_logger._feature_title
         if feature_for_compliance and tool_calls_log and has_evolve_tools:
-            # Temporarily restore feature context for the compliance log
             saved_fid = _ctx_logger._feature_id
             saved_ftitle = _ctx_logger._feature_title
             _ctx_logger._feature_id = feature_for_compliance
-            _ctx_logger._feature_title = _prev_ctx_feature_title or _ctx_logger._feature_title
+            _ctx_logger._feature_title = feature_title_for_compliance
             _ctx_logger.log_skill_compliance(
                 role="implementer", tool_calls=tool_calls_log,
             )
