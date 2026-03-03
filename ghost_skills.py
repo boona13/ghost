@@ -9,6 +9,7 @@ Community can drop skills into ~/.ghost/skills/ with zero code.
 import os
 import re
 import yaml
+import json
 import time
 import logging
 from pathlib import Path
@@ -23,9 +24,9 @@ SKILLS_BUNDLED_DIR = Path(__file__).resolve().parent / "skills"
 
 SKILLS_USER_DIR.mkdir(parents=True, exist_ok=True)
 
-# Model aliases for per-skill model overrides
-# Maps alias names to provider:model format
-MODEL_ALIASES = {
+# Default model aliases for per-skill model overrides
+# These can be overridden via config.json skill_model_aliases
+DEFAULT_MODEL_ALIASES = {
     "cheap": "openrouter/google/gemini-2.0-flash-001",
     "fast": "openrouter/google/gemini-2.0-flash-001",
     "capable": "openrouter/anthropic/claude-sonnet-4-6",
@@ -35,19 +36,37 @@ MODEL_ALIASES = {
 }
 
 
+def _get_model_aliases() -> Dict[str, str]:
+    """Load model aliases from config with fallback to defaults."""
+    config_path = GHOST_HOME / "config.json"
+    if config_path.exists():
+        try:
+            cfg = json.loads(config_path.read_text(encoding='utf-8'))
+            aliases = cfg.get("skill_model_aliases", {})
+            if isinstance(aliases, dict) and aliases:
+                # Merge with defaults (user aliases override defaults)
+                merged = dict(DEFAULT_MODEL_ALIASES)
+                merged.update(aliases)
+                return merged
+        except (json.JSONDecodeError, OSError) as exc:
+            log.warning("Failed to load skill_model_aliases from config: %s", exc)
+    return dict(DEFAULT_MODEL_ALIASES)
+
+
 def resolve_model_alias(model: str | None) -> str | None:
     """Resolve a model alias to full provider:model format.
     
     Supports:
-    - Aliases: 'cheap', 'fast', 'capable', 'smart', 'vision', 'code'
+    - Aliases: 'cheap', 'fast', 'capable', 'smart', 'vision', 'code' (configurable)
     - Full format: 'provider/model' (passed through)
     - Provider-prefixed: 'google/gemini-2.0-flash-001' (passed through)
     """
     if not model:
         return None
     model = model.strip().lower()
-    if model in MODEL_ALIASES:
-        return MODEL_ALIASES[model]
+    aliases = _get_model_aliases()
+    if model in aliases:
+        return aliases[model]
     return model
 
 
@@ -60,10 +79,11 @@ def validate_skill_model(model: str | None) -> Tuple[bool, str]:
         return True, ""  # No model override is valid
     
     resolved = resolve_model_alias(model)
+    aliases = _get_model_aliases()
     
     # Must be in provider/model format
     if "/" not in resolved:
-        return False, f"Model must be in 'provider/model' format or a known alias ({', '.join(MODEL_ALIASES.keys())})"
+        return False, f"Model must be in 'provider/model' format or a known alias ({', '.join(sorted(aliases.keys()))})"
     
     parts = resolved.split("/", 1)
     if len(parts) != 2 or not parts[0] or not parts[1]:

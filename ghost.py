@@ -380,6 +380,15 @@ DEFAULT_CONFIG = {
     "langfuse_public_key": "",
     "langfuse_secret_key": "",
     "langfuse_project_id": "",
+    # Skill Model Aliases - configurable shortcuts for per-skill model overrides
+    "skill_model_aliases": {
+        "cheap": "openrouter/google/gemini-2.0-flash-001",
+        "fast": "openrouter/google/gemini-2.0-flash-001",
+        "capable": "openrouter/anthropic/claude-sonnet-4-6",
+        "smart": "openrouter/anthropic/claude-opus-4-6",
+        "vision": "openrouter/anthropic/claude-sonnet-4-6",
+        "code": "openrouter/openai/gpt-5.3-codex",
+    },
 }
 
 def load_config():

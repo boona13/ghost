@@ -197,6 +197,11 @@ CONFIG_SCHEMA = {
             "embedding_ollama": "nomic-embed-text",
         },
     },
+    "skill_model_aliases": {
+        "type": "object",
+        "description": "Model aliases for per-skill model overrides. Keys are alias names, values are provider/model strings. Built-in aliases: cheap, fast, capable, smart, vision, code. User-defined aliases override defaults.",
+        "additionalProperties": {"type": "string"},
+    },
 }
 
 
