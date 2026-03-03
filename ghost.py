@@ -385,6 +385,12 @@ DEFAULT_CONFIG = {
             "enabled": True,
             "timeout": 60,
         },
+        "playwright": {
+            "command": "npx",
+            "args": ["-y", "@executeautomation/playwright-mcp-server"],
+            "enabled": False,
+            "timeout": 60,
+        },
     },
     # Webhook Triggers (auto-generated on startup if empty for security)
     "webhook_secret": "",
