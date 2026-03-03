@@ -423,21 +423,34 @@ class EvolutionEngine:
                 new_str = patch.get("new", "")
                 if old_str and old_str in new_content:
                     new_content = new_content.replace(old_str, new_str, 1)
-                else:
-                    # Provide more helpful error message with context
-                    hint = ""
-                    if old_str.strip():
-                        # Check if it's a whitespace issue
-                        if old_str.strip() in new_content:
-                            hint = " (Note: The content exists but with different whitespace/indentation)"
-                        # Check if it's a line ending issue  
-                        elif old_str.replace('\r\n', '\n') in new_content.replace('\r\n', '\n'):
-                            hint = " (Note: Content matches but line endings differ)"
-                        # Suggest re-reading the file
-                        else:
-                            hint = f" Hint: Use file_read on '{rel_path}' to get the exact current content, then retry with matching text."
-                    
-                    return False, f"Patch target not found in {rel_path}: {old_str[:80]}...{hint}"
+                elif old_str:
+                    matched = False
+                    # Fallback 1: normalize line endings
+                    norm_old = old_str.replace('\r\n', '\n')
+                    norm_content = new_content.replace('\r\n', '\n')
+                    if norm_old in norm_content:
+                        new_content = norm_content.replace(norm_old, new_str.replace('\r\n', '\n'), 1)
+                        matched = True
+                    # Fallback 2: strip trailing whitespace per line
+                    if not matched:
+                        def _strip_trailing(s):
+                            return '\n'.join(line.rstrip() for line in s.split('\n'))
+                        st_old = _strip_trailing(old_str)
+                        st_content = _strip_trailing(new_content)
+                        if st_old and st_old in st_content:
+                            pos = st_content.index(st_old)
+                            lines_before = st_content[:pos].count('\n')
+                            lines_match = st_old.count('\n') + 1
+                            orig_lines = new_content.split('\n')
+                            replaced_lines = new_str.split('\n')
+                            new_content = '\n'.join(
+                                orig_lines[:lines_before] + replaced_lines +
+                                orig_lines[lines_before + lines_match:]
+                            )
+                            matched = True
+                    if not matched:
+                        hint = f" Hint: Use file_read on '{rel_path}' to get the exact current content, then retry with matching text."
+                        return False, f"Patch target not found in {rel_path}: {old_str[:80]}...{hint}"
         else:
             return False, "Provide either 'content' (full file) or 'patches' (search/replace pairs)"
 
