@@ -2155,7 +2155,7 @@ class ToolLoopEngine:
                     if not text_content:
                         consecutive_empty = getattr(self, "_consecutive_empty", 0) + 1
                         self._consecutive_empty = consecutive_empty
-                        if consecutive_empty >= 5:
+                        if consecutive_empty >= 10:
                             _debug_logger.step_text_response(
                                 step, "", f"break_empty_loop_{consecutive_empty}")
                             final_text = (
