@@ -26,14 +26,22 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import datetime
 
+import platform
+if platform.system() == "Darwin":
+    try:
+        import AppKit  # pyobjc-framework-Cocoa
+        info = AppKit.NSBundle.mainBundle().infoDictionary()
+        info["LSUIElement"] = "1"
+    except Exception:
+        pass
+
 try:
-    from browser_use import Agent, Browser, BrowserConfig
+    from browser_use import Agent, Browser
     BROWSER_USE_AVAILABLE = True
 except ImportError:
     BROWSER_USE_AVAILABLE = False
     Agent = None
     Browser = None
-    BrowserConfig = None
 
 log = logging.getLogger(__name__)
 
@@ -207,7 +215,7 @@ def delete_session(session_id: str) -> bool:
     browser = _get_runtime(session_id, "browser")
     if browser:
         try:
-            _run_async(browser.close())
+            _run_async(browser.stop())
         except Exception as exc:
             log.warning("Error closing browser for session %s: %s", session_id, exc)
     with _runtime_lock:
@@ -240,8 +248,7 @@ async def _run_browser_task(
     save_session(session)
 
     try:
-        browser_config = BrowserConfig(headless=headless)
-        browser = Browser(config=browser_config)
+        browser = Browser(headless=headless)
         _set_runtime(session_id, "browser", browser)
 
         try:

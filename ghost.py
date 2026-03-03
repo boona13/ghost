@@ -316,6 +316,7 @@ DEFAULT_CONFIG = {
     "strict_tool_registration": True,   # Security: True prevents tool shadowing (CVE-2025-59536/21852 defense)
     "enable_cron": True,
     "enable_evolve": True,
+    "enable_future_features": True,
     "evolve_auto_approve": False,
     "max_evolutions_per_hour": 25,
     "enable_integrations": True,
@@ -1604,6 +1605,10 @@ class GhostDaemon:
         payload = job.get("payload", {})
         ptype = payload.get("type", "task")
         console_bus.emit("info", "cron", job_name, f"Cron fired ({ptype})")
+
+        if job_name == _FEATURE_IMPLEMENTER_JOB and not self.cfg.get("enable_future_features", True):
+            console_bus.emit("info", "cron", job_name, "Skipped — Future Features disabled in config")
+            return
 
         if job_name == _IMPLEMENTATION_AUDITOR_JOB:
             if self.cron and self.cron.is_job_running(_FEATURE_IMPLEMENTER_JOB):

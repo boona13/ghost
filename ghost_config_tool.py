@@ -97,6 +97,7 @@ CONFIG_SCHEMA = {
     "enable_browser_tools": {"type": "boolean", "description": "Enable browser automation"},
     "enable_cron": {"type": "boolean", "description": "Enable cron scheduler"},
     "enable_evolve": {"type": "boolean", "description": "Enable self-evolution"},
+    "enable_future_features": {"type": "boolean", "description": "Enable autonomous feature implementation (evolve loop)"},
     "enable_integrations": {"type": "boolean", "description": "Enable Google/Grok integrations"},
     "enable_growth": {"type": "boolean", "description": "Enable autonomy growth routines"},
     "enable_web_search": {"type": "boolean", "description": "Enable web search tool"},

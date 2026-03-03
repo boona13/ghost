@@ -842,6 +842,8 @@ def build_future_features_tools(cfg, on_queue_change=None):
 
     def _start_future_feature(feature_id: str):
         """Mark a feature as in_progress. Auto-resumes if branch exists."""
+        if not cfg.get("enable_future_features", True):
+            return "BLOCKED — Future Features is disabled in config. Do NOT attempt to implement any feature. Call task_complete now."
         item = store.get_by_id(feature_id)
         resume_evo = None
         resume_branch = None
