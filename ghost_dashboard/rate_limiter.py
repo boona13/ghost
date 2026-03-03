@@ -93,13 +93,36 @@ class RateLimiter:
 _limiter = RateLimiter()
 
 
+def _cleanup_worker(interval_seconds: float = 300):
+    """Background thread to periodically clean up stale buckets."""
+    while True:
+        time.sleep(interval_seconds)
+        try:
+            _limiter.cleanup_old_buckets(max_age_seconds=3600)
+        except Exception as exc:
+            log.warning("Rate limiter cleanup error: %s", exc)
+
+
+# Start cleanup thread on module load
+_cleanup_thread = threading.Thread(target=_cleanup_worker, daemon=True)
+_cleanup_thread.start()
+
+
 def _get_client_ip() -> str:
-    """Extract client IP from request, handling proxies."""
+    """Extract client IP from request, handling proxies.
+    
+    Uses the LAST IP from X-Forwarded-For (most trusted) as the first
+    IPs can be spoofed by the client. Falls back to remote_addr.
+    """
     # Check X-Forwarded-For header first (for proxies)
     forwarded = request.headers.get('X-Forwarded-For')
     if forwarded:
-        # Take the first IP in the chain
-        return forwarded.split(',')[0].strip()
+        # Take the LAST IP in the chain (most trusted/proxy-closest)
+        # X-Forwarded-For: client, proxy1, proxy2 (last is most trusted)
+        ips = [ip.strip() for ip in forwarded.split(',')]
+        for ip in reversed(ips):
+            if ip:
+                return ip
     # Fall back to direct remote address
     return request.remote_addr or 'unknown'
 
@@ -124,32 +147,38 @@ def rate_limit(requests_per_minute: int = 60, key_func=None):
     def decorator(f):
         @wraps(f)
         def wrapped(*args, **kwargs):
-            # Get rate limit key
-            if key_func:
-                key = key_func(request)
-            else:
-                key = _get_client_ip()
+            try:
+                # Get rate limit key
+                if key_func:
+                    key = key_func(request)
+                else:
+                    key = _get_client_ip()
 
-            # Add endpoint name to key for per-endpoint limiting
-            endpoint_key = f"{f.__name__}:{key}"
+                # Use endpoint path for unique keys across blueprints
+                # request.endpoint gives 'blueprint.view_function' format
+                endpoint_name = request.endpoint or f.__name__
+                endpoint_key = f"{endpoint_name}:{key}"
 
-            allowed, retry_after = _limiter.is_allowed(
-                endpoint_key, capacity, refill_rate
-            )
-
-            if not allowed:
-                log.warning(
-                    "Rate limit exceeded for %s from %s",
-                    f.__name__, key
+                allowed, retry_after = _limiter.is_allowed(
+                    endpoint_key, capacity, refill_rate
                 )
-                response = jsonify({
-                    "error": "Rate limit exceeded",
-                    "retry_after": retry_after
-                })
-                response.status_code = 429
-                response.headers['Retry-After'] = str(retry_after)
-                return response
 
+                if not allowed:
+                    log.warning(
+                        "Rate limit exceeded for %s from %s",
+                        endpoint_name, key
+                    )
+                    response = jsonify({
+                        "error": "Rate limit exceeded",
+                        "retry_after": retry_after
+                    })
+                    response.status_code = 429
+                    response.headers['Retry-After'] = str(retry_after)
+                    return response
+            except Exception as exc:
+                # Graceful degradation: allow request on rate limiter failure
+                log.error("Rate limiter error, allowing request: %s", exc)
+            
             return f(*args, **kwargs)
         return wrapped
     return decorator
