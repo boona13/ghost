@@ -149,6 +149,10 @@ CONFIG_SCHEMA = {
         "type": "boolean",
         "description": "Enable Claude 4.6+ context window compression to automatically manage long contexts. Only applies to direct Anthropic API.",
     },
+    "anthropic_context_compaction_ratio": {
+        "type": "number",
+        "description": "Compression ratio for Claude 4.6+ context window (0.0-1.0, default 0.5). Higher = more aggressive compression. Only applies when anthropic_context_compaction is enabled.",
+    },
     "strict_tool_registration": {"type": "boolean", "description": "Security: True prevents tool shadowing by plugins (CVE-2025-59536/21852 defense)"},
     "enable_mcp": {"type": "boolean", "description": "Enable MCP (Model Context Protocol) client for external tool servers"},
     "mcp_servers": {

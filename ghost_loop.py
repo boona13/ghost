@@ -1108,9 +1108,12 @@ class ToolLoopEngine:
                     payload["effort"] = effort
                 
                 if anthropic_cfg.get("anthropic_context_compaction"):
+                    ratio = anthropic_cfg.get("anthropic_context_compaction_ratio", 0.5)
+                    # Clamp ratio to valid range 0.0-1.0
+                    ratio = max(0.0, min(1.0, float(ratio)))
                     payload["context_window_compression"] = {
                         "type": "prompt_caching",
-                        "ratio": 0.5
+                        "ratio": ratio
                     }
 
             is_last_step = (step == max_steps - 1)
