@@ -173,7 +173,7 @@ def build_hook_debug_tools(hook_runner=None):
         cfg = getattr(hook_runner, "_config", {}) or {}
         return bool(cfg.get("enable_hook_debug", False))
 
-    def list_execute(limit: int = 50, hook_name: str = "", status: str = ""):
+    def list_execute(limit: int = 50, hook_name: str = "", status: str = "", **kwargs):
         if not _enabled():
             return {"ok": False, "error": "Hook debug disabled (enable_hook_debug=false)"}
         limit = max(1, min(int(limit), 500))
@@ -181,12 +181,12 @@ def build_hook_debug_tools(hook_runner=None):
         status = str(status).strip()
         return {"ok": True, "events": store.list_events(limit=limit, hook_name=hook_name, status=status)}
 
-    def stats_execute():
+    def stats_execute(**kwargs):
         if not _enabled():
             return {"ok": False, "error": "Hook debug disabled (enable_hook_debug=false)"}
         return {"ok": True, "stats": store.stats()}
 
-    def replay_execute(event_id: str = "", confirm: bool = False):
+    def replay_execute(event_id: str = "", confirm: bool = False, **kwargs):
         if not _enabled():
             return {"ok": False, "error": "Hook debug disabled (enable_hook_debug=false)"}
         event_id = str(event_id).strip()
