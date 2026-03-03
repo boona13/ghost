@@ -451,8 +451,13 @@ class ReviewEngine:
             return f"Diff for {fd['file']}:\n```diff\n{fd['diff']}\n```"
 
         def read_pr_file(file: str = "", offset: int = 1, limit: int = 200, **kwargs) -> str:
-            if not file:
-                return "Error: file parameter is required."
+            if not file or file.strip() in ("", ".py", ".js", ".html", ".css"):
+                avail = ", ".join(diff_index.keys()) if diff_index else "none"
+                return (
+                    f"Error: provide a full file path (not '{file}'). "
+                    f"Files in this PR: {avail}. "
+                    "Call read_pr_diff() with no args to see the file list."
+                )
             abs_path = PROJECT_DIR / file
             if not abs_path.exists():
                 return f"File not found: {file}"
