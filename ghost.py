@@ -381,7 +381,7 @@ DEFAULT_CONFIG = {
     "mcp_servers": {
         "markitdown": {
             "command": "uvx",
-            "args": ["mcp-server-markitdown"],
+            "args": ["markitdown-mcp"],
             "enabled": False,
             "timeout": 60,
         },
