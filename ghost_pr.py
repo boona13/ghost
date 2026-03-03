@@ -13,6 +13,7 @@ the diff, they discuss back and forth, and the Reviewer renders a verdict
 
 import json
 import logging
+import traceback
 import threading
 import uuid
 from datetime import datetime
@@ -757,7 +758,7 @@ class ReviewEngine:
                 max_tokens=4096,
             )
         except Exception as exc:
-            log.error("Reviewer tool loop failed: %s", exc)
+            log.error("Reviewer tool loop failed: %s\n%s", exc, traceback.format_exc())
             self.store.set_verdict(pr_id, "rejected",
                                    f"Reviewer tool loop error: {exc}")
             return "rejected"
