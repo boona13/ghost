@@ -1925,6 +1925,7 @@ class ToolLoopEngine:
             messages.append(msg)
 
             if msg.get("tool_calls") and tool_registry:
+                self._consecutive_text_only = 0
                 for tc in msg["tool_calls"]:
                     fn_name = str(tc.get("function", {}).get("name", "")).strip()
                     raw_args = tc.get("function", {}).get("arguments", "{}")
@@ -2203,14 +2204,35 @@ class ToolLoopEngine:
                     else:
                         self._consecutive_empty = 0
 
+                    consecutive_text = getattr(self, "_consecutive_text_only", 0) + 1
+                    self._consecutive_text_only = consecutive_text
+
+                    # After 3 consecutive text-only responses, compact context
+                    # to free output token budget for tool calls
+                    if consecutive_text == 3 and len(messages) > 22:
+                        messages = self._compact_messages(messages, step=step)
+
                     workflow_issue = _check_incomplete_workflows(tool_calls_log)
-                    pushback = (
-                        "You responded with a plain text message, but you should call "
-                        "task_complete(summary='...') when done. A text response without "
-                        "task_complete means you're still working. "
-                        "If the task IS done, call task_complete now with your summary. "
-                        "If the task is NOT done, call the next tool to make progress."
-                    )
+
+                    if consecutive_text >= 5:
+                        pushback = (
+                            "CRITICAL: You have produced {n} text responses without "
+                            "calling any tool. You MUST call a tool NOW. "
+                            "Do NOT explain what you will do — just call the tool.\n\n"
+                            "Pick ONE of these actions:\n"
+                            "  - evolve_apply(evolution_id=..., file_path='...', patches=[...])\n"
+                            "  - evolve_test(evolution_id=...)\n"
+                            "  - fail_future_feature(feature_id=..., reason='...')\n"
+                            "  - task_complete(summary='...')"
+                        ).format(n=consecutive_text)
+                    else:
+                        pushback = (
+                            "You responded with a plain text message, but you should call "
+                            "task_complete(summary='...') when done. A text response without "
+                            "task_complete means you're still working. "
+                            "If the task IS done, call task_complete now with your summary. "
+                            "If the task is NOT done, call the next tool to make progress."
+                        )
                     if workflow_issue:
                         pushback += f"\n\nBLOCKER: {workflow_issue}"
                     _debug_logger.step_text_response(step, text_content,
