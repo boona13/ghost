@@ -362,3 +362,146 @@ class SkillRegistryManager:
         except Exception as exc:
             log.error("Failed to install skill %s: %s", skill_name, exc)
             return {"ok": False, "error": f"Installation failed: {exc}"}
+
+
+def build_skill_registry_tools(cfg=None):
+    """Build tools for the public skill registry (GhostHub)."""
+    cfg = cfg or {}
+    if not cfg.get("enable_skill_registry", True):
+        return []
+
+    client = SkillRegistryClient()
+    from ghost_skill_manager import SkillManager
+
+    def _load_save_config():
+        from ghost import load_config, save_config
+        return load_config, save_config
+
+    def search_registry_skills(query="", tags=None, author="", **kwargs):
+        """Search the public skill registry (GhostHub) for community skills."""
+        try:
+            results = client.search_skills(
+                query=query,
+                tags=tags or [],
+                author=author,
+            )
+            return {
+                "ok": True,
+                "count": len(results),
+                "skills": [s.to_dict() for s in results],
+            }
+        except Exception as exc:
+            log.warning("Registry search failed: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def get_registry_skill(name, **kwargs):
+        """Get detailed info about a skill from the public registry."""
+        try:
+            skill = client.get_skill(name)
+            if not skill:
+                return {"ok": False, "error": f"Skill '{name}' not found in registry"}
+            return {"ok": True, "skill": skill.to_dict()}
+        except Exception as exc:
+            log.warning("Registry get_skill failed: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def install_registry_skill(name, overwrite=False, **kwargs):
+        """Install a skill from the public registry (GhostHub)."""
+        try:
+            load_config, save_config = _load_save_config()
+            manager = SkillManager(load_config, save_config)
+            result = client.install_skill(name, manager, overwrite=overwrite)
+            return result
+        except Exception as exc:
+            log.error("Failed to install registry skill %s: %s", name, exc)
+            return {"ok": False, "error": str(exc)}
+
+    def refresh_registry_cache(**kwargs):
+        """Force refresh the local skill registry cache from GitHub."""
+        try:
+            client.clear_cache()
+            # Trigger a fetch to repopulate
+            skills = client.list_skills(force_refresh=True)
+            return {
+                "ok": True,
+                "message": f"Registry cache refreshed. {len(skills)} skills available.",
+                "count": len(skills),
+            }
+        except Exception as exc:
+            log.error("Failed to refresh registry cache: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def get_registry_stats(**kwargs):
+        """Get statistics about the public skill registry."""
+        try:
+            skills = client.list_skills()
+            tags = set()
+            authors = set()
+            for s in skills:
+                tags.update(s.tags or [])
+                if s.author:
+                    authors.add(s.author)
+            return {
+                "ok": True,
+                "total_skills": len(skills),
+                "unique_tags": len(tags),
+                "unique_authors": len(authors),
+                "tags": sorted(tags)[:50],  # Limit for brevity
+                "source": client.repo,
+            }
+        except Exception as exc:
+            log.warning("Registry stats failed: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    return [
+        {
+            "name": "search_registry_skills",
+            "description": "Search the public skill registry (GhostHub) for community skills by keyword, tags, or author",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query string", "default": ""},
+                    "tags": {"type": "array", "items": {"type": "string"}, "description": "Filter by tags", "default": []},
+                    "author": {"type": "string", "description": "Filter by author username", "default": ""},
+                },
+            },
+            "execute": search_registry_skills,
+        },
+        {
+            "name": "get_registry_skill",
+            "description": "Get detailed information about a specific skill from the public registry",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Name of the skill to look up"},
+                },
+                "required": ["name"],
+            },
+            "execute": get_registry_skill,
+        },
+        {
+            "name": "install_registry_skill",
+            "description": "Install a skill from the public registry (GhostHub) into your local skills directory",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Name of the skill to install"},
+                    "overwrite": {"type": "boolean", "description": "Overwrite if skill already exists", "default": False},
+                },
+                "required": ["name"],
+            },
+            "execute": install_registry_skill,
+        },
+        {
+            "name": "refresh_registry_cache",
+            "description": "Force refresh the local skill registry cache from GitHub",
+            "parameters": {"type": "object", "properties": {}},
+            "execute": refresh_registry_cache,
+        },
+        {
+            "name": "get_registry_stats",
+            "description": "Get statistics about the public skill registry (GhostHub)",
+            "parameters": {"type": "object", "properties": {}},
+            "execute": get_registry_stats,
+        },
+    ]

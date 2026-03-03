@@ -35,6 +35,7 @@ from ghost_browser import build_browser_tools, browser_stop as _browser_stop
 from ghost_cron import CronService, build_cron_tools, describe_schedule
 from ghost_evolve import build_evolve_tools, get_engine as get_evolve_engine
 from ghost_integrations import build_integration_tools
+from ghost_skill_registry import build_skill_registry_tools
 from ghost_autonomy import (
     ActionItemStore, GrowthLogger, build_autonomy_tools,
     bootstrap_growth_cron, run_self_repair,
@@ -989,6 +990,11 @@ class GhostDaemon:
         # X/Twitter interaction tracker (prevents duplicate likes/retweets/follows)
         for tool_def in build_x_tracker_tools():
             self.tool_registry.register(tool_def)
+
+        # Public skill registry (GhostHub) — discover and install community skills
+        if cfg.get("enable_skill_registry", True):
+            for tool_def in build_skill_registry_tools(cfg):
+                self.tool_registry.register(tool_def)
 
         # State file repair tool + startup integrity check
         # Skip full repair in dry-run mode for faster startup

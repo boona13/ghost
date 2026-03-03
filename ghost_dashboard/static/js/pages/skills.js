@@ -2,6 +2,8 @@
 
 let allSkills = [];
 let expandedSkill = null;
+let registrySkills = [];
+let registryStats = null;
 
 export async function render(container) {
   const { GhostAPI: api, GhostUtils: u } = window;
@@ -29,23 +31,47 @@ export async function render(container) {
     </div>
     <p class="page-desc">${stats.total} skills loaded from bundled and user directories</p>
 
-    <div class="flex gap-3 mb-6">
-      <input id="skills-search" type="text" class="form-input flex-1" placeholder="Search skills by name, description, or trigger...">
-      <select id="skills-filter" class="form-input" style="width:150px">
-        <option value="all">All Skills</option>
-        <option value="eligible">Eligible</option>
-        <option value="disabled">Disabled</option>
-        <option value="missing">Missing Reqs</option>
-      </select>
+    <!-- Tabs -->
+    <div class="flex gap-1 mb-4 border-b border-zinc-800">
+      <button id="tab-local" class="evo-tab active px-4 py-2 text-sm font-medium">Local Skills</button>
+      <button id="tab-registry" class="evo-tab px-4 py-2 text-sm font-medium">GhostHub Registry</button>
     </div>
 
-    <div id="skills-groups"></div>
-
-    <div class="mt-6 stat-card">
-      <div class="text-xs text-zinc-500">
-        <div>Bundled: <span class="font-mono text-zinc-400">${u.escapeHtml(data.bundled_dir)}</span></div>
-        <div>User: <span class="font-mono text-zinc-400">${u.escapeHtml(data.user_dir)}</span></div>
+    <!-- Local Skills Panel -->
+    <div id="panel-local">
+      <div class="flex gap-3 mb-6">
+        <input id="skills-search" type="text" class="form-input flex-1" placeholder="Search skills by name, description, or trigger...">
+        <select id="skills-filter" class="form-input" style="width:150px">
+          <option value="all">All Skills</option>
+          <option value="eligible">Eligible</option>
+          <option value="disabled">Disabled</option>
+          <option value="missing">Missing Reqs</option>
+        </select>
       </div>
+
+      <div id="skills-groups"></div>
+
+      <div class="mt-6 stat-card">
+        <div class="text-xs text-zinc-500">
+          <div>Bundled: <span class="font-mono text-zinc-400">${u.escapeHtml(data.bundled_dir)}</span></div>
+          <div>User: <span class="font-mono text-zinc-400">${u.escapeHtml(data.user_dir)}</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Registry Panel -->
+    <div id="panel-registry" style="display:none">
+      <div class="flex gap-3 mb-4">
+        <input id="registry-search" type="text" class="form-input flex-1" placeholder="Search GhostHub registry...">
+        <button id="registry-refresh" class="btn btn-secondary btn-sm">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+          </svg>
+        </button>
+      </div>
+
+      <div id="registry-stats" class="mb-4"></div>
+      <div id="registry-results"></div>
     </div>
   `;
 
@@ -53,6 +79,165 @@ export async function render(container) {
 
   document.getElementById('skills-search')?.addEventListener('input', () => applyFilters(groups, container, api, u));
   document.getElementById('skills-filter')?.addEventListener('change', () => applyFilters(groups, container, api, u));
+
+  // Tab switching
+  document.getElementById('tab-local')?.addEventListener('click', () => switchTab('local'));
+  document.getElementById('tab-registry')?.addEventListener('click', () => switchTab('registry'));
+
+  // Registry search
+  const registrySearch = document.getElementById('registry-search');
+  let searchTimeout;
+  registrySearch?.addEventListener('input', () => {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => searchRegistry(registrySearch.value, api, u), 300);
+  });
+
+  document.getElementById('registry-refresh')?.addEventListener('click', () => refreshRegistry(api, u));
+
+  // Load registry stats in background
+  loadRegistryStats(api, u);
+}
+
+function switchTab(tab) {
+  document.getElementById('tab-local')?.classList.toggle('active', tab === 'local');
+  document.getElementById('tab-registry')?.classList.toggle('active', tab === 'registry');
+  document.getElementById('panel-local').style.display = tab === 'local' ? '' : 'none';
+  document.getElementById('panel-registry').style.display = tab === 'registry' ? '' : 'none';
+}
+
+async function loadRegistryStats(api, u) {
+  try {
+    const stats = await api.get('/api/skills/registry/stats');
+    if (stats.ok) {
+      registryStats = stats;
+      const el = document.getElementById('registry-stats');
+      if (el) {
+        el.innerHTML = `
+          <div class="flex gap-2 text-xs">
+            <span class="badge badge-purple">${stats.total_skills} skills</span>
+            <span class="badge badge-blue">${stats.unique_tags} tags</span>
+            <span class="badge badge-green">${stats.unique_authors} authors</span>
+          </div>
+        `;
+      }
+    }
+  } catch (e) {
+    console.log('Registry stats unavailable');
+  }
+}
+
+async function searchRegistry(query, api, u) {
+  const resultsEl = document.getElementById('registry-results');
+  if (!resultsEl) return;
+
+  if (!query.trim()) {
+    resultsEl.innerHTML = '<div class="text-sm text-zinc-500">Type to search the registry...</div>';
+    return;
+  }
+
+  resultsEl.innerHTML = '<div class="text-sm text-zinc-500">Searching...</div>';
+
+  try {
+    const data = await api.get('/api/skills/registry/search?q=' + encodeURIComponent(query));
+    if (!data.ok) {
+      resultsEl.innerHTML = `<div class="text-sm text-red-400">Error: ${u.escapeHtml(data.error)}</div>`;
+      return;
+    }
+
+    registrySkills = data.skills || [];
+
+    if (registrySkills.length === 0) {
+      resultsEl.innerHTML = '<div class="text-sm text-zinc-500">No skills found matching "' + u.escapeHtml(query) + '"</div>';
+      return;
+    }
+
+    resultsEl.innerHTML = `
+      <div class="text-xs text-zinc-500 mb-2">${data.count} result${data.count !== 1 ? 's' : ''}</div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        ${registrySkills.map(s => renderRegistryCard(s, u)).join('')}
+      </div>
+    `;
+
+    // Add install handlers
+    resultsEl.querySelectorAll('[data-registry-install]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const name = btn.dataset.registryInstall;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="animate-pulse">Installing...</span>';
+        try {
+          const result = await api.post('/api/skills/registry/' + encodeURIComponent(name) + '/install', {});
+          if (result.ok) {
+            u.toast('Installed ' + name, 'success');
+            btn.innerHTML = 'Installed';
+            btn.classList.add('opacity-50');
+          } else {
+            u.toast(result.error || 'Install failed', 'error');
+            btn.disabled = false;
+            btn.innerHTML = 'Install';
+          }
+        } catch (e) {
+          u.toast('Install failed: ' + e.message, 'error');
+          btn.disabled = false;
+          btn.innerHTML = 'Install';
+        }
+      });
+    });
+  } catch (e) {
+    resultsEl.innerHTML = `<div class="text-sm text-red-400">Search failed: ${u.escapeHtml(e.message)}</div>`;
+  }
+}
+
+function renderRegistryCard(s, u) {
+  const installed = allSkills.some(local => local.name === s.name);
+
+  return `
+    <div class="stat-card">
+      <div class="flex items-start justify-between mb-2">
+        <div class="flex-1 min-w-0">
+          <div class="font-semibold text-sm text-white truncate">${u.escapeHtml(s.name)}</div>
+          <div class="text-xs text-zinc-400">${u.escapeHtml(s.author || 'Unknown')}</div>
+        </div>
+        <span class="text-[10px] text-zinc-500">v${u.escapeHtml(s.version || '0.0.0')}</span>
+      </div>
+
+      <div class="text-xs text-zinc-400 leading-relaxed mb-3">${u.escapeHtml(s.description || 'No description')}</div>
+
+      <div class="flex flex-wrap gap-1 mb-3">
+        ${(s.tags || []).slice(0, 4).map(t =>
+          '<span class="inline-block text-[10px] px-1.5 py-0.5 rounded bg-ghost-500/10 text-ghost-400 border border-ghost-500/20">'
+          + u.escapeHtml(t) + '</span>'
+        ).join('')}
+      </div>
+
+      <div class="flex gap-2">
+        <button class="btn btn-primary btn-sm flex-1" data-registry-install="${u.escapeHtml(s.name)}" ${installed ? 'disabled' : ''}>
+          ${installed ? 'Installed' : 'Install'}
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+async function refreshRegistry(api, u) {
+  const btn = document.getElementById('registry-refresh');
+  if (!btn) return;
+  btn.disabled = true;
+  btn.classList.add('animate-spin');
+
+  try {
+    const result = await api.post('/api/skills/registry/refresh', {});
+    if (result.ok) {
+      u.toast(result.message, 'success');
+      loadRegistryStats(api, u);
+    } else {
+      u.toast(result.error || 'Refresh failed', 'error');
+    }
+  } catch (e) {
+    u.toast('Refresh failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove('animate-spin');
+  }
 }
 
 function applyFilters(groups, container, api, u) {

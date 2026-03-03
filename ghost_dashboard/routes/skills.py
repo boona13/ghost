@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from ghost_skills import SkillLoader, SKILLS_BUNDLED_DIR, SKILLS_USER_DIR
 from ghost import load_config, save_config
+from ghost_skill_registry import SkillRegistryClient, SkillRegistryManager
 
 bp = Blueprint("skills", __name__)
 
@@ -181,3 +182,101 @@ def update_skill(name):
         save_config(cfg)
 
     return jsonify({"ok": True})
+
+
+# Registry (GhostHub) endpoints
+
+@bp.route("/api/skills/registry/search")
+def registry_search():
+    """Search the public skill registry."""
+    query = request.args.get("q", "")
+    tags = request.args.getlist("tag")
+    author = request.args.get("author", "")
+    force_refresh = request.args.get("refresh", "false").lower() == "true"
+
+    try:
+        client = SkillRegistryClient()
+        skills = client.search_skills(
+            query=query,
+            tags=tags if tags else None,
+            author=author,
+            force_refresh=force_refresh,
+        )
+        return jsonify({
+            "ok": True,
+            "count": len(skills),
+            "skills": [s.to_dict() for s in skills],
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@bp.route("/api/skills/registry/<name>")
+def registry_get_skill(name):
+    """Get a specific skill from the registry."""
+    try:
+        client = SkillRegistryClient()
+        skill = client.get_skill(name)
+        if not skill:
+            return jsonify({"ok": False, "error": "Skill not found"}), 404
+        return jsonify({"ok": True, "skill": skill.to_dict()})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@bp.route("/api/skills/registry/<name>/install", methods=["POST"])
+def registry_install(name):
+    """Install a skill from the registry."""
+    data = request.get_json(silent=True) or {}
+    overwrite = data.get("overwrite", False)
+
+    try:
+        manager = SkillRegistryManager(load_config, save_config)
+        result = manager.install_skill(name, overwrite=overwrite)
+        if result.get("ok"):
+            # Reload skills after install
+            loader = _get_loader()
+            loader.reload()
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@bp.route("/api/skills/registry/stats")
+def registry_stats():
+    """Get registry statistics."""
+    try:
+        client = SkillRegistryClient()
+        skills = client.list_skills()
+        tags = set()
+        authors = set()
+        for s in skills:
+            tags.update(s.tags or [])
+            if s.author:
+                authors.add(s.author)
+        return jsonify({
+            "ok": True,
+            "total_skills": len(skills),
+            "unique_tags": len(tags),
+            "unique_authors": len(authors),
+            "tags": sorted(tags)[:50],
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@bp.route("/api/skills/registry/refresh", methods=["POST"])
+def registry_refresh():
+    """Force refresh the registry cache."""
+    try:
+        client = SkillRegistryClient()
+        # Force refresh by fetching with force=True
+        data = client.fetch_index(force=True)
+        skills = client.list_skills(force_refresh=True)
+        return jsonify({
+            "ok": True,
+            "message": f"Registry cache refreshed. {len(skills)} skills available.",
+            "count": len(skills),
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
