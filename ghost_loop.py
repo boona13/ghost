@@ -2055,6 +2055,32 @@ class ToolLoopEngine:
                         "content": tool_result[:result_limit],
                     })
 
+                    if "__parse_error" in fn_args and fn_name == "evolve_apply":
+                        _malformed_json_count = getattr(
+                            self, "_malformed_json_count", 0) + 1
+                        self._malformed_json_count = _malformed_json_count
+                        messages.append({
+                            "role": "user",
+                            "content": (
+                                f"⛔ MALFORMED JSON (attempt {_malformed_json_count}/3). "
+                                "Your output was truncated because the file content exceeded "
+                                "your output token limit. You MUST use CHUNKED WRITES:\n"
+                                "  1. evolve_apply(evo_id, file_path, content='<first ~80 lines>')\n"
+                                "  2. evolve_apply(evo_id, file_path, content='<next ~80 lines>', append=True)\n"
+                                "  3. Repeat with append=True for remaining chunks.\n"
+                                "Keep each chunk under 80 lines. Do NOT retry with full content."
+                            ),
+                        })
+                        if _malformed_json_count >= 3:
+                            messages.append({
+                                "role": "user",
+                                "content": (
+                                    "⛔ 3 MALFORMED JSON FAILURES. You keep exceeding the output limit. "
+                                    "Call fail_future_feature(feature_id, 'Output token limit exceeded — "
+                                    "file too large for single tool call') then task_complete."
+                                ),
+                            })
+
                 if exit_reason in ("task_complete", "cancelled",
                                    "critical_loop_break", "warning_accumulation_break"):
                     break
@@ -2297,14 +2323,15 @@ class ToolRegistry:
             if "__parse_error" in args:
                 raw_len = args.get("__raw_len", 0)
                 return (
-                    f"Tool error ({name}): Your tool call arguments were malformed JSON "
-                    f"(parse error: {args['__parse_error']}, raw length: {raw_len} chars). "
-                    f"This usually happens when the content is too large for a single tool call. "
-                    f"SOLUTION: Use evolve_apply with append=true to write the file in smaller chunks. "
-                    f"Call evolve_apply(evolution_id, file_path, content='<first part>', append=false) "
-                    f"for the first chunk, then evolve_apply(evolution_id, file_path, content='<next part>', append=true) "
-                    f"for each subsequent chunk. Keep each chunk under 4000 characters. "
-                    f"NEVER use shell_exec to write files as a workaround."
+                    f"Tool error ({name}): MALFORMED JSON — your output was TRUNCATED "
+                    f"(raw length: {raw_len} chars). Your output token limit is ~8K tokens "
+                    f"(~150 lines of code). You CANNOT write a full module in one call.\n"
+                    f"YOU MUST USE CHUNKED WRITES with append=True:\n"
+                    f"  Step 1: evolve_apply(evolution_id, file_path, content='<lines 1-80>')\n"
+                    f"  Step 2: evolve_apply(evolution_id, file_path, content='<lines 81-160>', append=True)\n"
+                    f"  Step 3: evolve_apply(evolution_id, file_path, content='<lines 161+>', append=True)\n"
+                    f"Keep each chunk ≤80 lines. Each chunk must end at a complete statement.\n"
+                    f"Do NOT retry with full content — it WILL fail again."
                 )
 
             params = tool.get("parameters", {})
