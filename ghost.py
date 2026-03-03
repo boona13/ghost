@@ -85,6 +85,7 @@ from ghost_pr import build_pr_tools
 from ghost_mcp import MCPClientManager, build_mcp_tools
 from ghost_subagents import build_subagent_tools
 from ghost_langfuse import get_langfuse_manager, build_langfuse_tools
+from ghost_browser_use import build_browser_use_tools
 
 # responses capabilities wiring marker: dashboard-managed feature flags loaded via config/routes
 
@@ -311,6 +312,7 @@ DEFAULT_CONFIG = {
     "enable_skills": True,
     "enable_system_tools": True,
     "enable_browser_tools": True,
+    "enable_browser_use": True,  # AI-native browser automation via browser-use
     "strict_tool_registration": True,   # Security: True prevents tool shadowing (CVE-2025-59536/21852 defense)
     "enable_cron": True,
     "enable_evolve": True,
@@ -868,6 +870,11 @@ class GhostDaemon:
         # Browser tools (lazy-loaded, only activated when the LLM calls them)
         if cfg.get("enable_browser_tools", True):
             for tool_def in build_browser_tools():
+                self.tool_registry.register(tool_def)
+
+        # Browser-use tools (AI-native browser automation)
+        if cfg.get("enable_browser_use", True):
+            for tool_def in build_browser_use_tools(cfg):
                 self.tool_registry.register(tool_def)
 
         # Persistent memory (skip in dry-run mode for faster startup)
