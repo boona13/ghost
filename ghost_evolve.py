@@ -597,14 +597,14 @@ class EvolutionEngine:
                     return p.name
             return str(p)
 
-        changed_py = [
+        changed_py = list(dict.fromkeys(
             _to_rel(c["file"]) for c in evo["changes"]
             if c["file"].endswith(".py")
-        ]
-        deleted_py = [
+        ))
+        deleted_py = list(dict.fromkeys(
             _to_rel(c["file"]) for c in evo["changes"]
             if c["file"].endswith(".py") and c.get("action") == "delete"
-        ]
+        ))
 
         for f in deleted_py:
             dangling = self._scan_dangling_imports(f)
@@ -1888,11 +1888,26 @@ def build_evolve_tools(cfg):
     def evolve_test_exec(evolution_id):
         passed, results = engine.test(evolution_id)
         lines = [f"Tests {'PASSED' if passed else 'FAILED'}"]
-        for d in results.get("dangling_imports", []):
-            lines.append(
-                f"  DANGLING IMPORT: {d['importing_file']} imports deleted module "
-                f"'{d['deleted_module']}' (line(s) {d['lines']})"
-            )
+        if not passed:
+            failures = []
+            for s in results.get("syntax", []):
+                if not s["ok"]:
+                    failures.append(f"Syntax {s['file']}: {s.get('error')}")
+            for i in results.get("import", []):
+                if not i["ok"]:
+                    failures.append(f"Import {i['module']}: {i.get('error')}")
+            smoke = results.get("smoke")
+            if smoke and not smoke["ok"]:
+                failures.append(f"Smoke: {smoke.get('output')}")
+            for api_r in results.get("api_routes", []):
+                if not api_r["ok"]:
+                    failures.append(f"API {api_r['endpoint']}: {api_r.get('error')}")
+            for lint in results.get("semantic_lint", []):
+                failures.append(f"LINT {lint['file']}:{lint['line']} [{lint['rule']}]: {lint['message']}")
+            if failures:
+                lines.append("  FAILURE REASONS:")
+                for f in failures:
+                    lines.append(f"    ❌ {f}")
         for s in results.get("syntax", []):
             status = "OK" if s["ok"] else f"FAIL: {s.get('error')}"
             lines.append(f"  Syntax {s['file']}: {status}")

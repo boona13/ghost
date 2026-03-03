@@ -290,7 +290,7 @@ class ToolLoopDebugLogger:
             "step": step,
             "tool": tool_name,
             "args_summary": self._summarize_args(args),
-            "result_preview": result[:300] if result else "",
+            "result_preview": result[:600] if result else "",
             "result_length": len(result) if result else 0,
             "duration_ms": round(duration_ms),
             "loop_detection": loop_detection,
