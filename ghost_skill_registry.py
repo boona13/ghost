@@ -182,13 +182,12 @@ class SkillRegistryClient:
             return data
 
         except requests.RequestException as exc:
-            log.error("Failed to fetch registry index: %s", exc)
-            # Fall back to cache even if expired
+            log.warning("Registry fetch failed (this is normal if the registry repo doesn't exist yet): %s", exc)
             cached = self._load_cache()
             if cached is not None:
-                log.warning("Using stale cache due to fetch failure")
+                log.debug("Using stale cache due to fetch failure")
                 return cached
-            raise SkillRegistryError(f"Failed to fetch registry: {exc}")
+            return {"skills": [], "_offline": True}
         except (json.JSONDecodeError, ValueError) as exc:
             log.error("Failed to parse registry index: %s", exc)
             raise SkillRegistryError(f"Invalid registry format: {exc}")

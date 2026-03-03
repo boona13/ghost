@@ -866,6 +866,31 @@ class LoopDetector:
         detectors = self._cfg.detectors
 
         tool_total = self._tool_name_counts.get(tool_name, 0)
+
+        _LOGGING_TOOLS_WARN = 3
+        _LOGGING_TOOLS_BLOCK = 5
+        if tool_name in ("log_growth_activity", "memory_save") and tool_total >= _LOGGING_TOOLS_WARN:
+            self._warning_count += 1
+            if tool_total >= _LOGGING_TOOLS_BLOCK:
+                return LoopDetectionResult(
+                    stuck=True, level="critical", detector="tool_saturation",
+                    count=tool_total,
+                    message=(
+                        f"BLOCKED: {tool_name} called {tool_total} times this session. "
+                        "Logging tools should only be called ONCE at the end of a task. "
+                        "STOP calling this tool and proceed with your actual task "
+                        "(evolve_plan, evolve_apply, file_read, task_complete, etc.)."
+                    ),
+                )
+            return LoopDetectionResult(
+                stuck=True, level="warning", detector="tool_saturation",
+                count=tool_total,
+                message=(
+                    f"WARNING: {tool_name} called {tool_total} times. "
+                    "Only call logging tools ONCE. Focus on your actual task."
+                ),
+            )
+
         _SHELL_ABUSE_WARN = 12
         _SHELL_ABUSE_BLOCK = 20
         if tool_name == "shell_exec" and tool_total >= _SHELL_ABUSE_WARN:
@@ -1377,13 +1402,16 @@ class ToolLoopEngine:
         condensed = ""
         try:
             condensed = _condense_for_llm_summary(old)
-            # Only spend an LLM call when there's substantial new content to
-            # summarize (first compaction or large delta).  Rolling compactions
-            # of ~3 messages don't justify the latency/cost.
+            # LLM summarization triggers:
+            # 1. First compaction (no prior summary) with enough content
+            # 2. Every 5th compaction — deterministic summaries degrade over
+            #    repeated re-summarization; periodic LLM refresh keeps quality
+            self._compaction_count = getattr(self, "_compaction_count", 0) + 1
+            periodic_refresh = (self._compaction_count % 5 == 0)
             worth_llm = (
                 condensed
                 and len(condensed) > 3000
-                and not has_prior_summary
+                and (not has_prior_summary or periodic_refresh)
             )
             if worth_llm:
                 payload = {

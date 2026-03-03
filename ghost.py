@@ -1688,6 +1688,8 @@ class GhostDaemon:
                         "shell_exec",
                         "shell_session", "shell_bg_start",
                         "shell_bg_status", "shell_bg_kill",
+                        # Fresh-context verification (fights context degradation)
+                        "delegate_task",
                         # Web & browser (for UI verification)
                         "web_fetch", "web_search",
                         "browser_navigate", "browser_snapshot",
