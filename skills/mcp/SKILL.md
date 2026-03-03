@@ -84,7 +84,7 @@ MCP lets you connect to external servers that provide additional tools (filesyst
 | SQLite | `npx` | `-y @modelcontextprotocol/server-sqlite /path/to/db.sqlite` |
 | Brave Search | `npx` | `-y @modelcontextprotocol/server-brave-search` (needs `BRAVE_API_KEY` env) |
 | PostgreSQL | `npx` | `-y @modelcontextprotocol/server-postgres postgresql://...` |
-| MarkItDown | `uvx` | `markitdown-mcp` — converts PDF, Word, Excel, PowerPoint, images, audio to Markdown |
+| MarkItDown | `python` | `-m markitdown_mcp` — converts PDF, Word, Excel, PowerPoint, images, audio to Markdown |
 
 ## Configuration
 
