@@ -86,6 +86,7 @@ def _build_skill_status(skill, disabled_skills):
         "disabled": disabled,
         "eligible": eligible,
         "os_ok": os_ok,
+        "model": skill.model,  # Per-skill model override
         "requirements": {
             "bins": req_bins,
             "env": req_env,

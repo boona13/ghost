@@ -10,8 +10,11 @@ import os
 import re
 import yaml
 import time
+import logging
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
+
+log = logging.getLogger("ghost.skills")
 
 
 GHOST_HOME = Path.home() / ".ghost"
@@ -19,6 +22,65 @@ SKILLS_USER_DIR = GHOST_HOME / "skills"
 SKILLS_BUNDLED_DIR = Path(__file__).resolve().parent / "skills"
 
 SKILLS_USER_DIR.mkdir(parents=True, exist_ok=True)
+
+# Model aliases for per-skill model overrides
+# Maps alias names to provider:model format
+MODEL_ALIASES = {
+    "cheap": "openrouter/google/gemini-2.0-flash-001",
+    "fast": "openrouter/google/gemini-2.0-flash-001",
+    "capable": "openrouter/anthropic/claude-sonnet-4-6",
+    "smart": "openrouter/anthropic/claude-opus-4-6",
+    "vision": "openrouter/anthropic/claude-sonnet-4-6",
+    "code": "openrouter/openai/gpt-5.3-codex",
+}
+
+
+def resolve_model_alias(model: str | None) -> str | None:
+    """Resolve a model alias to full provider:model format.
+    
+    Supports:
+    - Aliases: 'cheap', 'fast', 'capable', 'smart', 'vision', 'code'
+    - Full format: 'provider/model' (passed through)
+    - Provider-prefixed: 'google/gemini-2.0-flash-001' (passed through)
+    """
+    if not model:
+        return None
+    model = model.strip().lower()
+    if model in MODEL_ALIASES:
+        return MODEL_ALIASES[model]
+    return model
+
+
+def validate_skill_model(model: str | None) -> Tuple[bool, str]:
+    """Validate a skill model override.
+    
+    Returns (is_valid, error_message_or_normalized_model).
+    """
+    if not model:
+        return True, ""  # No model override is valid
+    
+    resolved = resolve_model_alias(model)
+    
+    # Must be in provider/model format
+    if "/" not in resolved:
+        return False, f"Model must be in 'provider/model' format or a known alias ({', '.join(MODEL_ALIASES.keys())})"
+    
+    parts = resolved.split("/", 1)
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        return False, "Model must be in 'provider/model' format"
+    
+    provider, model_name = parts
+    
+    # List of known providers
+    known_providers = {
+        "openrouter", "openai", "anthropic", "google", 
+        "xai", "ollama", "openai-codex", "deepseek"
+    }
+    
+    if provider not in known_providers:
+        return False, f"Unknown provider '{provider}'. Known: {', '.join(sorted(known_providers))}"
+    
+    return True, resolved
 
 
 class Skill:
@@ -128,7 +190,17 @@ def parse_skill_md(path):
         priority = 0
     os_filter = frontmatter.get("os", None)
     requires = frontmatter.get("requires", {})
-    model = frontmatter.get("model", None)
+    raw_model = frontmatter.get("model", None)
+    
+    # Validate and normalize model override
+    model = None
+    if raw_model:
+        is_valid, result = validate_skill_model(raw_model)
+        if is_valid:
+            model = result
+        else:
+            log.warning("Skill '%s' has invalid model '%s': %s", name, raw_model, result)
+            model = None  # Invalid model, don't use it
 
     return Skill(
         name=name,

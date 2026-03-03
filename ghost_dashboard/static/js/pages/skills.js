@@ -152,6 +152,7 @@ function renderSkillCard(s, u) {
   if (s.disabled) statusChips += '<span class="badge badge-zinc">disabled</span>';
   if (hasMissing) statusChips += '<span class="badge badge-yellow">missing reqs</span>';
   if (!s.os_ok) statusChips += '<span class="badge badge-red">wrong OS</span>';
+  if (s.model) statusChips += `<span class="badge badge-purple" title="${u.escapeHtml(s.model)}">model override</span>`;
 
   let reqsHtml = '';
   if (s.requirements.bins.length || s.requirements.env.length) {
@@ -230,6 +231,15 @@ async function openSkillDetail(name, api, u) {
   metaHtml += '<div><span class="text-zinc-500">Status:</span> <span class="' + (data.eligible ? 'text-emerald-400' : 'text-amber-400') + '">' + (data.eligible ? 'Eligible' : 'Not Eligible') + '</span></div>';
   metaHtml += '<div><span class="text-zinc-500">Enabled:</span> <span class="' + (data.disabled ? 'text-red-400' : 'text-emerald-400') + '">' + (data.disabled ? 'No' : 'Yes') + '</span></div>';
   metaHtml += '</div>';
+  
+  // Model override display
+  if (data.model) {
+    metaHtml += '<div class="mt-3 p-2 rounded bg-purple-500/5 border border-purple-500/20">';
+    metaHtml += '<span class="text-[10px] text-purple-400 font-semibold uppercase tracking-wider">Model Override</span>';
+    metaHtml += '<div class="text-xs text-purple-300 mt-1 font-mono">' + u.escapeHtml(data.model) + '</div>';
+    metaHtml += '<div class="text-[10px] text-zinc-500 mt-1">This skill uses a custom model instead of the default.</div>';
+    metaHtml += '</div>';
+  }
 
   if (data.triggers.length) {
     metaHtml += '<div class="mt-3"><span class="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider">Triggers</span><div class="flex flex-wrap gap-1 mt-1">'
