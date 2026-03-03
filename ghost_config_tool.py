@@ -142,6 +142,7 @@ CONFIG_SCHEMA = {
     },
     "anthropic_effort": {
         "type": "string",
+        "enum": ["low", "medium", "high"],
         "description": "Claude 4.6+ reasoning effort level: 'low' (fastest), 'medium' (balanced), 'high' (best quality). Only applies to direct Anthropic API.",
     },
     "anthropic_context_compaction": {

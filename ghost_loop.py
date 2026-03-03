@@ -17,6 +17,7 @@ import uuid
 import requests
 import traceback
 from ghost_tool_intent_security import ToolIntentSecurity
+from ghost_config_tool import _load_config
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1078,6 +1079,9 @@ class ToolLoopEngine:
 
         tool_intent_security = tool_intent_security or ToolIntentSecurity({"enable_tool_intent_security": False})
 
+        # Load Anthropic config once before the loop (not on every iteration)
+        anthropic_cfg = _load_config() if self._fallback_chain.active_provider == "anthropic" else {}
+
         for step in range(max_steps):
             if cancel_check and cancel_check():
                 final_text = "(Stopped by user)"
@@ -1098,15 +1102,12 @@ class ToolLoopEngine:
             }
 
             # Add Claude 4.6+ API features if configured and using Anthropic provider
-            if self._fallback_chain.active_provider == "anthropic":
-                from ghost_config_tool import _load_config
-                cfg = _load_config()
-                
-                effort = cfg.get("anthropic_effort")
+            if anthropic_cfg:
+                effort = anthropic_cfg.get("anthropic_effort")
                 if effort and effort in ("low", "medium", "high"):
                     payload["effort"] = effort
                 
-                if cfg.get("anthropic_context_compaction"):
+                if anthropic_cfg.get("anthropic_context_compaction"):
                     payload["context_window_compression"] = {
                         "type": "prompt_caching",
                         "ratio": 0.5
