@@ -13,6 +13,7 @@ import time
 import threading
 import secrets
 import ipaddress
+import logging
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -106,10 +107,12 @@ def browser_stop():
     with _lock:
         try:
             if _context: _context.close()
-        except Exception: pass
+        except Exception as exc:
+            logging.getLogger("ghost.browser").warning("Failed to close browser context: %s", exc)
         try:
             if _pw: _pw.stop()
-        except Exception: pass
+        except Exception as exc:
+            logging.getLogger("ghost.browser").warning("Failed to stop playwright: %s", exc)
         _pw = _context = _page = None
         _ref_store = {}
 
