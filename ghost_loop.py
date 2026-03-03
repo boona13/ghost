@@ -2120,6 +2120,21 @@ class ToolLoopEngine:
                     break
 
                 if tools_schema and step < max_steps - 2:
+                    if not text_content:
+                        consecutive_empty = getattr(self, "_consecutive_empty", 0) + 1
+                        self._consecutive_empty = consecutive_empty
+                        if consecutive_empty >= 5:
+                            _debug_logger.step_text_response(
+                                step, "", f"break_empty_loop_{consecutive_empty}")
+                            final_text = (
+                                "(Session terminated: model produced "
+                                f"{consecutive_empty} consecutive empty responses.)"
+                            )
+                            exit_reason = "empty_response_loop"
+                            break
+                    else:
+                        self._consecutive_empty = 0
+
                     workflow_issue = _check_incomplete_workflows(tool_calls_log)
                     pushback = (
                         "You responded with a plain text message, but you should call "

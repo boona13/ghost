@@ -634,7 +634,16 @@ class EvolutionEngine:
                     cwd=str(PROJECT_DIR),
                 )
                 ok = r.returncode == 0
-                output = r.stderr.strip()[:300] if not ok else "OK"
+                if not ok:
+                    # Filter out benign RequestsDependencyWarning from urllib3 version mismatch
+                    filtered_stderr = re.sub(
+                        r".*RequestsDependencyWarning: urllib3 .* or chardet .* doesn't match.*\n?",
+                        "",
+                        r.stderr,
+                    )
+                    output = filtered_stderr.strip()[:300] if filtered_stderr.strip() else "Unknown error"
+                else:
+                    output = "OK"
             except subprocess.TimeoutExpired:
                 ok, output = False, "Smoke test timed out"
             except Exception as e:
