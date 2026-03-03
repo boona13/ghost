@@ -671,7 +671,7 @@ class EvolveContextLogger:
         }
 
 
-_ctx_logger = EvolveContextLogger()
+_ctx_logger = EvolveContextLogger.get()
 
 KNOWN_POLL_TOOLS = {"shell_exec", "browser"}
 KNOWN_POLL_ACTIONS = {"snapshot", "content", "screenshot", "poll", "log", "status"}
@@ -2055,7 +2055,8 @@ class ToolLoopEngine:
                         "content": tool_result[:result_limit],
                     })
 
-                if exit_reason in ("task_complete", "cancelled"):
+                if exit_reason in ("task_complete", "cancelled",
+                                   "critical_loop_break", "warning_accumulation_break"):
                     break
 
                 if cancel_check and cancel_check():

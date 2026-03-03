@@ -386,8 +386,18 @@ class EvolutionEngine:
 
 
         old_content = ""
-        if abs_path.exists():
+        file_exists = abs_path.exists()
+        if file_exists:
             old_content = abs_path.read_text()
+
+        if not file_exists and patches and content is None:
+            return False, (
+                f"File '{rel_path}' does NOT exist — you cannot use patches on a "
+                f"non-existent file. To CREATE a new file, use:\n"
+                f"  evolve_apply(evolution_id, '{rel_path}', content='<full file content>')\n"
+                f"Do NOT use patches=[...] for new files. Provide the complete file "
+                f"content in the content= parameter."
+            )
 
         PATCH_ONLY_EXTENSIONS = {".css", ".js", ".html", ".py"}
         PATCH_ONLY_MIN_SIZE = 200
@@ -1797,7 +1807,14 @@ def build_evolve_tools(cfg):
                 "Proceed to call evolve_apply — it will wait for approval automatically."
             )
         else:
-            parts.append("Auto-approved. You can now call evolve_apply to make changes.")
+            parts.append("Auto-approved.")
+        parts.append(
+            "\n🔴 MANDATORY BEFORE evolve_apply: RE-READ every file you will import from "
+            "or patch. Your earlier file_read results have been compacted from context. "
+            "Call file_read NOW for each dependency file, then call evolve_apply. "
+            "For NEW files, use evolve_apply(evo_id, 'path', content='full file content'). "
+            "For EXISTING files, use evolve_apply(evo_id, 'path', patches=[...])."
+        )
         return "\n".join(parts)
 
     def evolve_apply_exec(evolution_id, file_path, content=None, patches=None,
