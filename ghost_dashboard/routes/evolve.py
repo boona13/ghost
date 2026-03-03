@@ -6,6 +6,8 @@ import sys
 import threading
 from flask import Blueprint, jsonify, request
 
+from ghost_dashboard.rate_limiter import rate_limit
+
 log = logging.getLogger(__name__)
 
 bp = Blueprint("evolve", __name__)
@@ -50,6 +52,7 @@ def list_pending():
 
 
 @bp.route("/api/evolve/approve/<evo_id>", methods=["POST"])
+@rate_limit(requests_per_minute=5)
 def approve_evolution(evo_id):
     engine = _get_engine()
     ok, msg = engine.approve(evo_id)
@@ -62,6 +65,7 @@ def approve_evolution(evo_id):
 
 
 @bp.route("/api/evolve/reject/<evo_id>", methods=["POST"])
+@rate_limit(requests_per_minute=5)
 def reject_evolution(evo_id):
     engine = _get_engine()
     ok, msg = engine.reject(evo_id)
@@ -69,6 +73,7 @@ def reject_evolution(evo_id):
 
 
 @bp.route("/api/evolve/rollback/<evo_id>", methods=["POST"])
+@rate_limit(requests_per_minute=5)
 def rollback_evolution(evo_id):
     engine = _get_engine()
     ok, msg = engine.rollback(evo_id)

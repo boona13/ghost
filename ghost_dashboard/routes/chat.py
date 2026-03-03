@@ -11,6 +11,8 @@ from pathlib import Path
 from datetime import datetime
 from flask import Blueprint, jsonify, request, Response, send_from_directory, abort
 
+from ghost_dashboard.rate_limiter import rate_limit
+
 # Import reasoning module for /think directive support
 try:
     from ghost_reasoning import detect_think_directive, get_reasoning_state
@@ -764,6 +766,7 @@ def upload_file():
 
 
 @bp.route("/api/chat/send", methods=["POST"])
+@rate_limit(requests_per_minute=10)
 def send_message():
     daemon = _get_daemon()
     if not daemon:

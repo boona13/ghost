@@ -3,6 +3,8 @@
 import logging
 from flask import Blueprint, jsonify, request
 
+from ghost_dashboard.rate_limiter import rate_limit
+
 import sys
 from pathlib import Path
 
@@ -67,6 +69,7 @@ def get_config():
 
 
 @bp.route("/api/config", methods=["PUT"])
+@rate_limit(requests_per_minute=20)
 def update_config():
     data = request.get_json(silent=True) or {}
     cfg = load_config()
