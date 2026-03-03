@@ -214,6 +214,10 @@ def build_session_maintenance_tools(cfg):
         """Run full session maintenance (cleanup + disk budget enforcement)."""
         return run_maintenance(cfg)
     
+    def archive_sessions_tool(older_than_days=7, dry_run=False, **kwargs):
+        """Archive sessions older than N days (compress to .md.gz)."""
+        return archive_sessions(older_than_days=older_than_days, dry_run=dry_run)
+    
     return [
         {
             "name": "session_stats",
@@ -239,6 +243,18 @@ def build_session_maintenance_tools(cfg):
             "description": "Run full session maintenance including disk budget enforcement",
             "parameters": {"type": "object", "properties": {}},
             "execute": session_maintenance,
+        },
+        {
+            "name": "archive_sessions",
+            "description": "Compress and archive session files older than a specified number of days to save disk space",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "older_than_days": {"type": "integer", "description": "Archive sessions older than this many days", "default": 7},
+                    "dry_run": {"type": "boolean", "description": "Only report what would be archived without actually archiving", "default": False},
+                },
+            },
+            "execute": archive_sessions_tool,
         },
     ]
 
