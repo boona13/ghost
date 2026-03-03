@@ -380,8 +380,8 @@ DEFAULT_CONFIG = {
     "enable_mcp": True,
     "mcp_servers": {
         "markitdown": {
-            "command": "uvx",
-            "args": ["markitdown-mcp"],
+            "command": "python",
+            "args": ["-m", "markitdown_mcp"],
             "enabled": True,
             "timeout": 60,
         },
