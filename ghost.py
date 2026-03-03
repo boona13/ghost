@@ -376,13 +376,13 @@ DEFAULT_CONFIG = {
     "anthropic_effort": "high",
     "anthropic_context_compaction": False,
     "anthropic_context_compaction_ratio": 0.5,
-    # MCP (Model Context Protocol) - disabled by default for security
-    "enable_mcp": False,
+    # MCP (Model Context Protocol) — enabled by default; servers auto-connect on start
+    "enable_mcp": True,
     "mcp_servers": {
         "markitdown": {
             "command": "uvx",
             "args": ["markitdown-mcp"],
-            "enabled": False,
+            "enabled": True,
             "timeout": 60,
         },
     },

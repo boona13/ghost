@@ -180,6 +180,14 @@ class MCPClientManager:
                     future.set_result({"ok": False, "error": f"Initialize failed: {init_result.get('error', 'unknown')}"})
                     return
 
+                # MCP spec: client MUST send initialized notification before other requests
+                try:
+                    notify = json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n"
+                    conn.process.stdin.write(notify)
+                    conn.process.stdin.flush()
+                except (BrokenPipeError, OSError) as e:
+                    log.warning(f"Failed to send initialized notification to '{server_name}': {e}")
+
                 tools_result = self._send_request(conn, "tools/list", {}, timeout=config.timeout)
                 if tools_result.get("ok"):
                     conn.tools_cache = tools_result.get("result", {}).get("tools", [])
@@ -433,8 +441,9 @@ class MCPClientManager:
                 else:
                     log.warning(f"  [mcp] Auto-connect failed for '{name}': {result.get('error')}")
             except Exception as e:
-                results[name] = {"ok": False, "error": str(e)}
-                log.warning(f"  [mcp] Auto-connect error for '{name}': {e}")
+                err_msg = str(e) or f"{type(e).__name__} (no message)"
+                results[name] = {"ok": False, "error": err_msg}
+                log.warning(f"  [mcp] Auto-connect error for '{name}': {err_msg}")
 
         return results
 
