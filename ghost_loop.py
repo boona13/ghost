@@ -1140,7 +1140,9 @@ class ToolLoopEngine:
                 break
 
             choice = choices[0]
-            msg = choice["message"]
+            msg = choice.get("message") or {}
+            if msg.get("content") is None:
+                msg["content"] = ""
 
             messages.append(msg)
 

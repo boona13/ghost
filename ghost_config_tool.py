@@ -124,6 +124,22 @@ CONFIG_SCHEMA = {
     "voice_chime": {"type": "boolean", "description": "Play chime on wake word detection"},
     "enable_security_audit": {"type": "boolean", "description": "Enable security audit tools"},
     "enable_session_memory": {"type": "boolean", "description": "Enable auto-save session memory"},
+    "session_auto_cleanup": {
+        "type": "boolean",
+        "description": "Automatically clean up old session files (default: true)",
+    },
+    "session_max_count": {
+        "type": "integer",
+        "description": "Maximum number of session files to keep (default: 100, min: 10)",
+    },
+    "session_max_age_days": {
+        "type": "integer",
+        "description": "Delete sessions older than this many days (default: 30, min: 1)",
+    },
+    "session_disk_budget_mb": {
+        "type": "integer",
+        "description": "Maximum disk space for sessions in MB (default: 500, min: 50)",
+    },
     "strict_tool_registration": {"type": "boolean", "description": "Security: True prevents tool shadowing by plugins (CVE-2025-59536/21852 defense)"},
     "enable_mcp": {"type": "boolean", "description": "Enable MCP (Model Context Protocol) client for external tool servers"},
     "mcp_servers": {
@@ -289,6 +305,22 @@ def _validate_patch(patch: dict) -> tuple[bool, str]:
         ok, err = _validate_dangerous_command_policy(patch["dangerous_command_policy"])
         if not ok:
             return False, err
+    
+    # Session maintenance config validation
+    if "session_max_count" in patch:
+        val = patch["session_max_count"]
+        if not isinstance(val, int) or val < 10 or val > 10000:
+            return False, "session_max_count must be 10-10000"
+    
+    if "session_max_age_days" in patch:
+        val = patch["session_max_age_days"]
+        if not isinstance(val, int) or val < 1 or val > 365:
+            return False, "session_max_age_days must be 1-365"
+    
+    if "session_disk_budget_mb" in patch:
+        val = patch["session_disk_budget_mb"]
+        if not isinstance(val, int) or val < 50 or val > 10000:
+            return False, "session_disk_budget_mb must be 50-10000"
     
     # When enabling dangerous interpreters, require secure policy minimums
     if "enable_dangerous_interpreters" in patch:

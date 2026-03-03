@@ -55,7 +55,11 @@ from ghost_vision import build_vision_tools
 from ghost_tts import build_tts_tools
 from ghost_voice import build_voice_tools, stop_voice_engine
 from ghost_canvas import build_canvas_tools
-from ghost_session_memory import register_session_hooks
+from ghost_session_memory import (
+    register_session_hooks,
+    build_session_maintenance_tools,
+    bootstrap_session_maintenance_cron,
+)
 from ghost_security_audit import build_security_audit_tools, assess_command_hardening_impact
 from ghost_config_tool import build_config_tools
 from ghost_projects import ProjectRegistry, build_project_tools
@@ -898,6 +902,8 @@ class GhostDaemon:
         # Session memory auto-save (registers on_shutdown hook)
         if cfg.get("enable_session_memory", True):
             register_session_hooks(self.hooks, self)
+            for tool_def in build_session_maintenance_tools(cfg):
+                self.tool_registry.register(tool_def)
 
         # Cron scheduler (skip in dry-run mode for faster startup)
         self.cron = None
@@ -1720,6 +1726,27 @@ class GhostDaemon:
                 terminal_print("ask", f"[cron shell] {command[:40]}", out[:500] or "(no output)")
             except Exception as e:
                 terminal_print("ask", f"[cron shell] {command[:40]}", f"Error: {e}")
+
+        elif ptype == "session_maintenance":
+            # Run session cleanup maintenance
+            try:
+                from ghost_session_memory import run_maintenance
+                result = run_maintenance(self.cfg)
+                if result.get("status") == "success":
+                    deleted = result.get("cleanup", {}).get("deleted_count", 0)
+                    reclaimed = result.get("cleanup", {}).get("mb_reclaimed", 0)
+                    console_bus.emit(
+                        "success", "cron", job_name,
+                        f"Session maintenance complete — {deleted} files deleted, {reclaimed:.2f} MB reclaimed",
+                    )
+                else:
+                    console_bus.emit(
+                        "info", "cron", job_name,
+                        f"Session maintenance skipped — {result.get('reason', 'unknown')}",
+                    )
+            except Exception as e:
+                log.warning("Session maintenance failed: %s", e)
+                console_bus.emit("error", "cron", job_name, f"Session maintenance failed: {e}")
 
     def stop(self, *_):
         console_bus.emit("warn", "system", "daemon_stop", "Ghost shutting down")
@@ -2557,6 +2584,7 @@ class GhostDaemon:
         if self.cron:
             self.cron.start()
             bootstrap_growth_cron(self.cron, self.cfg)
+            bootstrap_session_maintenance_cron(self.cron, self.cfg)
 
         console_bus.emit(
             "success", "system", "daemon_start",
