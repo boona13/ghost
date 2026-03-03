@@ -80,6 +80,7 @@ from ghost_dependency_doctor import build_dependency_doctor_tools
 from ghost_pr import build_pr_tools
 from ghost_mcp import MCPClientManager, build_mcp_tools
 from ghost_subagents import build_subagent_tools
+from ghost_langfuse import get_langfuse_manager, build_langfuse_tools
 
 # responses capabilities wiring marker: dashboard-managed feature flags loaded via config/routes
 
@@ -367,6 +368,12 @@ DEFAULT_CONFIG = {
     # Webhook Triggers (auto-generated on startup if empty for security)
     "webhook_secret": "",
     "webhook_max_concurrent": 3,
+    # Langfuse Observability
+    "enable_langfuse": False,
+    "langfuse_host": "https://cloud.langfuse.com",
+    "langfuse_public_key": "",
+    "langfuse_secret_key": "",
+    "langfuse_project_id": "",
 }
 
 def load_config():
@@ -1282,6 +1289,17 @@ class GhostDaemon:
                 print("  [subagents] Initialized task delegation system")
             except Exception as e:
                 print(f"  [subagents] Failed to initialize: {e}")
+
+        # Langfuse Observability — LLM Tracing and Monitoring
+        if cfg.get("enable_langfuse", False):
+            try:
+                # Initialize the Langfuse manager singleton
+                get_langfuse_manager(cfg)
+                for tool_def in build_langfuse_tools(cfg):
+                    self.tool_registry.register(tool_def)
+                print("  [langfuse] Initialized observability system")
+            except Exception as e:
+                print(f"  [langfuse] Failed to initialize: {e}")
 
 
     def _load_soul(self):
