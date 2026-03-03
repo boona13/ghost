@@ -1792,6 +1792,14 @@ class ToolLoopEngine:
             max_steps=max_steps,
             caller=caller_name,
         )
+
+        # Save parent session state before overwriting (nested run() inside
+        # evolve_submit_pr would clobber the implementer's session otherwise)
+        _prev_ctx_session = _ctx_logger._session_id
+        _prev_ctx_caller = _ctx_logger._caller
+        _prev_ctx_feature_id = _ctx_logger._feature_id
+        _prev_ctx_feature_title = _ctx_logger._feature_title
+
         _ctx_logger.set_session(
             session_id=_debug_logger._session_id or "",
             caller=caller_name,
@@ -2281,10 +2289,36 @@ class ToolLoopEngine:
             tokens_estimated=_estimate_context_tokens(messages),
             model=effective_model,
         )
-        if _ctx_logger._feature_id and tool_calls_log:
+
+        # Only log implementer compliance when this run() IS the implementer
+        # (has evolve_plan in tool_calls). Use the saved feature_id since
+        # complete_future_feature may have cleared the logger by now.
+        has_evolve_tools = any(
+            tc["tool"] in ("evolve_plan", "evolve_apply")
+            for tc in tool_calls_log
+        ) if tool_calls_log else False
+        feature_for_compliance = _prev_ctx_feature_id or _ctx_logger._feature_id
+        if feature_for_compliance and tool_calls_log and has_evolve_tools:
+            # Temporarily restore feature context for the compliance log
+            saved_fid = _ctx_logger._feature_id
+            saved_ftitle = _ctx_logger._feature_title
+            _ctx_logger._feature_id = feature_for_compliance
+            _ctx_logger._feature_title = _prev_ctx_feature_title or _ctx_logger._feature_title
             _ctx_logger.log_skill_compliance(
                 role="implementer", tool_calls=tool_calls_log,
             )
+            _ctx_logger._feature_id = saved_fid
+            _ctx_logger._feature_title = saved_ftitle
+
+        # Restore parent session state if we're returning from a nested run()
+        if _prev_ctx_session and _prev_ctx_session != _ctx_logger._session_id:
+            _ctx_logger.set_session(
+                session_id=_prev_ctx_session,
+                caller=_prev_ctx_caller,
+            )
+            if _prev_ctx_feature_id:
+                _ctx_logger._feature_id = _prev_ctx_feature_id
+                _ctx_logger._feature_title = _prev_ctx_feature_title
 
         return ToolLoopResult(
             text=final_text,
