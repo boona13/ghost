@@ -35,6 +35,7 @@ DEFAULT_SESSION_MAX_COUNT = 100
 DEFAULT_SESSION_MAX_AGE_DAYS = 30
 DEFAULT_SESSION_DISK_BUDGET_MB = 500
 DEFAULT_SESSION_AUTO_CLEANUP = True
+DEFAULT_SESSION_ARCHIVE_AGE_DAYS = 7
 
 # Thread safety lock for maintenance operations
 _maintenance_lock = threading.Lock()
@@ -469,6 +470,7 @@ def run_maintenance(cfg=None):
         max_count = cfg.get("session_max_count", DEFAULT_SESSION_MAX_COUNT)
         max_age_days = cfg.get("session_max_age_days", DEFAULT_SESSION_MAX_AGE_DAYS)
         disk_budget_mb = cfg.get("session_disk_budget_mb", DEFAULT_SESSION_DISK_BUDGET_MB)
+        archive_age_days = cfg.get("session_archive_age_days", DEFAULT_SESSION_ARCHIVE_AGE_DAYS)
         
         if not auto_cleanup:
             log.info("Session auto-cleanup disabled, skipping maintenance")
@@ -483,11 +485,19 @@ def run_maintenance(cfg=None):
                 "max_count": max_count,
                 "max_age_days": max_age_days,
                 "disk_budget_mb": disk_budget_mb,
+                "archive_age_days": archive_age_days,
             },
             "before": get_session_stats(),
         }
         
-        # Step 1: Apply count and age limits
+        # Step 1: Archive old sessions before deletion (preserves history)
+        archive_result = archive_sessions(
+            older_than_days=archive_age_days,
+            dry_run=False
+        )
+        results["archive"] = archive_result
+        
+        # Step 2: Apply count and age limits (deletion)
         cleanup_result = cleanup_old_sessions(
             max_count=max_count,
             max_age_days=max_age_days,
@@ -517,10 +527,15 @@ def run_maintenance(cfg=None):
         
         results["after"] = get_session_stats()
         
-        total_reclaimed = cleanup_result.get("bytes_reclaimed", 0) + disk_cleanup.get("bytes_reclaimed", 0)
-        log.info("Session maintenance complete: deleted %s files, reclaimed %.2f MB",
-                 cleanup_result.get("deleted_count", 0) + disk_cleanup.get("deleted_count", 0),
-                 total_reclaimed / (1024 * 1024))
+        total_reclaimed = (
+            archive_result.get("bytes_reclaimed", 0) +
+            cleanup_result.get("bytes_reclaimed", 0) +
+            disk_cleanup.get("bytes_reclaimed", 0)
+        )
+        total_deleted = cleanup_result.get("deleted_count", 0) + disk_cleanup.get("deleted_count", 0)
+        total_archived = archive_result.get("archived_count", 0)
+        log.info("Session maintenance complete: archived %s files, deleted %s files, reclaimed %.2f MB",
+                 total_archived, total_deleted, total_reclaimed / (1024 * 1024))
         
         return results
 
