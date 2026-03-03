@@ -401,9 +401,14 @@ class EvolutionEngine:
 
         PATCH_ONLY_EXTENSIONS = {".css", ".js", ".html", ".py"}
         PATCH_ONLY_MIN_SIZE = 200
+        file_created_this_evo = any(
+            c["file"] == rel_path and c.get("diff", "").startswith("(new file)")
+            for c in evo.get("changes", [])
+        )
         if (content is not None and not append and old_content
                 and Path(rel_path).suffix.lower() in PATCH_ONLY_EXTENSIONS
-                and len(old_content) > PATCH_ONLY_MIN_SIZE):
+                and len(old_content) > PATCH_ONLY_MIN_SIZE
+                and not file_created_this_evo):
             return False, (
                 f"REJECTED: Cannot use full-file 'content' mode on existing {Path(rel_path).suffix} file "
                 f"'{rel_path}' ({len(old_content)} bytes). Use 'patches' instead — provide a list of "
@@ -449,7 +454,14 @@ class EvolutionEngine:
                             )
                             matched = True
                     if not matched:
-                        hint = f" Hint: Use file_read on '{rel_path}' to get the exact current content, then retry with matching text."
+                        if file_created_this_evo:
+                            hint = (
+                                f" Since you CREATED this file in this evolution, you can use "
+                                f"evolve_apply(evo_id, '{rel_path}', content='<full corrected file>') "
+                                f"to overwrite it entirely. This is easier than fixing patch mismatches."
+                            )
+                        else:
+                            hint = f" Hint: Use file_read on '{rel_path}' to get the exact current content, then retry with matching text."
                         return False, f"Patch target not found in {rel_path}: {old_str[:80]}...{hint}"
         else:
             return False, "Provide either 'content' (full file) or 'patches' (search/replace pairs)"
