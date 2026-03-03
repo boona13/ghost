@@ -388,7 +388,7 @@ DEFAULT_CONFIG = {
         "playwright": {
             "command": "npx",
             "args": ["-y", "@executeautomation/playwright-mcp-server"],
-            "enabled": False,
+            "enabled": True,
             "timeout": 60,
         },
     },
@@ -421,11 +421,19 @@ DEFAULT_CONFIG = {
     },
 }
 
+_DEEP_MERGE_KEYS = {"mcp_servers", "skill_model_aliases", "provider_chains"}
+
 def load_config():
     cfg = dict(DEFAULT_CONFIG)
     if CONFIG_FILE.exists():
         try:
-            cfg.update(json.loads(CONFIG_FILE.read_text()))
+            user_cfg = json.loads(CONFIG_FILE.read_text())
+            for key in _DEEP_MERGE_KEYS:
+                if key in user_cfg and key in cfg and isinstance(cfg[key], dict):
+                    merged = dict(cfg[key])
+                    merged.update(user_cfg[key])
+                    user_cfg[key] = merged
+            cfg.update(user_cfg)
         except json.JSONDecodeError as e:
             log.warning(f"Failed to load config: {e}")
     return cfg
