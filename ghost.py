@@ -856,11 +856,21 @@ class GhostDaemon:
         self.usage_tracker = UsageTracker()
         set_usage_tracker(self.usage_tracker)
 
-        # Tool loop engine with provider-aware fallback chain
-        # Skip in dry-run mode for faster startup
+        # Tool loop engines with provider-aware fallback chains
+        # Separate engines for cron/evolve vs interactive chat to prevent
+        # contention: evolve's heavy LLM traffic and model fallback state
+        # would otherwise block or degrade chat responsiveness.
         self.engine = None
+        self.chat_engine = None
         if not dry_run:
             self.engine = ToolLoopEngine(
+                api_key, model,
+                fallback_models=fallback_models,
+                auth_store=self.auth_store,
+                provider_chain=provider_chain,
+                usage_tracker=self.usage_tracker,
+            )
+            self.chat_engine = ToolLoopEngine(
                 api_key, model,
                 fallback_models=fallback_models,
                 auth_store=self.auth_store,
@@ -2342,6 +2352,8 @@ class GhostDaemon:
             self.cfg["model"] = new_model
             self.llm.model = new_model
             self.engine.model = new_model
+            if self.chat_engine:
+                self.chat_engine.model = new_model
             print(f"  {MAG}⟳ Model switched to: {new_model}{RST}")
 
         if self.hooks:

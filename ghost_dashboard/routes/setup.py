@@ -277,5 +277,7 @@ def _hot_swap_key(api_key):
                 daemon.llm.api_key = api_key
             if hasattr(daemon, "engine"):
                 daemon.engine.api_key = api_key
+            if getattr(daemon, "chat_engine", None):
+                daemon.chat_engine.api_key = api_key
     except Exception:
         log.warning("Failed to update daemon API key", exc_info=True)

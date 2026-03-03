@@ -27,6 +27,8 @@ def _notify_daemon():
                 daemon.llm.model = new_model
             if new_model and hasattr(daemon, 'engine'):
                 daemon.engine.model = new_model
+            if new_model and getattr(daemon, 'chat_engine', None):
+                daemon.chat_engine.model = new_model
     except Exception:
         log.warning("Failed to reload config in daemon", exc_info=True)
 

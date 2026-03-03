@@ -149,6 +149,8 @@ def reload_config():
             daemon.llm.model = fresh.get("model", daemon.cfg.get("model"))
         if hasattr(daemon, 'engine'):
             daemon.engine.model = fresh.get("model", daemon.cfg.get("model"))
+        if getattr(daemon, 'chat_engine', None):
+            daemon.chat_engine.model = fresh.get("model", daemon.cfg.get("model"))
         if daemon.skill_loader:
             daemon.skill_loader.reload()
         return jsonify({"ok": True, "reloaded": True})
@@ -187,6 +189,8 @@ def restart_ghost():
             daemon.llm.model = new_model
         if hasattr(daemon, "engine"):
             daemon.engine.model = new_model
+        if getattr(daemon, "chat_engine", None):
+            daemon.chat_engine.model = new_model
         new_key = fresh.get("api_key", "")
         if new_key and new_key != "__SETUP_PENDING__":
             daemon.api_key = new_key
@@ -194,6 +198,8 @@ def restart_ghost():
                 daemon.llm.api_key = new_key
             if hasattr(daemon, "engine"):
                 daemon.engine.api_key = new_key
+            if getattr(daemon, "chat_engine", None):
+                daemon.chat_engine.api_key = new_key
         if daemon.skill_loader:
             daemon.skill_loader.reload()
         return jsonify({"ok": True, "method": "hot-reload", "message": "Config reloaded into running daemon"})

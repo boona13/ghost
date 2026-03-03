@@ -189,6 +189,8 @@ def set_model():
                 daemon.llm.model = new_model
             if hasattr(daemon, 'engine'):
                 daemon.engine.model = new_model
+            if getattr(daemon, 'chat_engine', None):
+                daemon.chat_engine.model = new_model
 
         if provider and effective_model_id and hasattr(daemon, 'engine'):
             chain = daemon._build_provider_chain(
@@ -196,6 +198,8 @@ def set_model():
                 cfg.get("fallback_models", []),
             )
             daemon.engine.fallback_chain.set_provider_chain(chain)
+            if getattr(daemon, 'chat_engine', None):
+                daemon.chat_engine.fallback_chain.set_provider_chain(list(chain))
 
     return jsonify({
         "ok": True,
@@ -323,6 +327,8 @@ def set_fallback_chain():
     daemon = get_daemon()
     if daemon and hasattr(daemon, 'engine'):
         daemon.engine.fallback_chain.set_provider_chain(parsed)
+        if getattr(daemon, 'chat_engine', None):
+            daemon.chat_engine.fallback_chain.set_provider_chain(list(parsed))
         return jsonify({"ok": True, "chain": [f"{p}:{m}" for p, m in parsed]})
 
     return jsonify({"ok": False, "error": "Daemon not running"}), 503
@@ -354,6 +360,8 @@ def set_primary_provider():
             fallback_models = cfg.get("fallback_models", [])
             new_chain = daemon._build_provider_chain(model, fallback_models)
             daemon.engine.fallback_chain.set_provider_chain(new_chain)
+            if getattr(daemon, 'chat_engine', None):
+                daemon.chat_engine.fallback_chain.set_provider_chain(list(new_chain))
 
     return jsonify({"ok": True, "primary_provider": provider_id})
 

@@ -591,7 +591,8 @@ def _process_message(session, daemon):
                     if scoped_names:
                         chat_registry = chat_registry.subset(scoped_names)
 
-            loop_result = daemon.engine.run(
+            engine = getattr(daemon, "chat_engine", None) or daemon.engine
+            loop_result = engine.run(
                 system_prompt=system_prompt,
                 user_message=user_message_with_context,
                 tool_registry=chat_registry,
@@ -607,7 +608,8 @@ def _process_message(session, daemon):
             session.result = loop_result.text
             session.tools_used = [tc["tool"] for tc in loop_result.tool_calls]
         else:
-            result = daemon.engine.single_shot(
+            engine = getattr(daemon, "chat_engine", None) or daemon.engine
+            result = engine.single_shot(
                 system_prompt=system_prompt,
                 user_message=user_message_with_context,
                 images=image_attachments if image_attachments else None,
