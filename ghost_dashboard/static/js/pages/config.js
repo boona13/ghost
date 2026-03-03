@@ -261,6 +261,18 @@ export async function render(container) {
 
     <!-- ── Models ───────────────────────────────────────────── -->
     <div class="cfg-tab-panel" data-panel="models">
+      <div class="stat-card mb-4">
+        <h3 class="text-sm font-semibold text-white mb-1">Skill Model Aliases</h3>
+        <div class="text-[10px] text-zinc-600 mb-3">Model aliases used by skills for per-skill model overrides. Built-in aliases: cheap, fast, capable, smart, vision, code. Changes take effect on next restart.</div>
+        <div id="skill-model-aliases-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3"></div>
+        <div class="mt-3 pt-3 border-t border-surface-600/30">
+          <div class="flex gap-2">
+            <input type="text" id="new-alias-name" class="form-input text-xs w-32" placeholder="alias name">
+            <input type="text" id="new-alias-model" class="form-input text-xs flex-1 font-mono" placeholder="provider/model-id">
+            <button id="btn-add-alias" class="btn btn-sm btn-primary">Add</button>
+          </div>
+        </div>
+      </div>
       <div class="stat-card">
         <h3 class="text-sm font-semibold text-white mb-1">Tool Models</h3>
         <div class="text-[10px] text-zinc-600 mb-3">Override the model IDs used by each tool. Leave blank to use defaults. Changes take effect on next restart.</div>
