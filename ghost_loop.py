@@ -1097,6 +1097,21 @@ class ToolLoopEngine:
                 "max_tokens": max_tokens,
             }
 
+            # Add Claude 4.6+ API features if configured and using Anthropic provider
+            if self._fallback_chain.active_provider == "anthropic":
+                from ghost_config_tool import _load_config
+                cfg = _load_config()
+                
+                effort = cfg.get("anthropic_effort")
+                if effort and effort in ("low", "medium", "high"):
+                    payload["effort"] = effort
+                
+                if cfg.get("anthropic_context_compaction"):
+                    payload["context_window_compression"] = {
+                        "type": "prompt_caching",
+                        "ratio": 0.5
+                    }
+
             is_last_step = (step == max_steps - 1)
 
             if tools_schema and not is_last_step:

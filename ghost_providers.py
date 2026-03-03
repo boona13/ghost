@@ -577,6 +577,15 @@ def _adapt_to_anthropic(payload: dict) -> dict:
     if payload.get("temperature") is not None:
         result["temperature"] = payload["temperature"]
 
+    # Claude 4.6+ API features: Context Compaction and Effort Controls
+    effort = payload.get("effort")
+    if effort:
+        result["effort"] = effort
+
+    context_compaction = payload.get("context_window_compression")
+    if context_compaction:
+        result["context_window_compression"] = context_compaction
+
     tools = payload.get("tools")
     if tools:
         ant_tools = []

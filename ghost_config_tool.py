@@ -140,6 +140,14 @@ CONFIG_SCHEMA = {
         "type": "integer",
         "description": "Maximum disk space for sessions in MB (default: 500, min: 50)",
     },
+    "anthropic_effort": {
+        "type": "string",
+        "description": "Claude 4.6+ reasoning effort level: 'low' (fastest), 'medium' (balanced), 'high' (best quality). Only applies to direct Anthropic API.",
+    },
+    "anthropic_context_compaction": {
+        "type": "boolean",
+        "description": "Enable Claude 4.6+ context window compression to automatically manage long contexts. Only applies to direct Anthropic API.",
+    },
     "strict_tool_registration": {"type": "boolean", "description": "Security: True prevents tool shadowing by plugins (CVE-2025-59536/21852 defense)"},
     "enable_mcp": {"type": "boolean", "description": "Enable MCP (Model Context Protocol) client for external tool servers"},
     "mcp_servers": {
