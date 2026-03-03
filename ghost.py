@@ -377,7 +377,14 @@ DEFAULT_CONFIG = {
     "anthropic_context_compaction_ratio": 0.5,
     # MCP (Model Context Protocol) - disabled by default for security
     "enable_mcp": False,
-    "mcp_servers": {},
+    "mcp_servers": {
+        "markitdown": {
+            "command": "uvx",
+            "args": ["mcp-server-markitdown"],
+            "enabled": False,
+            "timeout": 60,
+        },
+    },
     # Webhook Triggers (auto-generated on startup if empty for security)
     "webhook_secret": "",
     "webhook_max_concurrent": 3,

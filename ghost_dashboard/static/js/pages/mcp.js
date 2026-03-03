@@ -502,6 +502,7 @@ function _showAddServerModal(pageContainer, api, u) {
             { label: 'GitHub', cmd: 'npx', args: '-y @modelcontextprotocol/server-github', env: '{"GITHUB_PERSONAL_ACCESS_TOKEN":""}' },
             { label: 'SQLite', cmd: 'npx', args: '-y @modelcontextprotocol/server-sqlite /tmp/test.db' },
             { label: 'Brave Search', cmd: 'npx', args: '-y @modelcontextprotocol/server-brave-search', env: '{"BRAVE_API_KEY":""}' },
+            { label: 'MarkItDown', cmd: 'uvx', args: 'mcp-server-markitdown' },
           ].map(p => `<button class="mcp-preset text-[9px] px-2 py-1 rounded bg-ghost-500/15 text-ghost-400 hover:bg-ghost-500/25"
             data-cmd="${u.escapeHtml(p.cmd)}" data-args="${u.escapeHtml(p.args)}" data-name="${u.escapeHtml(p.label.toLowerCase())}"
             ${p.env ? `data-env="${u.escapeHtml(p.env)}"` : ''}>${p.label}</button>`).join('')}
