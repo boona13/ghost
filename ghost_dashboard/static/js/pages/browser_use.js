@@ -341,15 +341,41 @@ export async function render(container) {
     }
   });
 
-  // Close on Escape key
-  document.addEventListener('keydown', (e) => {
+  // Close on Escape key (with cleanup when page navigates away)
+  function onEscape(e) {
     if (e.key === 'Escape') {
       newModal.classList.add('hidden');
       newModal.classList.remove('flex');
       navigateModal.classList.add('hidden');
       navigateModal.classList.remove('flex');
     }
+  }
+  document.addEventListener('keydown', onEscape);
+
+  // Auto-refresh sessions every 5s
+  const refreshTimer = setInterval(async () => {
+    if (!document.body.contains(container)) return;
+    await loadSessions();
+    if (selectedSession) {
+      try {
+        const data = await api.get(`/api/browser-use/sessions/${selectedSession.id}`);
+        if (data.success) {
+          selectedSession = data.session;
+          renderSessionDetail();
+        }
+      } catch (_) { /* session may have been deleted */ }
+    }
+  }, 5000);
+
+  // Cleanup when navigating away from this page
+  const observer = new MutationObserver(() => {
+    if (!document.body.contains(container)) {
+      document.removeEventListener('keydown', onEscape);
+      clearInterval(refreshTimer);
+      observer.disconnect();
+    }
   });
+  observer.observe(document.body, { childList: true, subtree: true });
 
   // Initial load
   await loadSessions();

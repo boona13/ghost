@@ -10,7 +10,7 @@ Uses browser-use (browser-use.com) for LLM-powered browser automation with:
 Complements the existing Playwright-based ghost_browser.py with AI-native control.
 
 Requirements:
-    pip install browser-use
+    pip install browser-use langchain-openai
 
 Note: browser-use requires Playwright and an LLM API key to function.
 """
@@ -19,6 +19,8 @@ import logging
 import json
 import asyncio
 import threading
+import atexit
+import sqlite3
 from typing import Optional, Dict, Any, List
 from pathlib import Path
 from dataclasses import dataclass, field
@@ -35,90 +37,187 @@ except ImportError:
 
 log = logging.getLogger(__name__)
 
-# Thread-safe session storage
-_sessions_lock = threading.Lock()
-_sessions: Dict[str, Dict[str, Any]] = {}
+# ── shared asyncio event loop (one per process) ────────────────────────
+_loop: Optional[asyncio.AbstractEventLoop] = None
+_loop_thread: Optional[threading.Thread] = None
+_loop_lock = threading.Lock()
+
+
+def _get_shared_loop() -> asyncio.AbstractEventLoop:
+    """Return (and lazily start) a long-lived background event loop.
+
+    All browser-use async work is dispatched here so that Playwright
+    connections survive across multiple calls.
+    """
+    global _loop, _loop_thread
+    with _loop_lock:
+        if _loop is not None and _loop.is_running():
+            return _loop
+        _loop = asyncio.new_event_loop()
+        _loop_thread = threading.Thread(
+            target=_loop.run_forever, daemon=True, name="browser-use-loop"
+        )
+        _loop_thread.start()
+        atexit.register(_shutdown_loop)
+        return _loop
+
+
+def _shutdown_loop() -> None:
+    global _loop, _loop_thread
+    if _loop and _loop.is_running():
+        _loop.call_soon_threadsafe(_loop.stop)
+    if _loop_thread:
+        _loop_thread.join(timeout=5)
+    _loop = None
+    _loop_thread = None
+
+
+def _run_async(coro) -> Any:
+    """Submit *coro* to the shared loop and block until it completes."""
+    loop = _get_shared_loop()
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
+    return future.result()
+
+
+# ── SQLite persistence for session metadata & history ──────────────────
+_DB_DIR = Path.home() / ".ghost" / "browser_use"
+_DB_PATH = _DB_DIR / "sessions.db"
+_db_lock = threading.Lock()
+
+
+def _get_db() -> sqlite3.Connection:
+    _DB_DIR.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(_DB_PATH), check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS sessions (
+            id          TEXT PRIMARY KEY,
+            url         TEXT NOT NULL,
+            task        TEXT,
+            status      TEXT NOT NULL DEFAULT 'idle',
+            history     TEXT NOT NULL DEFAULT '[]',
+            created_at  TEXT NOT NULL,
+            error_message TEXT
+        )
+    """)
+    conn.commit()
+    return conn
+
+
+_db: Optional[sqlite3.Connection] = None
+
+
+def _conn() -> sqlite3.Connection:
+    global _db
+    with _db_lock:
+        if _db is None:
+            _db = _get_db()
+        return _db
+
+
+# ── live runtime objects (browser/agent — NOT serializable) ────────────
+_runtime_lock = threading.Lock()
+_runtime: Dict[str, Dict[str, Any]] = {}
 _session_counter = 0
 
 
 @dataclass
 class BrowserUseSession:
-    """Represents an active browser-use session."""
+    """Represents a browser-use session.
+
+    Serializable fields are persisted to SQLite.
+    Live objects (browser, agent) are held separately in _runtime.
+    """
     id: str
     url: str
     task: Optional[str] = None
-    status: str = "idle"  # idle, running, paused, error, completed
+    status: str = "idle"
     history: List[Dict] = field(default_factory=list)
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
-    browser: Any = None
-    agent: Any = None
     error_message: Optional[str] = None
 
 
 def _get_next_session_id() -> str:
-    """Generate unique session ID."""
     global _session_counter
-    with _sessions_lock:
+    with _runtime_lock:
         _session_counter += 1
         return f"bu_{_session_counter:04d}"
 
 
+# ── session CRUD (SQLite-backed) ──────────────────────────────────────
+
 def get_session(session_id: str) -> Optional[BrowserUseSession]:
-    """Retrieve a session by ID."""
-    with _sessions_lock:
-        data = _sessions.get(session_id)
-        if data:
-            return BrowserUseSession(**data)
+    """Retrieve a session by ID from the database."""
+    row = _conn().execute(
+        "SELECT id, url, task, status, history, created_at, error_message "
+        "FROM sessions WHERE id = ?", (session_id,)
+    ).fetchone()
+    if not row:
         return None
+    return BrowserUseSession(
+        id=row[0], url=row[1], task=row[2], status=row[3],
+        history=json.loads(row[4]), created_at=row[5], error_message=row[6],
+    )
 
 
 def save_session(session: BrowserUseSession) -> None:
-    """Save session to storage."""
-    with _sessions_lock:
-        _sessions[session.id] = {
-            "id": session.id,
-            "url": session.url,
-            "task": session.task,
-            "status": session.status,
-            "history": session.history,
-            "created_at": session.created_at,
-            "browser": session.browser,
-            "agent": session.agent,
-            "error_message": session.error_message,
-        }
+    """Upsert session metadata into SQLite."""
+    _conn().execute(
+        "INSERT INTO sessions (id, url, task, status, history, created_at, error_message) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(id) DO UPDATE SET "
+        "url=excluded.url, task=excluded.task, status=excluded.status, "
+        "history=excluded.history, error_message=excluded.error_message",
+        (session.id, session.url, session.task, session.status,
+         json.dumps(session.history), session.created_at, session.error_message),
+    )
+    _conn().commit()
+
+
+def _set_runtime(session_id: str, key: str, value: Any) -> None:
+    with _runtime_lock:
+        _runtime.setdefault(session_id, {})[key] = value
+
+
+def _get_runtime(session_id: str, key: str) -> Any:
+    with _runtime_lock:
+        return _runtime.get(session_id, {}).get(key)
 
 
 def list_sessions() -> List[Dict[str, Any]]:
-    """List all sessions (without browser/agent objects for serialization)."""
-    with _sessions_lock:
-        result = []
-        for sid, data in _sessions.items():
-            result.append({
-                "id": data["id"],
-                "url": data["url"],
-                "task": data.get("task"),
-                "status": data.get("status", "unknown"),
-                "created_at": data.get("created_at"),
-                "history_count": len(data.get("history", [])),
-                "error_message": data.get("error_message"),
-            })
-        return result
+    """List all sessions (serializable fields only)."""
+    rows = _conn().execute(
+        "SELECT id, url, task, status, history, created_at, error_message "
+        "FROM sessions ORDER BY created_at DESC"
+    ).fetchall()
+    result = []
+    for r in rows:
+        history = json.loads(r[4])
+        result.append({
+            "id": r[0], "url": r[1], "task": r[2],
+            "status": r[3], "created_at": r[5],
+            "history_count": len(history),
+            "error_message": r[6],
+        })
+    return result
 
 
 def delete_session(session_id: str) -> bool:
-    """Delete a session and close its browser."""
-    with _sessions_lock:
-        data = _sessions.pop(session_id, None)
-        if not data:
-            return False
-        browser = data.get("browser")
-        if browser:
-            try:
-                asyncio.get_event_loop().run_until_complete(browser.close())
-            except Exception as exc:
-                log.warning("Error closing browser for session %s: %s", session_id, exc)
-        return True
+    """Delete a session, close its browser if running, and remove from DB."""
+    browser = _get_runtime(session_id, "browser")
+    if browser:
+        try:
+            _run_async(browser.close())
+        except Exception as exc:
+            log.warning("Error closing browser for session %s: %s", session_id, exc)
+    with _runtime_lock:
+        _runtime.pop(session_id, None)
+    cur = _conn().execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+    _conn().commit()
+    return cur.rowcount > 0
 
+
+# ── async task runner ─────────────────────────────────────────────────
 
 async def _run_browser_task(
     session_id: str,
@@ -128,46 +227,41 @@ async def _run_browser_task(
     model: Optional[str] = None,
     headless: bool = True,
 ) -> Dict[str, Any]:
-    """Run a browser-use task asynchronously."""
+    """Run a browser-use task asynchronously on the shared event loop."""
     if not BROWSER_USE_AVAILABLE:
         return {"success": False, "error": "browser-use package not installed"}
-    
+
     session = get_session(session_id)
     if not session:
         return {"success": False, "error": f"Session {session_id} not found"}
-    
+
     session.status = "running"
     session.task = task
     save_session(session)
-    
+
     try:
         browser_config = BrowserConfig(headless=headless)
         browser = Browser(config=browser_config)
-        session.browser = browser
-        save_session(session)
-        
-        # Create LLM - try different providers
-        llm = None
+        _set_runtime(session_id, "browser", browser)
+
+        try:
+            from langchain_openai import ChatOpenAI
+        except ImportError:
+            return {"success": False, "error": "langchain-openai not installed. Run: pip install langchain-openai"}
+
+        llm_kwargs: Dict[str, Any] = {"model": model or "gpt-4o"}
         if api_key:
-            try:
-                from langchain_openai import ChatOpenAI
-                llm = ChatOpenAI(model=model or "gpt-4o", api_key=api_key)
-            except ImportError:
-                log.warning("langchain-openai not installed")
-        
-        if not llm:
-            try:
-                from langchain_openai import ChatOpenAI
-                llm = ChatOpenAI(model=model or "gpt-4o")
-            except Exception as exc:
-                return {"success": False, "error": f"LLM init failed: {exc}"}
-        
+            llm_kwargs["api_key"] = api_key
+        try:
+            llm = ChatOpenAI(**llm_kwargs)
+        except Exception as exc:
+            return {"success": False, "error": f"LLM init failed: {exc}"}
+
         agent = Agent(task=task, llm=llm, browser=browser)
-        session.agent = agent
-        save_session(session)
-        
+        _set_runtime(session_id, "agent", agent)
+
         result = await agent.run()
-        
+
         history_entry = {
             "timestamp": datetime.now().isoformat(),
             "task": task,
@@ -175,14 +269,16 @@ async def _run_browser_task(
             "result": result.model_dump() if hasattr(result, "model_dump") else str(result),
             "success": True,
         }
+        session = get_session(session_id) or session
         session.history.append(history_entry)
         session.status = "completed"
         save_session(session)
-        
+
         return {"success": True, "result": history_entry["result"], "session_id": session_id}
-        
+
     except Exception as exc:
         log.exception("Browser-use task failed for session %s", session_id)
+        session = get_session(session_id) or session
         session.status = "error"
         session.error_message = str(exc)
         session.history.append({
@@ -196,6 +292,7 @@ async def _run_browser_task(
         return {"success": False, "error": str(exc), "session_id": session_id}
 
 
+# ── public tool functions ─────────────────────────────────────────────
 
 def browser_use_create_session(url: str = "https://google.com", **kwargs) -> str:
     """Create a new browser-use automation session."""
@@ -217,17 +314,15 @@ def browser_use_run_task(
     """Run an AI-powered browser task using browser-use."""
     if not BROWSER_USE_AVAILABLE:
         return {"success": False, "error": "browser-use not installed. Run: pip install browser-use"}
-    
+
     session = get_session(session_id)
     if not session:
         return {"success": False, "error": f"Session {session_id} not found"}
-    
+
     start_url = kwargs.get("url") or session.url
-    
+
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(_run_browser_task(
+        return _run_async(_run_browser_task(
             session_id=session_id,
             task=task,
             start_url=start_url,
@@ -235,7 +330,6 @@ def browser_use_run_task(
             model=model,
             headless=headless,
         ))
-        return result
     except Exception as exc:
         log.exception("Failed to run browser-use task")
         return {"success": False, "error": str(exc)}
@@ -246,7 +340,7 @@ def browser_use_get_status(session_id: str, **kwargs) -> Dict[str, Any]:
     session = get_session(session_id)
     if not session:
         return {"success": False, "error": f"Session {session_id} not found"}
-    
+
     return {
         "success": True,
         "session": {
@@ -283,17 +377,18 @@ def browser_use_navigate(session_id: str, url: str, **kwargs) -> Dict[str, Any]:
     """Navigate to a URL in an existing browser-use session."""
     if not BROWSER_USE_AVAILABLE:
         return {"success": False, "error": "browser-use not installed"}
-    
+
     session = get_session(session_id)
     if not session:
         return {"success": False, "error": f"Session {session_id} not found"}
-    
+
     try:
-        if session.browser:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            page = loop.run_until_complete(session.browser.get_current_page())
-            loop.run_until_complete(page.goto(url))
+        browser = _get_runtime(session_id, "browser")
+        if browser:
+            async def _nav():
+                page = await browser.get_current_page()
+                await page.goto(url)
+            _run_async(_nav())
             session.url = url
             save_session(session)
             return {"success": True, "message": f"Navigated to {url}"}
@@ -310,24 +405,25 @@ def browser_use_get_html(session_id: str, **kwargs) -> Dict[str, Any]:
     """Get the current page HTML from a browser-use session."""
     if not BROWSER_USE_AVAILABLE:
         return {"success": False, "error": "browser-use not installed"}
-    
+
     session = get_session(session_id)
     if not session:
         return {"success": False, "error": f"Session {session_id} not found"}
-    
+
     try:
-        if not session.browser:
+        browser = _get_runtime(session_id, "browser")
+        if not browser:
             return {"success": False, "error": "Browser not started for this session"}
-        
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        page = loop.run_until_complete(session.browser.get_current_page())
-        html = loop.run_until_complete(page.content())
-        
+
+        async def _get_html():
+            page = await browser.get_current_page()
+            return await page.content()
+        html = _run_async(_get_html())
+
         max_len = kwargs.get("max_length", 50000)
         if len(html) > max_len:
             html = html[:max_len] + f"\n... [truncated, total: {len(html)} chars]"
-        
+
         return {"success": True, "html": html, "url": session.url}
     except Exception as exc:
         log.exception("Failed to get HTML")
@@ -338,32 +434,32 @@ def browser_use_screenshot(session_id: str, output_path: Optional[str] = None, *
     """Take a screenshot from a browser-use session."""
     if not BROWSER_USE_AVAILABLE:
         return {"success": False, "error": "browser-use not installed"}
-    
+
     session = get_session(session_id)
     if not session:
         return {"success": False, "error": f"Session {session_id} not found"}
-    
+
     try:
-        if not session.browser:
+        browser = _get_runtime(session_id, "browser")
+        if not browser:
             return {"success": False, "error": "Browser not started for this session"}
-        
+
         if not output_path:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_path = str(Path.home() / ".ghost" / "screenshots" / f"browser_use_{session_id}_{ts}.png")
-        
+
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        page = loop.run_until_complete(session.browser.get_current_page())
-        loop.run_until_complete(page.screenshot(path=str(path), full_page=kwargs.get("full_page", True)))
-        
+
+        async def _screenshot():
+            page = await browser.get_current_page()
+            await page.screenshot(path=str(path), full_page=kwargs.get("full_page", True))
+        _run_async(_screenshot())
+
         return {"success": True, "path": str(path), "url": session.url}
     except Exception as exc:
         log.exception("Screenshot failed")
         return {"success": False, "error": str(exc)}
-
 
 
 def build_browser_use_tools(cfg=None):
