@@ -352,7 +352,7 @@ class FallbackEmbeddingChain(EmbeddingProvider):
 # ---------------------------------------------------------------------------
 
 class FTSSearch:
-    """Full-text search via SQLite FTS5 with BM25 scoring."""
+    """Full-text search via SQLite FTS5 with BM25 scoring and query expansion."""
 
     def __init__(self, conn: sqlite3.Connection):
         self._conn = conn
@@ -362,10 +362,30 @@ class FTSSearch:
         tokens = re.findall(r"[a-zA-Z0-9]+", query.lower())
         return [t for t in tokens if len(t) > 1]
 
+    @staticmethod
+    def _expand_query(query: str) -> str:
+        """Use query expansion for richer FTS matching, with fallback."""
+        try:
+            from ghost_query_expansion import expand_query_for_fts
+            result = expand_query_for_fts(query)
+            if result["expanded"]:
+                return result["expanded"]
+        except ImportError:
+            pass
+        tokens = re.findall(r"[a-zA-Z0-9]+", query.lower())
+        tokens = [t for t in tokens if len(t) > 1]
+        return " OR ".join(f'"{t}"' for t in tokens) if tokens else ""
+
     def search(self, query: str, limit: int = 20) -> list[dict]:
+        expanded = self._expand_query(query)
+        if not expanded:
+            return []
+
         tokens = self.tokenize_query(query)
         if not tokens:
             return []
+
+        # Try AND matching first for precision, fall back to expanded OR
         match_expr = " AND ".join(f'"{t}"' for t in tokens)
         try:
             rows = self._conn.execute(
@@ -379,8 +399,9 @@ class FTSSearch:
                 """,
                 (match_expr, limit),
             ).fetchall()
+            if not rows:
+                raise sqlite3.OperationalError("no AND results, try expanded")
         except sqlite3.OperationalError:
-            match_expr = " OR ".join(f'"{t}"' for t in tokens)
             try:
                 rows = self._conn.execute(
                     """
@@ -391,7 +412,7 @@ class FTSSearch:
                     ORDER BY rank
                     LIMIT ?
                     """,
-                    (match_expr, limit),
+                    (expanded, limit),
                 ).fetchall()
             except sqlite3.OperationalError:
                 return []

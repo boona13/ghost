@@ -1,5 +1,7 @@
 /** Ghost Console — real-time terminal event stream */
 
+const t = (key, params) => window.GhostI18n?.t(key, params) ?? key;
+
 const CATEGORY_COLORS = {
   tool_call: { badge: 'bg-cyan-500/20 text-cyan-400', label: 'TOOL' },
   cron:      { badge: 'bg-yellow-500/20 text-yellow-400', label: 'CRON' },
@@ -151,13 +153,13 @@ export async function render(container) {
         <div>
           <h1 class="text-lg font-bold text-white flex items-center gap-2">
             <svg class="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-            Console
+            ${t('console.title')}
           </h1>
-          <p class="text-xs text-zinc-500 mt-0.5">Real-time Ghost event stream</p>
+          <p class="text-xs text-zinc-500 mt-0.5">${t('console.subtitle')}</p>
         </div>
         <div class="flex items-center gap-2">
           <span id="console-count" class="text-xs text-zinc-600 tabular-nums font-mono">0</span>
-          <span class="text-zinc-700 text-xs">events</span>
+          <span class="text-zinc-700 text-xs">${t('console.events')}</span>
         </div>
       </div>
 
@@ -174,15 +176,15 @@ export async function render(container) {
 
         <div class="flex-1"></div>
 
-        <input id="console-search" type="text" placeholder="Filter..."
+        <input id="console-search" type="text" placeholder="${t('console.filterPlaceholder')}"
           class="bg-[#0d1117] border border-zinc-800 rounded px-2 py-1 text-xs text-zinc-300 w-32 focus:outline-none focus:border-zinc-600 font-mono placeholder:text-zinc-700">
 
         <button id="btn-pause" class="text-[10px] px-2.5 py-1 rounded font-semibold transition-colors bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200">
-          Pause
+          ${t('console.pause')}
         </button>
 
         <button id="btn-clear" class="text-[10px] px-2.5 py-1 rounded font-semibold bg-zinc-800 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300 transition-colors">
-          Clear
+          ${t('common.clear')}
         </button>
       </div>
 
@@ -192,13 +194,13 @@ export async function render(container) {
           class="absolute inset-0 overflow-auto font-mono text-xs rounded-lg border border-zinc-800/80"
           style="background: #0d1117; scrollbar-width: thin; scrollbar-color: #28283d #0d1117;">
           <div class="text-zinc-700 text-center py-8 text-[11px]" id="console-empty">
-            Waiting for events...
+            ${t('console.waitingForEvents')}
           </div>
         </div>
 
         <button id="btn-jump-bottom"
           class="hidden absolute bottom-4 right-4 bg-zinc-800/90 text-zinc-400 hover:text-white text-[10px] px-3 py-1.5 rounded-full shadow-lg border border-zinc-700 transition-all hover:bg-zinc-700">
-          ↓ Jump to bottom
+          ${t('console.jumpToBottom')}
         </button>
       </div>
     </div>
@@ -246,7 +248,7 @@ export async function render(container) {
   paused = false;
   btnPause.addEventListener('click', () => {
     paused = !paused;
-    btnPause.textContent = paused ? 'Resume' : 'Pause';
+    btnPause.textContent = paused ? t('console.resume') : t('console.pause');
     btnPause.classList.toggle('bg-emerald-500/20', paused);
     btnPause.classList.toggle('text-emerald-400', paused);
   });

@@ -34,13 +34,15 @@ def register_routes(app: Flask):
     from .mcp import bp as mcp_bp
     from .langfuse import bp as langfuse_bp
     from .browser_use import bp as browser_use_bp
+    from .pairing import bp as pairing_bp
 
     for bp in [status_bp, config_bp, models_bp, identity_bp,
                skills_bp, cron_bp, memory_bp, feed_bp, daemon_bp, evolve_bp,
                chat_bp, integrations_bp, autonomy_bp, setup_bp, accounts_bp,
                security_bp, console_bp, channels_bp, future_features_bp,
                voice_bp, canvas_bp, usage_bp, webhooks_bp, projects_bp,
-               prs_bp, doctor_bp, mcp_bp, langfuse_bp, browser_use_bp]:
+               prs_bp, doctor_bp, mcp_bp, langfuse_bp, browser_use_bp,
+               pairing_bp]:
         app.register_blueprint(bp)
 
     @app.route("/")

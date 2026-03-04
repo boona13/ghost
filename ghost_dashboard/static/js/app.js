@@ -1,6 +1,7 @@
 /** Ghost Dashboard — Main app router */
 
 import { toast } from './utils.js';
+import { i18n } from './i18n/index.js';
 import { render as overview } from './pages/overview.js';
 import { render as models } from './pages/models.js';
 import { render as config } from './pages/config.js';
@@ -26,7 +27,8 @@ import { render as prs } from './pages/prs.js';
 import { render as mcp } from './pages/mcp.js';
 import { render as langfuse } from './pages/langfuse.js';
 import { render as browser_use } from './pages/browser_use.js';
-const pages = { overview, chat, models, config, soul, user, skills, cron, memory, feed, evolve, integrations, autonomy, accounts, setup, security, console: console_page, channels, future_features, webhooks, projects, prs, mcp, langfuse, browser_use };
+import { render as pairing } from './pages/pairing.js';
+const pages = { overview, chat, models, config, soul, user, skills, cron, memory, feed, evolve, integrations, autonomy, accounts, setup, security, console: console_page, channels, future_features, webhooks, projects, prs, mcp, langfuse, browser_use, pairing };
 const container = document.getElementById('page-content');
 let currentPage = null;
 let pollTimer = null;
@@ -51,10 +53,10 @@ function navigate(page) {
     container.classList.remove('chat-active');
   }
 
-  container.innerHTML = '<div class="flex items-center justify-center h-32 text-zinc-600"><div class="animate-pulse">Loading...</div></div>';
+  container.innerHTML = `<div class="flex items-center justify-center h-32 text-zinc-600"><div class="animate-pulse">${i18n.t('common.loading')}</div></div>`;
 
   pages[page](container).catch(err => {
-    container.innerHTML = `<div class="text-red-400 p-4">Error loading page: ${err.message}</div>`;
+    container.innerHTML = `<div class="text-red-400 p-4">${i18n.t('common.error')}: ${err.message}</div>`;
   });
 
   if (page === 'feed') {
@@ -83,7 +85,7 @@ sidebarToggle.addEventListener('click', () => {
   sidebar.classList.toggle('collapsed');
   const isCollapsed = sidebar.classList.contains('collapsed');
   localStorage.setItem('ghost-sidebar-collapsed', isCollapsed ? '1' : '0');
-  sidebarToggle.title = isCollapsed ? 'Expand sidebar' : 'Collapse sidebar';
+  sidebarToggle.title = isCollapsed ? i18n.t('sidebar.expand') : i18n.t('sidebar.collapse');
 });
 
 async function updateSidebarStatus() {
@@ -93,24 +95,24 @@ async function updateSidebarStatus() {
     const s = await window.GhostAPI.get('/api/status');
     if (s.running && !s.paused) {
       dot.className = 'w-2 h-2 rounded-full bg-emerald-500 animate-pulse';
-      text.textContent = `Running (PID ${s.pid})`;
+      text.textContent = i18n.t('status.runningPid', {pid: s.pid});
     } else if (s.paused) {
       dot.className = 'w-2 h-2 rounded-full bg-amber-500';
-      text.textContent = 'Paused';
+      text.textContent = i18n.t('status.paused');
     } else {
       dot.className = 'w-2 h-2 rounded-full bg-zinc-600';
-      text.textContent = 'Stopped';
+      text.textContent = i18n.t('status.stopped');
     }
     if (!_prevConnected) {
       _prevConnected = true;
       window.dispatchEvent(new CustomEvent('ghost:restarted'));
-      toast('Ghost restarted successfully');
+      toast(i18n.t('status.ghostRestartedSuccess'));
     }
   } catch {
     if (_prevConnected) {
       _prevConnected = false;
       dot.className = 'w-2 h-2 rounded-full bg-amber-500 ghost-restart-pulse';
-      text.textContent = 'Restarting...';
+      text.textContent = i18n.t('status.restarting');
     }
   }
   try {
@@ -126,6 +128,22 @@ async function updateSidebarStatus() {
 }
 
 async function init() {
+  await i18n.init();
+
+  const langSelector = document.getElementById('lang-selector');
+  if (langSelector) {
+    langSelector.value = i18n.getLocale();
+    langSelector.addEventListener('change', () => {
+      i18n.setLocale(langSelector.value);
+    });
+  }
+
+  i18n.onChange(() => {
+    if (currentPage && pages[currentPage]) {
+      pages[currentPage](container).catch(() => {});
+    }
+  });
+
   try {
     const setupStatus = await window.GhostAPI.get('/api/setup/status');
     if (setupStatus.needs_setup) {
@@ -145,6 +163,8 @@ async function init() {
   updateUsageStatus();
   setInterval(updateUsageStatus, 3000);
 }
+
+window.GhostI18n = i18n;
 
 init();
 

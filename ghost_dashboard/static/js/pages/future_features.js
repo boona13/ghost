@@ -1,5 +1,7 @@
 /** Future Features page — backlog management for autonomous feature implementation */
 
+const t = (key, params) => window.GhostI18n?.t(key, params) ?? key;
+
 let currentFeatures = [];
 let currentFilter = 'all';
 let metadata = { statuses: [], priorities: [], sources: [], efforts: [] };
@@ -21,35 +23,35 @@ export async function render(container) {
 
   container.innerHTML = `
     <div class="flex items-center justify-between mb-1">
-      <h1 class="page-header">Future Features</h1>
+      <h1 class="page-header">${t('future_features.title')}</h1>
       <button id="ff-add-btn" class="btn btn-primary btn-sm flex items-center gap-1.5">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
-        Add Feature
+        ${t('future_features.addFeature')}
       </button>
     </div>
-    <p class="page-desc">Autonomous feature backlog — Tech Scout and Competitive Intel add features here. Feature Implementer runs daily to implement them.</p>
+    <p class="page-desc">${t('future_features.subtitle')}</p>
 
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
       <div class="stat-card">
-        <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Active</div>
+        <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">${t('future_features.activeCount')}</div>
         <div class="text-xl font-bold text-ghost-400">${activeCount}</div>
       </div>
       <div class="stat-card">
-        <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Pending</div>
+        <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">${t('future_features.pendingCount')}</div>
         <div class="text-xl font-bold text-amber-400">${stats.pending || 0}</div>
       </div>
       <div class="stat-card">
-        <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Need Approval</div>
+        <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">${t('future_features.needApproval')}</div>
         <div class="text-xl font-bold text-red-400">${stats.approval_required || 0}</div>
       </div>
       <div class="stat-card">
-        <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Implemented</div>
+        <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">${t('future_features.implemented')}</div>
         <div class="text-xl font-bold text-emerald-400">${stats.implemented || 0}</div>
       </div>
     </div>
 
     <div class="stat-card mb-6">
-      <h3 class="text-xs font-semibold text-white mb-2">By Priority</h3>
+      <h3 class="text-xs font-semibold text-white mb-2">${t('future_features.byPriority')}</h3>
       <div class="flex gap-4 text-xs">
         <div class="flex items-center gap-1.5">
           <span class="w-2.5 h-2.5 rounded-full bg-red-500"></span>
@@ -72,12 +74,12 @@ export async function render(container) {
 
     <div class="border-b border-surface-600/30 mb-4">
       <nav class="flex gap-1">
-        ${renderTab('all', 'All', stats.total || 0)}
-        ${renderTab('pending', 'Pending', stats.pending || 0)}
-        ${renderTab('approval_required', 'Need Approval', stats.approval_required || 0)}
-        ${renderTab('in_progress', 'In Progress', stats.in_progress || 0)}
-        ${renderTab('implemented', 'Completed', stats.implemented || 0)}
-        ${renderTab('failed', 'Failed', (stats.failed || 0) + (stats.deferred || 0))}
+        ${renderTab('all', t('future_features.filterAll'), stats.total || 0)}
+        ${renderTab('pending', t('future_features.filterPending'), stats.pending || 0)}
+        ${renderTab('approval_required', t('future_features.filterNeedApproval'), stats.approval_required || 0)}
+        ${renderTab('in_progress', t('future_features.filterInProgress'), stats.in_progress || 0)}
+        ${renderTab('implemented', t('future_features.filterCompleted'), stats.implemented || 0)}
+        ${renderTab('failed', t('future_features.filterFailed'), (stats.failed || 0) + (stats.deferred || 0))}
       </nav>
     </div>
 
@@ -87,25 +89,25 @@ export async function render(container) {
 
     <div id="ff-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center" style="background:rgba(0,0,0,0.6)">
       <div class="stat-card w-full max-w-lg mx-4" style="border-color:rgba(139,92,246,0.3)">
-        <h3 class="text-sm font-bold text-white mb-4">Add Future Feature</h3>
+        <h3 class="text-sm font-bold text-white mb-4">${t('future_features.addTitle')}</h3>
         <form id="ff-form" class="space-y-3">
           <div>
-            <label class="form-label">Title</label>
+            <label class="form-label">${t('future_features.titleLabel')}</label>
             <input type="text" id="ff-title" required class="form-input w-full">
           </div>
           <div>
-            <label class="form-label">Description</label>
+            <label class="form-label">${t('future_features.descriptionLabel')}</label>
             <textarea id="ff-description" rows="3" required class="form-input w-full" style="resize:vertical"></textarea>
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <label class="form-label">Priority</label>
+              <label class="form-label">${t('future_features.priority')}</label>
               <select id="ff-priority" class="form-input w-full">
                 ${metadata.priorities.map(p => `<option value="${p.value}">${p.label}</option>`).join('')}
               </select>
             </div>
             <div>
-              <label class="form-label">Effort</label>
+              <label class="form-label">${t('future_features.effort')}</label>
               <select id="ff-effort" class="form-input w-full">
                 ${metadata.efforts.map(e => `<option value="${e.value}">${e.label}</option>`).join('')}
               </select>
@@ -113,11 +115,11 @@ export async function render(container) {
           </div>
           <div class="flex items-center gap-2 py-1">
             <div class="toggle on" id="ff-auto-toggle"><span class="toggle-dot"></span></div>
-            <span class="text-xs text-zinc-400">Auto-implement (toggle off to require approval)</span>
+            <span class="text-xs text-zinc-400">${t('future_features.autoImplement')}</span>
           </div>
           <div class="flex justify-end gap-2 pt-2">
-            <button type="button" id="ff-cancel" class="btn btn-secondary btn-sm">Cancel</button>
-            <button type="submit" class="btn btn-primary btn-sm">Add Feature</button>
+            <button type="button" id="ff-cancel" class="btn btn-secondary btn-sm">${t('common.cancel')}</button>
+            <button type="submit" class="btn btn-primary btn-sm">${t('future_features.addFeature')}</button>
           </div>
         </form>
       </div>
@@ -164,7 +166,7 @@ export async function render(container) {
       document.getElementById('ff-modal').classList.add('hidden');
       document.getElementById('ff-form').reset();
       document.getElementById('ff-auto-toggle').classList.add('on');
-      u.toast('Feature added');
+      u.toast(t('future_features.featureAdded'));
       const newData = await api.get('/api/future-features/list');
       currentFeatures = newData.features || [];
       document.getElementById('ff-list').innerHTML = renderFeatureList(currentFeatures, currentFilter, u);
@@ -191,45 +193,45 @@ export async function render(container) {
 
     if (action === 'approve') {
       await api.post(`/api/future-features/${featureId}/approve`);
-      u.toast('Feature approved');
+      u.toast(t('future_features.featureApproved'));
     } else if (action === 'start') {
       const res = await api.post(`/api/future-features/${featureId}/start`);
       if (res.ok) {
-        u.toast('Implementation started');
+        u.toast(t('future_features.implementationStarted'));
       } else {
-        u.toast(res.error || 'Cannot start feature', 'error');
+        u.toast(res.error || t('future_features.cannotStart'), 'error');
         return;
       }
     } else if (action === 'complete') {
-      const summary = prompt('Implementation summary:');
+      const summary = prompt(t('future_features.implementationSummary'));
       if (summary) {
         await api.post(`/api/future-features/${featureId}/complete`, { summary });
-        u.toast('Feature completed');
+        u.toast(t('future_features.featureCompleted'));
       }
     } else if (action === 'fail') {
-      const error = prompt('Failure reason:');
+      const error = prompt(t('future_features.failureReason'));
       if (error) {
         await api.post(`/api/future-features/${featureId}/fail`, { error });
-        u.toast('Marked as failed');
+        u.toast(t('future_features.markedFailed'));
       }
     } else if (action === 'retry') {
       const res = await api.post(`/api/future-features/${featureId}/retry`);
       if (res.ok) {
-        u.toast('Retrying — implementation started');
+        u.toast(t('future_features.retryStarted'));
       } else {
-        u.toast(res.error || 'Cannot retry feature', 'error');
+        u.toast(res.error || t('future_features.cannotRetry'), 'error');
         return;
       }
     } else if (action === 'reject') {
-      const reason = prompt('Rejection reason:');
+      const reason = prompt(t('future_features.rejectionReason'));
       if (reason) {
         await api.post(`/api/future-features/${featureId}/reject`, { reason });
-        u.toast('Feature rejected');
+        u.toast(t('future_features.featureRejected'));
       }
     } else if (action === 'delete') {
-      if (confirm('Permanently delete this feature?')) {
+      if (confirm(t('future_features.deleteConfirm'))) {
         await api.post(`/api/future-features/${featureId}/delete`);
-        u.toast('Feature deleted');
+        u.toast(t('future_features.featureDeleted'));
       }
     }
 
@@ -254,7 +256,7 @@ function renderFeatureList(features, filter, u) {
       });
 
   if (filtered.length === 0) {
-    return `<div class="text-center py-12 text-xs text-zinc-600">No features found</div>`;
+    return `<div class="text-center py-12 text-xs text-zinc-600">${t('future_features.noFeatures')}</div>`;
   }
 
   return filtered.map(f => {
@@ -279,28 +281,28 @@ function renderFeatureList(features, filter, u) {
 
     const actions = [];
     if (f.status === 'approval_required') {
-      actions.push(`<button data-action="approve" data-id="${f.id}" class="btn btn-primary btn-sm" style="padding:0.25rem 0.5rem;font-size:10px">Approve</button>`);
-      actions.push(`<button data-action="reject" data-id="${f.id}" class="btn btn-danger btn-sm" style="padding:0.25rem 0.5rem;font-size:10px">Reject</button>`);
+      actions.push(`<button data-action="approve" data-id="${f.id}" class="btn btn-primary btn-sm" style="padding:0.25rem 0.5rem;font-size:10px">${t('common.approve')}</button>`);
+      actions.push(`<button data-action="reject" data-id="${f.id}" class="btn btn-danger btn-sm" style="padding:0.25rem 0.5rem;font-size:10px">${t('common.reject')}</button>`);
     } else if (f.status === 'pending') {
-      actions.push(`<button data-action="start" data-id="${f.id}" class="btn btn-primary btn-sm" style="padding:0.25rem 0.5rem;font-size:10px">Start</button>`);
-      actions.push(`<button data-action="reject" data-id="${f.id}" class="btn btn-danger btn-sm" style="padding:0.25rem 0.5rem;font-size:10px">Reject</button>`);
+      actions.push(`<button data-action="start" data-id="${f.id}" class="btn btn-primary btn-sm" style="padding:0.25rem 0.5rem;font-size:10px">${t('common.run')}</button>`);
+      actions.push(`<button data-action="reject" data-id="${f.id}" class="btn btn-danger btn-sm" style="padding:0.25rem 0.5rem;font-size:10px">${t('common.reject')}</button>`);
     } else if (f.status === 'in_progress') {
-      actions.push(`<button data-action="complete" data-id="${f.id}" class="btn btn-primary btn-sm" style="padding:0.25rem 0.5rem;font-size:10px">Complete</button>`);
-      actions.push(`<button data-action="fail" data-id="${f.id}" class="btn btn-danger btn-sm" style="padding:0.25rem 0.5rem;font-size:10px">Fail</button>`);
+      actions.push(`<button data-action="complete" data-id="${f.id}" class="btn btn-primary btn-sm" style="padding:0.25rem 0.5rem;font-size:10px">${t('common.done')}</button>`);
+      actions.push(`<button data-action="fail" data-id="${f.id}" class="btn btn-danger btn-sm" style="padding:0.25rem 0.5rem;font-size:10px">${t('common.stop')}</button>`);
     } else if (f.status === 'failed' || f.status === 'deferred') {
-      actions.push(`<button data-action="retry" data-id="${f.id}" class="btn btn-primary btn-sm" style="padding:0.25rem 0.5rem;font-size:10px">Retry</button>`);
-      actions.push(`<button data-action="delete" data-id="${f.id}" class="btn btn-ghost btn-sm" style="padding:0.25rem 0.5rem;font-size:10px">Delete</button>`);
+      actions.push(`<button data-action="retry" data-id="${f.id}" class="btn btn-primary btn-sm" style="padding:0.25rem 0.5rem;font-size:10px">${t('common.retry')}</button>`);
+      actions.push(`<button data-action="delete" data-id="${f.id}" class="btn btn-ghost btn-sm" style="padding:0.25rem 0.5rem;font-size:10px">${t('common.delete')}</button>`);
     } else {
-      actions.push(`<button data-action="delete" data-id="${f.id}" class="btn btn-ghost btn-sm" style="padding:0.25rem 0.5rem;font-size:10px">Delete</button>`);
+      actions.push(`<button data-action="delete" data-id="${f.id}" class="btn btn-ghost btn-sm" style="padding:0.25rem 0.5rem;font-size:10px">${t('common.delete')}</button>`);
     }
 
     const timeAgo = (ts) => {
       if (!ts) return '';
       const s = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
-      if (s < 60) return 'just now';
-      if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-      if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-      return `${Math.floor(s / 86400)}d ago`;
+      if (s < 60) return t('common.justNow');
+      if (s < 3600) return t('common.minutesAgo', {n: Math.floor(s / 60)});
+      if (s < 86400) return t('common.hoursAgo', {n: Math.floor(s / 3600)});
+      return t('common.daysAgo', {n: Math.floor(s / 86400)});
     };
 
     return `
@@ -314,7 +316,7 @@ function renderFeatureList(features, filter, u) {
               <span class="badge ${statusBadge}">${statusInfo.label}</span>
             </div>
             <p class="text-[11px] text-zinc-500 leading-relaxed">${u.escapeHtml(f.description)}</p>
-            ${f.last_error && (f.status === 'failed' || f.status === 'deferred') ? `<p class="text-[10px] text-red-400/80 mt-1">Error: ${u.escapeHtml(f.last_error.substring(0, 200))}</p>` : ''}
+            ${f.last_error && (f.status === 'failed' || f.status === 'deferred') ? `<p class="text-[10px] text-red-400/80 mt-1">${t('common.error')}: ${u.escapeHtml(f.last_error.substring(0, 200))}</p>` : ''}
             <div class="flex items-center gap-3 mt-2 text-[10px] text-zinc-600">
               <span>${f.source || 'unknown'}</span>
               <span>effort: ${f.estimated_effort || 'medium'}</span>

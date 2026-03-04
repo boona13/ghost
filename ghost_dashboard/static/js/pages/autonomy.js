@@ -1,5 +1,7 @@
 /** Autonomy page — Action Items + Growth Log */
 
+const t = (key, params) => window.GhostI18n?.t(key, params) ?? key;
+
 export async function render(container) {
   const { GhostAPI: api, GhostUtils: u } = window;
 
@@ -28,40 +30,40 @@ export async function render(container) {
     if (!ts) return '';
     const d = new Date(ts);
     const s = Math.floor((Date.now() - d.getTime()) / 1000);
-    if (s < 60) return 'just now';
-    if (s < 3600) return `${Math.floor(s/60)}m ago`;
-    if (s < 86400) return `${Math.floor(s/3600)}h ago`;
-    return `${Math.floor(s/86400)}d ago`;
+    if (s < 60) return t('common.justNow');
+    if (s < 3600) return t('common.minutesAgo', {n: Math.floor(s/60)});
+    if (s < 86400) return t('common.hoursAgo', {n: Math.floor(s/3600)});
+    return t('common.daysAgo', {n: Math.floor(s/86400)});
   };
 
   const msTimeAgo = (ms) => {
-    if (!ms) return 'never';
+    if (!ms) return t('common.never');
     return timeAgo(new Date(ms).toISOString());
   };
 
   container.innerHTML = `
-    <h1 class="page-header">Autonomy</h1>
-    <p class="page-desc">Ghost's autonomous growth system — self-improvement, action items, and activity log</p>
+    <h1 class="page-header">${t('autonomy.title')}</h1>
+    <p class="page-desc">${t('autonomy.subtitle')}</p>
 
     ${crashReport ? `
     <div class="stat-card mb-6" style="border: 1px solid rgba(239,68,68,0.3); background: rgba(239,68,68,0.05);">
       <div class="flex items-center gap-2 mb-2">
         <svg class="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
-        <h3 class="text-sm font-semibold text-red-400">Crash Detected</h3>
+        <h3 class="text-sm font-semibold text-red-400">${t('autonomy.crashDetected')}</h3>
         <span class="text-[10px] text-zinc-500 ml-auto">${crashReport.timestamp || ''}</span>
       </div>
-      <div class="text-xs text-zinc-400">Exit code ${crashReport.exit_code} — Ghost is attempting self-repair (crash #${crashReport.crash_count})</div>
+      <div class="text-xs text-zinc-400">${t('autonomy.crashMsg', { code: crashReport.exit_code, n: crashReport.crash_count })}</div>
     </div>
     ` : ''}
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <div class="lg:col-span-1 space-y-6">
         <div class="stat-card">
-          <h3 class="text-sm font-semibold text-white mb-3">Action Items
+          <h3 class="text-sm font-semibold text-white mb-3">${t('autonomy.actionItems')}
             ${actions.length > 0 ? `<span class="ml-2 text-[10px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-full">${actions.length}</span>` : ''}
           </h3>
           <div id="action-items-list" class="space-y-3">
-            ${actions.length === 0 ? '<div class="text-xs text-zinc-600 py-4 text-center">No pending action items</div>' :
+            ${actions.length === 0 ? `<div class="text-xs text-zinc-600 py-4 text-center">${t('autonomy.noActionItems')}</div>` :
               actions.map(a => `
                 <div class="p-3 bg-surface-700/50 rounded-lg border border-surface-600/30" data-action-id="${a.id}">
                   <div class="flex items-start gap-2">
@@ -73,8 +75,8 @@ export async function render(container) {
                       </div>
                       <div class="text-[11px] text-zinc-500 leading-relaxed">${u.escapeHtml(a.description)}</div>
                       <div class="flex gap-2 mt-2">
-                        <button class="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 btn-resolve" data-id="${a.id}">Resolve</button>
-                        <button class="text-[10px] px-2 py-0.5 rounded bg-zinc-700 text-zinc-400 hover:bg-zinc-600 btn-dismiss" data-id="${a.id}">Dismiss</button>
+                        <button class="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 btn-resolve" data-id="${a.id}">${t('autonomy.resolve')}</button>
+                        <button class="text-[10px] px-2 py-0.5 rounded bg-zinc-700 text-zinc-400 hover:bg-zinc-600 btn-dismiss" data-id="${a.id}">${t('autonomy.dismiss')}</button>
                       </div>
                     </div>
                   </div>
@@ -84,17 +86,17 @@ export async function render(container) {
         </div>
 
         <div class="stat-card">
-          <h3 class="text-sm font-semibold text-white mb-3">Growth Routines</h3>
+          <h3 class="text-sm font-semibold text-white mb-3">${t('autonomy.growthRoutines')}</h3>
           <div class="space-y-2">
             ${routines.map(r => `
               <div class="flex items-center justify-between py-1.5 border-b border-surface-600/30 last:border-0">
                 <div>
                   <div class="text-xs text-zinc-300">${u.escapeHtml(r.name)}</div>
-                  <div class="text-[10px] text-zinc-600">${r.schedule || 'not scheduled'}</div>
+                  <div class="text-[10px] text-zinc-600">${r.schedule || t('autonomy.notScheduled')}</div>
                 </div>
                 <div class="text-right">
                   <div class="text-[10px] ${r.last_status === 'ok' ? 'text-emerald-400' : r.last_status === 'error' ? 'text-red-400' : 'text-zinc-600'}">
-                    ${r.last_status || 'never run'}
+                    ${r.last_status || t('autonomy.neverRun')}
                   </div>
                   <div class="text-[10px] text-zinc-600">${msTimeAgo(r.last_run)}</div>
                 </div>
@@ -106,11 +108,11 @@ export async function render(container) {
 
       <div class="lg:col-span-2">
         <div class="stat-card">
-          <h3 class="text-sm font-semibold text-white mb-3">Growth Log
-            <span class="ml-2 text-[10px] text-zinc-600">${growthLog.length} entries</span>
+          <h3 class="text-sm font-semibold text-white mb-3">${t('autonomy.growthLog')}
+            <span class="ml-2 text-[10px] text-zinc-600">${growthLog.length} ${t('common.entries')}</span>
           </h3>
           <div id="growth-log-list" class="space-y-3 max-h-[600px] overflow-y-auto">
-            ${growthLog.length === 0 ? '<div class="text-xs text-zinc-600 py-8 text-center">No growth activity yet. Ghost will start improving autonomously based on the configured schedules.</div>' :
+            ${growthLog.length === 0 ? `<div class="text-xs text-zinc-600 py-8 text-center">${t('autonomy.noGrowthActivity')}</div>` :
               growthLog.map(e => `
                 <div class="flex gap-3 p-3 bg-surface-700/30 rounded-lg">
                   <div class="flex-shrink-0 w-8 h-8 rounded-full bg-ghost-500/20 flex items-center justify-center">
@@ -135,7 +137,7 @@ export async function render(container) {
   container.querySelectorAll('.btn-resolve').forEach(btn => {
     btn.addEventListener('click', async () => {
       await api.post('/api/autonomy/actions/' + btn.dataset.id + '/resolve');
-      u.toast('Action item resolved');
+      u.toast(t('autonomy.itemResolved'));
       render(container);
     });
   });
@@ -143,7 +145,7 @@ export async function render(container) {
   container.querySelectorAll('.btn-dismiss').forEach(btn => {
     btn.addEventListener('click', async () => {
       await api.post('/api/autonomy/actions/' + btn.dataset.id + '/dismiss');
-      u.toast('Action item dismissed');
+      u.toast(t('autonomy.itemDismissed'));
       render(container);
     });
   });

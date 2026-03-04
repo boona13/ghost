@@ -1,5 +1,7 @@
 /** MCP (Model Context Protocol) page — server management, tool discovery, and testing */
 
+const t = (key, params) => window.GhostI18n?.t(key, params) ?? key;
+
 export async function render(container) {
   const { GhostAPI: api, GhostUtils: u } = window;
 
@@ -7,15 +9,15 @@ export async function render(container) {
   try {
     data = await api.get('/api/mcp');
   } catch (e) {
-    container.innerHTML = `<h1 class="page-header">MCP Servers</h1>
-      <div class="stat-card"><p class="text-zinc-500 text-sm">MCP system not available. Enable <code>enable_mcp</code> in config.</p></div>`;
+    container.innerHTML = `<h1 class="page-header">${t('mcp.title')}</h1>
+      <div class="stat-card"><p class="text-zinc-500 text-sm">${t('mcp.notAvailable')}</p></div>`;
     return;
   }
 
   if (!data.enabled) {
-    container.innerHTML = `<h1 class="page-header">MCP Servers</h1>
+    container.innerHTML = `<h1 class="page-header">${t('mcp.title')}</h1>
       <div class="stat-card">
-        <p class="text-zinc-500 text-sm">MCP is disabled. Set <code>enable_mcp: true</code> in your Ghost config to enable it.</p>
+        <p class="text-zinc-500 text-sm">${t('mcp.mcpDisabled')}</p>
       </div>`;
     return;
   }
@@ -30,29 +32,29 @@ export async function render(container) {
   };
 
   container.innerHTML = `
-    <h1 class="page-header">MCP Servers</h1>
-    <p class="page-desc">Model Context Protocol — extend Ghost with external tools from MCP-compatible servers</p>
+    <h1 class="page-header">${t('mcp.title')}</h1>
+    <p class="page-desc">${t('mcp.subtitle')}</p>
 
     <div class="mb-6">
-      <button id="mcp-add-server-btn" class="px-4 py-2 bg-ghost-600 hover:bg-ghost-500 text-white text-sm rounded font-medium">+ Add Server</button>
+      <button id="mcp-add-server-btn" class="px-4 py-2 bg-ghost-600 hover:bg-ghost-500 text-white text-sm rounded font-medium">${t('mcp.addServer')}</button>
     </div>
 
     <div class="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
       <div class="stat-card">
         <div class="text-2xl font-bold text-white">${servers.length}</div>
-        <div class="text-xs text-zinc-500">Configured</div>
+        <div class="text-xs text-zinc-500">${t('mcp.configured')}</div>
       </div>
       <div class="stat-card">
         <div class="text-2xl font-bold text-emerald-400">${data.connected_count || 0}</div>
-        <div class="text-xs text-zinc-500">Connected</div>
+        <div class="text-xs text-zinc-500">${t('mcp.connectedCount')}</div>
       </div>
       <div class="stat-card">
         <div class="text-2xl font-bold text-ghost-400">${data.total_tools || 0}</div>
-        <div class="text-xs text-zinc-500">Available Tools</div>
+        <div class="text-xs text-zinc-500">${t('mcp.availableTools')}</div>
       </div>
       <div class="stat-card">
-        <div class="text-2xl font-bold ${data.enabled ? 'text-emerald-400' : 'text-zinc-600'}">${data.enabled ? 'ON' : 'OFF'}</div>
-        <div class="text-xs text-zinc-500">MCP Status</div>
+        <div class="text-2xl font-bold ${data.enabled ? 'text-emerald-400' : 'text-zinc-600'}">${data.enabled ? t('mcp.onLabel') : t('mcp.offLabel')}</div>
+        <div class="text-xs text-zinc-500">${t('mcp.mcpStatus')}</div>
       </div>
     </div>
 
@@ -64,8 +66,8 @@ export async function render(container) {
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 12h14M12 5l7 7-7 7"/>
           </svg>
         </div>
-        <p class="text-sm text-zinc-400 mb-2">No MCP servers configured</p>
-        <p class="text-xs text-zinc-600 max-w-md mx-auto">Add MCP servers to your Ghost config under <code class="text-ghost-400">mcp_servers</code>. Each server provides external tools that Ghost can use during conversations and autonomous tasks.</p>
+        <p class="text-sm text-zinc-400 mb-2">${t('mcp.noServers')}</p>
+        <p class="text-xs text-zinc-600 max-w-md mx-auto">${t('mcp.noServersDesc')}</p>
         <pre class="text-left text-[11px] text-zinc-400 bg-surface-700 rounded-lg px-4 py-3 mt-4 mx-auto max-w-sm font-mono">{
   "mcp_servers": {
     "filesystem": {
@@ -81,9 +83,9 @@ export async function render(container) {
 
     ${servers.length > 0 ? `
     <div class="flex items-center justify-between mb-3">
-      <h3 class="text-sm font-semibold text-white">Servers</h3>
+      <h3 class="text-sm font-semibold text-white">${t('mcp.servers')}</h3>
       <div class="flex gap-2">
-        <button id="mcp-reconnect-all" class="text-[10px] px-2 py-1 rounded bg-amber-500/20 text-amber-400 hover:bg-amber-500/30" title="Reconnect any dead servers">Reconnect Dead</button>
+        <button id="mcp-reconnect-all" class="text-[10px] px-2 py-1 rounded bg-amber-500/20 text-amber-400 hover:bg-amber-500/30" title="${t('mcp.reconnectDead')}">${t('mcp.reconnectDead')}</button>
       </div>
     </div>
     <div id="mcp-servers-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
@@ -93,38 +95,38 @@ export async function render(container) {
 
     <div id="mcp-tools-section" class="${connected.length > 0 ? '' : 'hidden'}">
       <div class="flex items-center justify-between mb-3">
-        <h3 class="text-sm font-semibold text-white">Available Tools</h3>
-        <button id="mcp-refresh-tools" class="text-[10px] px-2 py-1 rounded bg-surface-600 text-zinc-400 hover:bg-surface-500">Refresh</button>
+        <h3 class="text-sm font-semibold text-white">${t('mcp.toolsTab')}</h3>
+        <button id="mcp-refresh-tools" class="text-[10px] px-2 py-1 rounded bg-surface-600 text-zinc-400 hover:bg-surface-500">${t('common.refresh')}</button>
       </div>
       <div id="mcp-tools-list" class="space-y-2 mb-6">
-        <div class="text-xs text-zinc-600 py-4 text-center animate-pulse">Loading tools...</div>
+        <div class="text-xs text-zinc-600 py-4 text-center animate-pulse">${t('mcp.loadingTools')}</div>
       </div>
     </div>
 
     <div id="mcp-test-section" class="${connected.length > 0 ? '' : 'hidden'}">
-      <h3 class="text-sm font-semibold text-white mb-3">Test Tool</h3>
+      <h3 class="text-sm font-semibold text-white mb-3">${t('common.test')} ${t('mcp.tool')}</h3>
       <div class="stat-card">
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
           <div>
-            <label class="block text-[11px] text-zinc-400 mb-1">Server</label>
+            <label class="block text-[11px] text-zinc-400 mb-1">${t('mcp.server')}</label>
             <select id="mcp-test-server" class="w-full bg-surface-700 border border-surface-600 rounded px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:border-zinc-500">
               ${connected.map(s => `<option value="${u.escapeHtml(s.name)}">${u.escapeHtml(s.name)}</option>`).join('')}
             </select>
           </div>
           <div>
-            <label class="block text-[11px] text-zinc-400 mb-1">Tool</label>
+            <label class="block text-[11px] text-zinc-400 mb-1">${t('mcp.tool')}</label>
             <select id="mcp-test-tool" class="w-full bg-surface-700 border border-surface-600 rounded px-3 py-2 text-sm text-zinc-300 focus:outline-none focus:border-zinc-500">
-              <option value="">Select a server first</option>
+              <option value="">${t('mcp.selectServer')}</option>
             </select>
           </div>
         </div>
         <div class="mb-3">
-          <label class="block text-[11px] text-zinc-400 mb-1">Arguments (JSON)</label>
+          <label class="block text-[11px] text-zinc-400 mb-1">${t('mcp.argsJson')}</label>
           <textarea id="mcp-test-args" rows="3" placeholder='{}'
             class="w-full bg-surface-700 border border-surface-600 rounded px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 font-mono"></textarea>
         </div>
         <div class="flex items-center gap-3">
-          <button id="mcp-test-run" class="px-4 py-2 bg-ghost-600 hover:bg-ghost-500 text-white text-sm rounded font-medium">Run Tool</button>
+          <button id="mcp-test-run" class="px-4 py-2 bg-ghost-600 hover:bg-ghost-500 text-white text-sm rounded font-medium">${t('mcp.runTool')}</button>
           <span id="mcp-test-status" class="text-xs text-zinc-500"></span>
         </div>
         <pre id="mcp-test-result" class="hidden mt-3 text-[11px] text-zinc-300 bg-surface-700 rounded-lg px-4 py-3 font-mono whitespace-pre-wrap max-h-64 overflow-y-auto"></pre>
@@ -138,22 +140,22 @@ export async function render(container) {
       const name = btn.dataset.name;
       const orig = btn.textContent;
       btn.disabled = true;
-      btn.textContent = 'Connecting...';
+      btn.textContent = t('common.connecting');
       btn.classList.add('opacity-60');
       try {
         const res = await api.post(`/api/mcp/servers/${encodeURIComponent(name)}/connect`, {});
         if (res.ok) {
-          btn.textContent = 'Connected!';
+          btn.textContent = t('mcp.connected');
           btn.classList.remove('bg-emerald-500/20', 'text-emerald-400');
           btn.classList.add('bg-emerald-500/30', 'text-emerald-300');
           setTimeout(() => render(container), 600);
         } else {
-          btn.textContent = 'Failed';
+          btn.textContent = t('mcp.failed');
           btn.classList.add('bg-red-500/20', 'text-red-400');
           setTimeout(() => { btn.textContent = orig; btn.disabled = false; btn.classList.remove('opacity-60', 'bg-red-500/20', 'text-red-400'); }, 2000);
         }
       } catch (e) {
-        btn.textContent = 'Error';
+        btn.textContent = t('common.error');
         setTimeout(() => { btn.textContent = orig; btn.disabled = false; btn.classList.remove('opacity-60'); }, 2000);
       }
     });
@@ -163,15 +165,15 @@ export async function render(container) {
     btn.addEventListener('click', async () => {
       const name = btn.dataset.name;
       btn.disabled = true;
-      btn.textContent = 'Disconnecting...';
+      btn.textContent = t('common.disconnecting');
       btn.classList.add('opacity-60');
       try {
         await api.post(`/api/mcp/servers/${encodeURIComponent(name)}/disconnect`, {});
-        btn.textContent = 'Disconnected';
+        btn.textContent = t('mcp.disconnected');
         setTimeout(() => render(container), 600);
       } catch (e) {
-        btn.textContent = 'Error';
-        setTimeout(() => { btn.textContent = 'Disconnect'; btn.disabled = false; btn.classList.remove('opacity-60'); }, 2000);
+        btn.textContent = t('common.error');
+        setTimeout(() => { btn.textContent = t('common.disconnect'); btn.disabled = false; btn.classList.remove('opacity-60'); }, 2000);
       }
     });
   });
@@ -185,15 +187,15 @@ export async function render(container) {
   container.querySelectorAll('.mcp-btn-remove').forEach(btn => {
     btn.addEventListener('click', async () => {
       const name = btn.dataset.name;
-      if (!confirm(`Remove MCP server "${name}"? This will disconnect it and delete its config.`)) return;
+      if (!confirm(t('mcp.removeConfirm', {name}))) return;
       btn.disabled = true;
-      btn.textContent = 'Removing...';
+      btn.textContent = t('mcp.removing');
       try {
         await api.post(`/api/mcp/servers/${encodeURIComponent(name)}/remove`, {});
         setTimeout(() => render(container), 400);
       } catch (e) {
-        btn.textContent = 'Error';
-        setTimeout(() => { btn.textContent = 'Remove'; btn.disabled = false; }, 2000);
+        btn.textContent = t('common.error');
+        setTimeout(() => { btn.textContent = t('common.remove'); btn.disabled = false; }, 2000);
       }
     });
   });
@@ -202,15 +204,15 @@ export async function render(container) {
   container.querySelector('#mcp-reconnect-all')?.addEventListener('click', async () => {
     const btn = container.querySelector('#mcp-reconnect-all');
     btn.disabled = true;
-    btn.textContent = 'Reconnecting...';
+    btn.textContent = t('mcp.reconnecting');
     btn.classList.add('opacity-60');
     try {
       await api.post('/api/mcp/reconnect', {});
-      btn.textContent = 'Done';
+      btn.textContent = t('common.done');
       setTimeout(() => render(container), 800);
     } catch (e) {
-      btn.textContent = 'Error';
-      setTimeout(() => { btn.textContent = 'Reconnect Dead'; btn.disabled = false; btn.classList.remove('opacity-60'); }, 2000);
+      btn.textContent = t('common.error');
+      setTimeout(() => { btn.textContent = t('mcp.reconnectDead'); btn.disabled = false; btn.classList.remove('opacity-60'); }, 2000);
     }
   });
 
@@ -222,10 +224,10 @@ export async function render(container) {
   // --- Refresh tools button ---
   container.querySelector('#mcp-refresh-tools')?.addEventListener('click', async () => {
     const btn = container.querySelector('#mcp-refresh-tools');
-    btn.textContent = 'Refreshing...';
+    btn.textContent = t('common.loading');
     btn.disabled = true;
     await _loadTools(container, api, u);
-    btn.textContent = 'Refresh';
+    btn.textContent = t('common.refresh');
     btn.disabled = false;
   });
 
@@ -235,15 +237,15 @@ export async function render(container) {
   if (testServer && testTool) {
     const populateTools = async () => {
       const serverName = testServer.value;
-      if (!serverName) { testTool.innerHTML = '<option value="">Select a server</option>'; return; }
+      if (!serverName) { testTool.innerHTML = `<option value="">${t('mcp.selectServer')}</option>`; return; }
       try {
         const res = await api.get(`/api/mcp/servers/${encodeURIComponent(serverName)}/tools`);
         const tools = res.tools || [];
         testTool.innerHTML = tools.length === 0
-          ? '<option value="">No tools available</option>'
-          : tools.map(t => `<option value="${u.escapeHtml(t.name)}">${u.escapeHtml(t.name)}</option>`).join('');
+          ? `<option value="">${t('mcp.noToolsAvailable')}</option>`
+          : tools.map(tl => `<option value="${u.escapeHtml(tl.name)}">${u.escapeHtml(tl.name)}</option>`).join('');
       } catch {
-        testTool.innerHTML = '<option value="">Error loading tools</option>';
+        testTool.innerHTML = `<option value="">${t('mcp.errorLoadingTools')}</option>`;
       }
     };
     testServer.addEventListener('change', populateTools);
@@ -260,7 +262,7 @@ export async function render(container) {
     const runBtn = container.querySelector('#mcp-test-run');
 
     if (!serverName || !toolName) {
-      statusEl.textContent = 'Select a server and tool first';
+      statusEl.textContent = t('mcp.selectServerAndTool');
       statusEl.className = 'text-xs text-red-400';
       return;
     }
@@ -269,13 +271,13 @@ export async function render(container) {
     try {
       args = JSON.parse(argsText);
     } catch (e) {
-      statusEl.textContent = `Invalid JSON: ${e.message}`;
+      statusEl.textContent = `${t('mcp.invalidJson')} ${e.message}`;
       statusEl.className = 'text-xs text-red-400';
       return;
     }
 
     runBtn.disabled = true;
-    runBtn.textContent = 'Running...';
+    runBtn.textContent = t('mcp.runningTool');
     statusEl.textContent = '';
     resultPre.classList.add('hidden');
     const startTime = performance.now();
@@ -290,23 +292,23 @@ export async function render(container) {
       resultPre.classList.remove('hidden');
 
       if (res.ok) {
-        statusEl.textContent = `Completed in ${elapsed}s`;
+        statusEl.textContent = t('mcp.completedIn', {t: elapsed});
         statusEl.className = 'text-xs text-emerald-400';
         resultPre.textContent = JSON.stringify(res.result, null, 2);
       } else {
-        statusEl.textContent = `Failed (${elapsed}s)`;
+        statusEl.textContent = t('mcp.failedIn', {t: elapsed});
         statusEl.className = 'text-xs text-red-400';
         resultPre.textContent = JSON.stringify(res, null, 2);
       }
     } catch (e) {
       resultPre.classList.remove('hidden');
-      statusEl.textContent = 'Error';
+      statusEl.textContent = t('common.error');
       statusEl.className = 'text-xs text-red-400';
       resultPre.textContent = e.message;
     }
 
     runBtn.disabled = false;
-    runBtn.textContent = 'Run Tool';
+    runBtn.textContent = t('mcp.runTool');
   });
 }
 
@@ -335,11 +337,11 @@ function _renderServerCard(server, u) {
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2">
             <span class="text-sm font-semibold text-white truncate">${u.escapeHtml(server.name)}</span>
-            ${!server.enabled ? '<span class="text-[9px] px-1.5 py-0.5 rounded-full bg-zinc-700 text-zinc-500">disabled</span>' : ''}
+            ${!server.enabled ? `<span class="text-[9px] px-1.5 py-0.5 rounded-full bg-zinc-700 text-zinc-500">${t('mcp.disabledBadge')}</span>` : ''}
           </div>
           <div class="flex items-center gap-1.5 mt-0.5">
             <span class="inline-block w-2 h-2 rounded-full ${connected ? 'bg-emerald-400' : 'bg-zinc-600'}"></span>
-            <span class="text-[11px] ${connected ? 'text-emerald-400' : 'text-zinc-500'}">${connected ? 'connected' : 'disconnected'}</span>
+            <span class="text-[11px] ${connected ? 'text-emerald-400' : 'text-zinc-500'}">${connected ? t('status.connected') : t('status.disconnected')}</span>
           </div>
         </div>
       </div>
@@ -350,22 +352,22 @@ function _renderServerCard(server, u) {
 
       ${connected ? `
       <div class="flex flex-wrap gap-x-4 gap-y-1 mb-3 text-[10px] text-zinc-500">
-        <span>uptime: <span class="text-zinc-400">${uptimeStr()}</span></span>
-        <span>requests: <span class="text-zinc-400">${server.request_count || 0}</span></span>
-        <span>idle: <span class="text-zinc-400">${server.idle_seconds != null ? Math.floor(server.idle_seconds) + 's' : '—'}</span></span>
+        <span>${t('mcp.uptime')}<span class="text-zinc-400">${uptimeStr()}</span></span>
+        <span>${t('mcp.requests')}<span class="text-zinc-400">${server.request_count || 0}</span></span>
+        <span>${t('mcp.idle')}<span class="text-zinc-400">${server.idle_seconds != null ? Math.floor(server.idle_seconds) + 's' : '—'}</span></span>
       </div>
       ` : ''}
 
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-2">
-          ${connected ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-ghost-500/20 text-ghost-400">${toolCount} tool${toolCount !== 1 ? 's' : ''}</span>` : ''}
+          ${connected ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-ghost-500/20 text-ghost-400">${t('mcp.toolCount', {n: toolCount})}</span>` : ''}
         </div>
         <div class="flex gap-2">
           ${connected
-            ? `<button class="mcp-btn-disconnect text-[10px] px-2 py-1 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20" data-name="${u.escapeHtml(server.name)}">Disconnect</button>`
-            : `<button class="mcp-btn-connect text-[10px] px-2 py-1 rounded bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30" data-name="${u.escapeHtml(server.name)}" ${!server.enabled ? 'disabled' : ''}>Connect</button>`
+            ? `<button class="mcp-btn-disconnect text-[10px] px-2 py-1 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20" data-name="${u.escapeHtml(server.name)}">${t('common.disconnect')}</button>`
+            : `<button class="mcp-btn-connect text-[10px] px-2 py-1 rounded bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30" data-name="${u.escapeHtml(server.name)}" ${!server.enabled ? 'disabled' : ''}>${t('common.connect')}</button>`
           }
-          <button class="mcp-btn-remove text-[10px] px-2 py-1 rounded bg-surface-600 text-zinc-500 hover:bg-red-500/20 hover:text-red-400" data-name="${u.escapeHtml(server.name)}" title="Remove server">Remove</button>
+          <button class="mcp-btn-remove text-[10px] px-2 py-1 rounded bg-surface-600 text-zinc-500 hover:bg-red-500/20 hover:text-red-400" data-name="${u.escapeHtml(server.name)}" title="${t('common.remove')}">${t('common.remove')}</button>
         </div>
       </div>
     </div>
@@ -377,14 +379,14 @@ async function _loadTools(container, api, u) {
   const toolsList = container.querySelector('#mcp-tools-list');
   if (!toolsList) return;
 
-  toolsList.innerHTML = '<div class="text-xs text-zinc-600 py-4 text-center animate-pulse">Loading tools...</div>';
+  toolsList.innerHTML = `<div class="text-xs text-zinc-600 py-4 text-center animate-pulse">${t('mcp.loadingTools')}</div>`;
 
   try {
     const res = await api.get('/api/mcp/tools');
     const tools = res.tools || [];
 
     if (tools.length === 0) {
-      toolsList.innerHTML = '<div class="text-xs text-zinc-600 py-4 text-center">No tools available from connected servers</div>';
+      toolsList.innerHTML = `<div class="text-xs text-zinc-600 py-4 text-center">${t('mcp.noToolsAvailable')}</div>`;
       return;
     }
 
@@ -402,14 +404,14 @@ async function _loadTools(container, api, u) {
           <div class="flex items-center gap-2 mb-3">
             <span class="inline-block w-2 h-2 rounded-full bg-emerald-400"></span>
             <span class="text-xs font-semibold text-white">${u.escapeHtml(srv)}</span>
-            <span class="text-[10px] text-zinc-500">${srvTools.length} tool${srvTools.length !== 1 ? 's' : ''}</span>
+            <span class="text-[10px] text-zinc-500">${t('mcp.toolCount', {n: srvTools.length})}</span>
           </div>
           <div class="space-y-2">
             ${srvTools.map(t => `
               <div class="mcp-tool-item group px-3 py-2 rounded-lg bg-surface-700/50 hover:bg-surface-700 transition-colors cursor-pointer" data-tool-name="${u.escapeHtml(t.name)}" data-tool-server="${u.escapeHtml(srv)}">
                 <div class="flex items-center justify-between">
                   <span class="text-[12px] font-medium text-ghost-400 font-mono">${u.escapeHtml(t.name)}</span>
-                  <button class="mcp-use-tool text-[9px] px-1.5 py-0.5 rounded bg-ghost-500/20 text-ghost-300 opacity-0 group-hover:opacity-100 transition-opacity" data-server="${u.escapeHtml(srv)}" data-tool="${u.escapeHtml(t.name)}">Use</button>
+                  <button class="mcp-use-tool text-[9px] px-1.5 py-0.5 rounded bg-ghost-500/20 text-ghost-300 opacity-0 group-hover:opacity-100 transition-opacity" data-server="${u.escapeHtml(srv)}" data-tool="${u.escapeHtml(t.name)}">${window.GhostI18n?.t('mcp.use') ?? 'Use'}</button>
                 </div>
                 ${t.description ? `<div class="text-[11px] text-zinc-500 mt-1 line-clamp-2">${u.escapeHtml(t.description)}</div>` : ''}
                 ${t.inputSchema?.properties ? `<div class="flex flex-wrap gap-1 mt-1.5">${Object.keys(t.inputSchema.properties).map(p =>
@@ -445,7 +447,7 @@ async function _loadTools(container, api, u) {
     });
 
   } catch (e) {
-    toolsList.innerHTML = `<div class="text-xs text-red-400 py-4 text-center">Error loading tools: ${u.escapeHtml(e.message)}</div>`;
+    toolsList.innerHTML = `<div class="text-xs text-red-400 py-4 text-center">${t('mcp.errorLoadingTools')} ${u.escapeHtml(e.message)}</div>`;
   }
 }
 
@@ -455,47 +457,47 @@ function _showAddServerModal(pageContainer, api, u) {
   overlay.className = 'fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4';
   overlay.innerHTML = `
     <div class="bg-surface-800 rounded-xl border border-surface-600 p-6 w-full max-w-lg shadow-2xl">
-      <h3 class="text-sm font-semibold text-white mb-4">Add MCP Server</h3>
+      <h3 class="text-sm font-semibold text-white mb-4">${t('mcp.addMcpServer')}</h3>
       <div class="space-y-3">
         <div>
-          <label class="block text-[11px] text-zinc-400 mb-1">Name <span class="text-red-400">*</span></label>
-          <input id="mcp-add-name" type="text" placeholder="e.g. filesystem, github, sqlite"
+          <label class="block text-[11px] text-zinc-400 mb-1">${t('mcp.serverName')}</label>
+          <input id="mcp-add-name" type="text" placeholder="${t('mcp.serverNamePlaceholder')}"
             class="w-full bg-surface-700 border border-surface-600 rounded px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 font-mono" />
-          <div class="text-[10px] text-zinc-600 mt-0.5">Alphanumeric, hyphens, underscores only</div>
+          <div class="text-[10px] text-zinc-600 mt-0.5">${t('mcp.nameConstraint')}</div>
         </div>
         <div>
-          <label class="block text-[11px] text-zinc-400 mb-1">Command <span class="text-red-400">*</span></label>
-          <input id="mcp-add-command" type="text" placeholder="e.g. npx, node, python, uvx"
+          <label class="block text-[11px] text-zinc-400 mb-1">${t('mcp.command')}</label>
+          <input id="mcp-add-command" type="text" placeholder="${t('mcp.commandPlaceholder')}"
             class="w-full bg-surface-700 border border-surface-600 rounded px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 font-mono" />
         </div>
         <div>
-          <label class="block text-[11px] text-zinc-400 mb-1">Arguments</label>
+          <label class="block text-[11px] text-zinc-400 mb-1">${t('mcp.arguments')}</label>
           <input id="mcp-add-args" type="text" placeholder="e.g. -y @modelcontextprotocol/server-filesystem /tmp"
             class="w-full bg-surface-700 border border-surface-600 rounded px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 font-mono" />
-          <div class="text-[10px] text-zinc-600 mt-0.5">Space-separated arguments</div>
+          <div class="text-[10px] text-zinc-600 mt-0.5">${t('mcp.argsDescription')}</div>
         </div>
         <div>
-          <label class="block text-[11px] text-zinc-400 mb-1">Environment Variables (JSON, optional)</label>
+          <label class="block text-[11px] text-zinc-400 mb-1">${t('mcp.envVars')}</label>
           <input id="mcp-add-env" type="text" placeholder='e.g. {"API_KEY": "sk-..."}'
             class="w-full bg-surface-700 border border-surface-600 rounded px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 font-mono" />
         </div>
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="block text-[11px] text-zinc-400 mb-1">Timeout (seconds)</label>
+            <label class="block text-[11px] text-zinc-400 mb-1">${t('mcp.timeoutSeconds')}</label>
             <input id="mcp-add-timeout" type="number" value="30" min="5" max="300"
               class="w-full bg-surface-700 border border-surface-600 rounded px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-zinc-500" />
           </div>
           <div class="flex items-end pb-1">
             <label class="flex items-center gap-2 cursor-pointer">
               <input id="mcp-add-enabled" type="checkbox" checked class="rounded bg-surface-700 border-surface-600 text-ghost-500 focus:ring-ghost-500" />
-              <span class="text-[11px] text-zinc-400">Enabled</span>
+              <span class="text-[11px] text-zinc-400">${t('common.enabled')}</span>
             </label>
           </div>
         </div>
       </div>
 
       <div class="mt-4 p-3 rounded-lg bg-surface-700/50 border border-surface-600/50">
-        <div class="text-[10px] text-zinc-500 mb-2">Popular MCP servers:</div>
+        <div class="text-[10px] text-zinc-500 mb-2">${t('mcp.popularServers')}</div>
         <div class="flex flex-wrap gap-1.5">
           ${[
             { label: 'Filesystem', cmd: 'npx', args: '-y @modelcontextprotocol/server-filesystem /tmp' },
@@ -510,8 +512,8 @@ function _showAddServerModal(pageContainer, api, u) {
       </div>
 
       <div class="flex justify-end gap-2 mt-5">
-        <button id="mcp-add-cancel" class="px-3 py-1.5 rounded bg-surface-600 text-zinc-400 text-sm hover:bg-surface-500">Cancel</button>
-        <button id="mcp-add-save" class="px-4 py-1.5 rounded bg-ghost-600 text-white text-sm hover:bg-ghost-500 font-medium">Add & Connect</button>
+        <button id="mcp-add-cancel" class="px-3 py-1.5 rounded bg-surface-600 text-zinc-400 text-sm hover:bg-surface-500">${t('common.cancel')}</button>
+        <button id="mcp-add-save" class="px-4 py-1.5 rounded bg-ghost-600 text-white text-sm hover:bg-ghost-500 font-medium">${t('mcp.addAndConnect')}</button>
       </div>
       <div id="mcp-add-result" class="text-xs mt-2 hidden"></div>
     </div>
@@ -545,14 +547,14 @@ function _showAddServerModal(pageContainer, api, u) {
 
     if (!name || !command) {
       resultDiv.classList.remove('hidden');
-      resultDiv.textContent = 'Name and command are required';
+      resultDiv.textContent = t('mcp.nameCommandRequired');
       resultDiv.className = 'text-xs text-red-400 mt-2';
       return;
     }
 
     if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
       resultDiv.classList.remove('hidden');
-      resultDiv.textContent = 'Name must be alphanumeric (hyphens/underscores allowed)';
+      resultDiv.textContent = t('mcp.nameAlphanumeric');
       resultDiv.className = 'text-xs text-red-400 mt-2';
       return;
     }
@@ -561,7 +563,7 @@ function _showAddServerModal(pageContainer, api, u) {
     if (envStr) {
       try { env = JSON.parse(envStr); } catch (e) {
         resultDiv.classList.remove('hidden');
-        resultDiv.textContent = `Invalid env JSON: ${e.message}`;
+        resultDiv.textContent = `${t('mcp.invalidEnvJson')} ${e.message}`;
         resultDiv.className = 'text-xs text-red-400 mt-2';
         return;
       }
@@ -570,7 +572,7 @@ function _showAddServerModal(pageContainer, api, u) {
     const args = argsStr ? argsStr.split(/\s+/) : [];
     const saveBtn = $('#mcp-add-save');
     saveBtn.disabled = true;
-    saveBtn.textContent = 'Adding...';
+    saveBtn.textContent = t('mcp.adding');
 
     try {
       const res = await api.post('/api/mcp/servers/add', {
@@ -580,22 +582,22 @@ function _showAddServerModal(pageContainer, api, u) {
       if (res.ok) {
         const connOk = res.connect_result?.ok;
         resultDiv.textContent = connOk
-          ? `Server "${name}" added and connected!`
-          : `Server "${name}" added (connect: ${res.connect_result?.error || 'pending'})`;
+          ? t('mcp.serverAdded', {name})
+          : t('mcp.serverAddedPending', {name});
         resultDiv.className = `text-xs ${connOk ? 'text-emerald-400' : 'text-amber-400'} mt-2`;
         setTimeout(() => { cleanup(); render(pageContainer); }, 800);
       } else {
-        resultDiv.textContent = res.error || 'Failed to add server';
+        resultDiv.textContent = res.error || t('mcp.failedAdd');
         resultDiv.className = 'text-xs text-red-400 mt-2';
         saveBtn.disabled = false;
-        saveBtn.textContent = 'Add & Connect';
+        saveBtn.textContent = t('mcp.addAndConnect');
       }
     } catch (e) {
       resultDiv.classList.remove('hidden');
-      resultDiv.textContent = `Error: ${e.message}`;
+      resultDiv.textContent = `${t('common.error')}: ${e.message}`;
       resultDiv.className = 'text-xs text-red-400 mt-2';
       saveBtn.disabled = false;
-      saveBtn.textContent = 'Add & Connect';
+      saveBtn.textContent = t('mcp.addAndConnect');
     }
   });
 }

@@ -1,5 +1,7 @@
 /** Channels page — Multi-channel messaging configuration, status, and testing */
 
+const t = (key, params) => window.GhostI18n?.t(key, params) ?? key;
+
 export async function render(container) {
   const { GhostAPI: api, GhostUtils: u } = window;
 
@@ -7,8 +9,8 @@ export async function render(container) {
   try {
     data = await api.get('/api/channels');
   } catch (e) {
-    container.innerHTML = `<h1 class="page-header">Channels</h1>
-      <div class="stat-card"><p class="text-zinc-500 text-sm">Channel system not available. Enable <code>enable_channels</code> in config.</p></div>`;
+    container.innerHTML = `<h1 class="page-header">${t('channels.title')}</h1>
+      <div class="stat-card"><p class="text-zinc-500 text-sm">${t('channels.notAvailable')}</p></div>`;
     return;
   }
 
@@ -42,42 +44,42 @@ export async function render(container) {
   const notConfigured = channels.filter(c => !c.configured || c.enabled === false);
 
   container.innerHTML = `
-    <h1 class="page-header">Channels</h1>
-    <p class="page-desc">Multi-channel messaging — send and receive messages via Telegram, Slack, Discord, ntfy, and more</p>
+    <h1 class="page-header">${t('channels.title')}</h1>
+    <p class="page-desc">${t('channels.subtitle')}</p>
 
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
       <div class="stat-card">
         <div class="text-2xl font-bold text-white">${configured.length}</div>
-        <div class="text-xs text-zinc-500">Configured</div>
+        <div class="text-xs text-zinc-500">${t('channels.configured')}</div>
       </div>
       <div class="stat-card">
         <div class="text-2xl font-bold text-white">${channels.length}</div>
-        <div class="text-xs text-zinc-500">Available</div>
+        <div class="text-xs text-zinc-500">${t('channels.available')}</div>
       </div>
       <div class="stat-card">
         <div class="text-2xl font-bold text-emerald-400">${preferred || 'none'}</div>
-        <div class="text-xs text-zinc-500">Preferred Channel</div>
+        <div class="text-xs text-zinc-500">${t('channels.preferredChannel')}</div>
       </div>
     </div>
 
     <div class="mb-6">
-      <h3 class="text-sm font-semibold text-white mb-3">Quick Send</h3>
+      <h3 class="text-sm font-semibold text-white mb-3">${t('channels.quickSend')}</h3>
       <div class="stat-card">
         <div class="flex gap-2">
-          <input id="ch-quick-msg" type="text" placeholder="Type a message to send..."
+          <input id="ch-quick-msg" type="text" placeholder="${t('channels.typePlaceholder')}"
             class="flex-1 bg-surface-700 border border-surface-600 rounded px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500" />
           <select id="ch-quick-channel" class="bg-surface-700 border border-surface-600 rounded px-2 py-2 text-sm text-zinc-300">
-            <option value="">Auto (preferred)</option>
+            <option value="">${t('channels.autoPreferred')}</option>
             ${configured.map(c => `<option value="${c.id}">${c.emoji} ${c.label}</option>`).join('')}
           </select>
-          <button id="ch-quick-send" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded font-medium">Send</button>
+          <button id="ch-quick-send" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded font-medium">${t('common.send')}</button>
         </div>
         <div id="ch-quick-result" class="text-xs text-zinc-500 mt-2 hidden"></div>
       </div>
     </div>
 
     ${configured.length > 0 ? `
-    <h3 class="text-sm font-semibold text-white mb-3">Configured Channels</h3>
+    <h3 class="text-sm font-semibold text-white mb-3">${t('channels.configuredChannels')}</h3>
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
       ${configured.map(ch => `
         <div class="stat-card channel-card" data-channel="${ch.id}">
@@ -86,7 +88,7 @@ export async function render(container) {
             <div class="flex-1">
               <div class="flex items-center gap-2">
                 <span class="text-sm font-semibold text-white">${u.escapeHtml(ch.label)}</span>
-                ${ch.id === preferred ? '<span class="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400">preferred</span>' : ''}
+                ${ch.id === preferred ? `<span class="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400">${t('channels.preferredBadge')}</span>` : ''}
               </div>
               <div class="flex items-center gap-1.5 mt-0.5">
                 ${statusDot(ch.status)}
@@ -94,14 +96,14 @@ export async function render(container) {
               </div>
             </div>
             <div class="flex gap-1">
-              <button class="btn-test text-[10px] px-2 py-1 rounded bg-blue-500/20 text-blue-400 hover:bg-blue-500/30" data-id="${ch.id}">Test</button>
-              <button class="btn-set-preferred text-[10px] px-2 py-1 rounded bg-zinc-700 text-zinc-400 hover:bg-zinc-600" data-id="${ch.id}">Set Default</button>
+              <button class="btn-test text-[10px] px-2 py-1 rounded bg-blue-500/20 text-blue-400 hover:bg-blue-500/30" data-id="${ch.id}">${t('common.test')}</button>
+              <button class="btn-set-preferred text-[10px] px-2 py-1 rounded bg-zinc-700 text-zinc-400 hover:bg-zinc-600" data-id="${ch.id}">${t('channels.setDefault')}</button>
             </div>
           </div>
           <div class="flex flex-wrap gap-1 mb-2">${capBadges(ch)}</div>
           <div class="flex gap-2">
-            <button class="btn-configure text-[10px] px-2 py-1 rounded bg-surface-600 text-zinc-400 hover:bg-surface-500" data-id="${ch.id}">Configure</button>
-            <button class="btn-disable text-[10px] px-2 py-1 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20" data-id="${ch.id}">Disable</button>
+            <button class="btn-configure text-[10px] px-2 py-1 rounded bg-surface-600 text-zinc-400 hover:bg-surface-500" data-id="${ch.id}">${t('common.configure')}</button>
+            <button class="btn-disable text-[10px] px-2 py-1 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20" data-id="${ch.id}">${t('common.disable')}</button>
           </div>
         </div>
       `).join('')}
@@ -109,7 +111,7 @@ export async function render(container) {
     ` : ''}
 
     ${notConfigured.length > 0 ? `
-    <h3 class="text-sm font-semibold text-zinc-400 mb-3">Available Channels</h3>
+    <h3 class="text-sm font-semibold text-zinc-400 mb-3">${t('channels.available')} ${t('channels.title')}</h3>
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
       ${notConfigured.map(ch => `
         <div class="stat-card opacity-70 hover:opacity-100 transition-opacity">
@@ -119,17 +121,17 @@ export async function render(container) {
               <span class="text-sm font-medium text-zinc-300">${u.escapeHtml(ch.label)}</span>
               <div class="flex flex-wrap gap-1 mt-1">${capBadges(ch)}</div>
             </div>
-            <button class="btn-configure text-[10px] px-2 py-1 rounded bg-surface-600 text-zinc-400 hover:bg-surface-500" data-id="${ch.id}">Setup</button>
+            <button class="btn-configure text-[10px] px-2 py-1 rounded bg-surface-600 text-zinc-400 hover:bg-surface-500" data-id="${ch.id}">${t('channels.setup')}</button>
           </div>
-          ${ch.docs_url ? `<a href="${ch.docs_url}" target="_blank" class="text-[10px] text-zinc-600 hover:text-zinc-400 mt-2 block">Docs &rarr;</a>` : ''}
+          ${ch.docs_url ? `<a href="${ch.docs_url}" target="_blank" class="text-[10px] text-zinc-600 hover:text-zinc-400 mt-2 block">${t('channels.docsLink')}</a>` : ''}
         </div>
       `).join('')}
     </div>
     ` : ''}
 
-    <h3 class="text-sm font-semibold text-zinc-400 mb-3">Recent Inbound Messages</h3>
+    <h3 class="text-sm font-semibold text-zinc-400 mb-3">${t('channels.recentInbound')}</h3>
     <div id="ch-inbound-log" class="stat-card">
-      <div class="text-xs text-zinc-600 py-4 text-center animate-pulse">Loading...</div>
+      <div class="text-xs text-zinc-600 py-4 text-center animate-pulse">${t('common.loading')}</div>
     </div>
   `;
 
@@ -143,27 +145,27 @@ export async function render(container) {
     const message = msgInput.value.trim();
     if (!message) return;
     sendBtn.disabled = true;
-    sendBtn.textContent = 'Sending...';
+    sendBtn.textContent = t('channels.sending');
     try {
       const res = await api.post('/api/channels/send', {
         message, channel: channelSelect.value || undefined,
       });
       resultDiv.classList.remove('hidden');
       if (res.ok) {
-        resultDiv.textContent = `Sent via ${res.channel}` + (res.message_id ? ` (${res.message_id})` : '');
+        resultDiv.textContent = t('channels.sentVia', { channel: res.channel }) + (res.message_id ? ` (${res.message_id})` : '');
         resultDiv.className = 'text-xs text-emerald-400 mt-2';
         msgInput.value = '';
       } else {
-        resultDiv.textContent = `Failed: ${res.error}`;
+        resultDiv.textContent = t('common.failedWithError', {error: res.error});
         resultDiv.className = 'text-xs text-red-400 mt-2';
       }
     } catch (e) {
       resultDiv.classList.remove('hidden');
-      resultDiv.textContent = `Error: ${e.message}`;
+      resultDiv.textContent = t('common.errorPrefix', {error: e.message});
       resultDiv.className = 'text-xs text-red-400 mt-2';
     }
     sendBtn.disabled = false;
-    sendBtn.textContent = 'Send';
+    sendBtn.textContent = t('common.send');
   });
 
   msgInput?.addEventListener('keydown', (e) => {
@@ -174,14 +176,14 @@ export async function render(container) {
   container.querySelectorAll('.btn-test').forEach(btn => {
     btn.addEventListener('click', async () => {
       const id = btn.dataset.id;
-      btn.textContent = 'Testing...';
+      btn.textContent = t('common.testing');
       try {
         const res = await api.post(`/api/channels/${id}/test`, {});
-        btn.textContent = res.ok ? 'Sent!' : 'Failed';
-        setTimeout(() => { btn.textContent = 'Test'; }, 2000);
+        btn.textContent = res.ok ? t('common.done') : t('common.error');
+        setTimeout(() => { btn.textContent = t('common.test'); }, 2000);
       } catch (e) {
-        btn.textContent = 'Error';
-        setTimeout(() => { btn.textContent = 'Test'; }, 2000);
+        btn.textContent = t('common.error');
+        setTimeout(() => { btn.textContent = t('common.test'); }, 2000);
       }
     });
   });
@@ -192,16 +194,16 @@ export async function render(container) {
       const id = btn.dataset.id;
       const origText = btn.textContent;
       btn.disabled = true;
-      btn.textContent = 'Setting...';
+      btn.textContent = t('channels.setting');
       btn.classList.add('opacity-60');
       try {
         await api.post('/api/channels/preferred', { channel: id });
-        btn.textContent = 'Done!';
+        btn.textContent = t('common.done');
         btn.classList.remove('bg-zinc-700', 'text-zinc-400');
         btn.classList.add('bg-emerald-500/20', 'text-emerald-400');
         setTimeout(() => render(container), 800);
       } catch (e) {
-        btn.textContent = 'Failed';
+        btn.textContent = t('common.error');
         btn.classList.remove('bg-zinc-700', 'text-zinc-400');
         btn.classList.add('bg-red-500/20', 'text-red-400');
         setTimeout(() => {
@@ -219,16 +221,16 @@ export async function render(container) {
     btn.addEventListener('click', async () => {
       const id = btn.dataset.id;
       btn.disabled = true;
-      btn.textContent = 'Disabling...';
+      btn.textContent = t('channels.disabling');
       btn.classList.add('opacity-60');
       try {
         await api.post(`/api/channels/${id}/disable`);
-        btn.textContent = 'Disabled';
+        btn.textContent = t('common.disabled');
         setTimeout(() => render(container), 600);
       } catch (e) {
-        btn.textContent = 'Error';
+        btn.textContent = t('common.error');
         setTimeout(() => {
-          btn.textContent = 'Disable';
+          btn.textContent = t('common.disable');
           btn.disabled = false;
           btn.classList.remove('opacity-60');
         }, 2000);
@@ -248,7 +250,7 @@ export async function render(container) {
         const schemaData = await api.get(`/api/channels/${id}/schema`);
         showConfigModal(id, schemaData.schema, schemaData.current, container);
       } catch (e) {
-        alert(`Failed to load schema: ${e.message}`);
+        alert(t('channels.failedLoadSchema', {error: e.message}));
       }
     });
   });
@@ -259,7 +261,7 @@ export async function render(container) {
     const entries = logData.entries || [];
     const logContainer = container.querySelector('#ch-inbound-log');
     if (entries.length === 0) {
-      logContainer.innerHTML = '<div class="text-xs text-zinc-600 py-4 text-center">No inbound messages yet</div>';
+      logContainer.innerHTML = `<div class="text-xs text-zinc-600 py-4 text-center">${t('channels.noInbound')}</div>`;
     } else {
       logContainer.innerHTML = entries.map(e => `
         <div class="flex items-center gap-2 py-2 border-b border-surface-600/30 last:border-0">
@@ -272,7 +274,7 @@ export async function render(container) {
     }
   } catch (_) {
     const logContainer = container.querySelector('#ch-inbound-log');
-    if (logContainer) logContainer.innerHTML = '<div class="text-xs text-zinc-600 py-4 text-center">Could not load inbound log</div>';
+    if (logContainer) logContainer.innerHTML = `<div class="text-xs text-zinc-600 py-4 text-center">${t('channels.couldNotLoadInbound')}</div>`;
   }
 }
 
@@ -290,22 +292,22 @@ function showWhatsAppModal(pageContainer) {
       <div class="flex items-center gap-3 mb-5">
         <span class="text-3xl">📱</span>
         <div>
-          <h3 class="text-sm font-semibold text-white">WhatsApp Setup</h3>
-          <p class="text-[11px] text-zinc-500">Link your WhatsApp account to Ghost</p>
+          <h3 class="text-sm font-semibold text-white">${t('channels.whatsappSetup')}</h3>
+          <p class="text-[11px] text-zinc-500">${t('channels.linkWhatsapp')}</p>
         </div>
       </div>
 
       <!-- Mode selector -->
       <div id="wa-mode-select" class="mb-5">
-        <label class="block text-[11px] text-zinc-400 mb-2">Connection mode</label>
+        <label class="block text-[11px] text-zinc-400 mb-2">${t('channels.connectionMode')}</label>
         <div class="grid grid-cols-2 gap-2">
           <button id="wa-mode-web" class="wa-mode-btn active px-3 py-2.5 rounded-lg border-2 border-emerald-500/50 bg-emerald-500/10 text-left transition-all">
-            <div class="text-xs font-semibold text-white">QR Code Scan</div>
-            <div class="text-[10px] text-zinc-400 mt-0.5">Personal WhatsApp</div>
+            <div class="text-xs font-semibold text-white">${t('channels.qrCodeScan')}</div>
+            <div class="text-[10px] text-zinc-400 mt-0.5">${t('channels.personalWhatsapp')}</div>
           </button>
           <button id="wa-mode-biz" class="wa-mode-btn px-3 py-2.5 rounded-lg border-2 border-surface-600 bg-surface-700 text-left transition-all hover:border-zinc-500">
-            <div class="text-xs font-semibold text-zinc-300">Business API</div>
-            <div class="text-[10px] text-zinc-500 mt-0.5">Cloud API + webhooks</div>
+            <div class="text-xs font-semibold text-zinc-300">${t('channels.businessApi')}</div>
+            <div class="text-[10px] text-zinc-500 mt-0.5">${t('channels.cloudApiWebhooks')}</div>
           </button>
         </div>
       </div>
@@ -320,9 +322,9 @@ function showWhatsAppModal(pageContainer) {
                   d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"/>
               </svg>
             </div>
-            <p class="text-xs text-zinc-400 mb-4">Click below to generate a QR code</p>
+            <p class="text-xs text-zinc-400 mb-4">${t('channels.clickToGenerateQr')}</p>
             <button id="wa-start-link" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-lg font-medium transition-colors">
-              Generate QR Code
+              ${t('channels.generateQr')}
             </button>
           </div>
           <div id="wa-qr-loading" class="text-center hidden">
@@ -332,14 +334,14 @@ function showWhatsAppModal(pageContainer) {
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
               </svg>
             </div>
-            <p class="text-xs text-zinc-400">Connecting to WhatsApp servers...</p>
+            <p class="text-xs text-zinc-400">${t('channels.connectingWa')}</p>
           </div>
           <div id="wa-qr-display" class="text-center hidden">
             <div class="bg-white p-3 rounded-xl inline-block mb-3 shadow-lg">
               <img id="wa-qr-img" src="" alt="WhatsApp QR Code" class="w-52 h-52" />
             </div>
-            <p class="text-xs text-zinc-300 font-medium">Scan with WhatsApp</p>
-            <p class="text-[10px] text-zinc-500 mt-1">Open WhatsApp &rarr; Settings &rarr; Linked Devices &rarr; Link a Device</p>
+            <p class="text-xs text-zinc-300 font-medium">${t('channels.scanWithWa')}</p>
+            <p class="text-[10px] text-zinc-500 mt-1">${t('channels.scanInstructions')}</p>
             <div id="wa-qr-timer" class="text-[10px] text-zinc-600 mt-2"></div>
           </div>
           <div id="wa-connected" class="text-center hidden">
@@ -348,8 +350,8 @@ function showWhatsAppModal(pageContainer) {
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
               </svg>
             </div>
-            <p class="text-sm font-semibold text-emerald-400">WhatsApp Linked!</p>
-            <p class="text-[11px] text-zinc-400 mt-1">Your WhatsApp account is connected to Ghost</p>
+            <p class="text-sm font-semibold text-emerald-400">${t('channels.waLinked')}</p>
+            <p class="text-[11px] text-zinc-400 mt-1">${t('channels.waConnected')}</p>
           </div>
           <div id="wa-error" class="text-center hidden">
             <div class="w-16 h-16 mx-auto mb-3 rounded-full bg-red-500/20 flex items-center justify-center">
@@ -357,10 +359,10 @@ function showWhatsAppModal(pageContainer) {
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
               </svg>
             </div>
-            <p id="wa-error-title" class="text-sm font-semibold text-red-400">Connection Failed</p>
+            <p id="wa-error-title" class="text-sm font-semibold text-red-400">${t('channels.connectionFailed')}</p>
             <p id="wa-error-msg" class="text-[11px] text-zinc-400 mt-1"></p>
             <pre id="wa-error-hint" class="hidden text-left text-[11px] text-amber-300/90 bg-surface-700 rounded-lg px-4 py-3 mt-3 mx-auto max-w-xs whitespace-pre-wrap font-mono"></pre>
-            <button id="wa-retry" class="mt-3 px-3 py-1.5 bg-surface-600 text-zinc-300 text-xs rounded hover:bg-surface-500">Retry</button>
+            <button id="wa-retry" class="mt-3 px-3 py-1.5 bg-surface-600 text-zinc-300 text-xs rounded hover:bg-surface-500">${t('common.retry')}</button>
           </div>
         </div>
 
@@ -370,22 +372,22 @@ function showWhatsAppModal(pageContainer) {
       <!-- Business mode panel (hidden by default) -->
       <div id="wa-biz-panel" class="hidden space-y-3">
         <div>
-          <label class="block text-[11px] text-zinc-400 mb-1">Access Token <span class="text-red-400">*</span></label>
-          <input id="wa-biz-token" type="password" placeholder="WhatsApp Business API access token"
+          <label class="block text-[11px] text-zinc-400 mb-1">${t('channels.accessToken')}</label>
+          <input id="wa-biz-token" type="password" placeholder="${t('channels.accessTokenDesc')}"
             class="w-full bg-surface-700 border border-surface-600 rounded px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500" />
         </div>
         <div>
-          <label class="block text-[11px] text-zinc-400 mb-1">Phone Number ID <span class="text-red-400">*</span></label>
-          <input id="wa-biz-phone" type="text" placeholder="Phone number ID from Meta Developer Portal"
+          <label class="block text-[11px] text-zinc-400 mb-1">${t('channels.phoneNumberId')}</label>
+          <input id="wa-biz-phone" type="text" placeholder="${t('channels.phoneNumberIdDesc')}"
             class="w-full bg-surface-700 border border-surface-600 rounded px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500" />
         </div>
         <div>
-          <label class="block text-[11px] text-zinc-400 mb-1">Default Recipient</label>
+          <label class="block text-[11px] text-zinc-400 mb-1">${t('channels.defaultRecipient')}</label>
           <input id="wa-biz-recipient" type="text" placeholder="+1234567890"
             class="w-full bg-surface-700 border border-surface-600 rounded px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500" />
         </div>
         <div>
-          <label class="block text-[11px] text-zinc-400 mb-1">Verify Token</label>
+          <label class="block text-[11px] text-zinc-400 mb-1">${t('channels.verifyToken')}</label>
           <input id="wa-biz-verify" type="password" placeholder="ghost_whatsapp_verify" value="ghost_whatsapp_verify"
             class="w-full bg-surface-700 border border-surface-600 rounded px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500" />
         </div>
@@ -393,10 +395,10 @@ function showWhatsAppModal(pageContainer) {
 
       <!-- Footer -->
       <div class="flex justify-between items-center mt-5 pt-4 border-t border-surface-600/50">
-        <button id="wa-logout" class="text-[10px] px-2 py-1 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20 hidden">Unlink WhatsApp</button>
+        <button id="wa-logout" class="text-[10px] px-2 py-1 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20 hidden">${t('channels.unlinkWhatsapp')}</button>
         <div class="flex gap-2 ml-auto">
-          <button id="wa-cancel" class="px-3 py-1.5 rounded bg-surface-600 text-zinc-400 text-sm hover:bg-surface-500">Cancel</button>
-          <button id="wa-save-biz" class="px-3 py-1.5 rounded bg-emerald-600 text-white text-sm hover:bg-emerald-500 font-medium hidden">Save</button>
+          <button id="wa-cancel" class="px-3 py-1.5 rounded bg-surface-600 text-zinc-400 text-sm hover:bg-surface-500">${t('common.cancel')}</button>
+          <button id="wa-save-biz" class="px-3 py-1.5 rounded bg-emerald-600 text-white text-sm hover:bg-emerald-500 font-medium hidden">${t('common.save')}</button>
         </div>
       </div>
       <div id="wa-result" class="text-xs mt-2 hidden"></div>
@@ -469,14 +471,14 @@ function showWhatsAppModal(pageContainer) {
       }
       if (!res.ok) {
         if (res.error_type === 'missing_dependency') {
-          $('#wa-error-title').textContent = 'Missing Dependency';
-          $('#wa-error-msg').textContent = 'WhatsApp Web mode requires a system library to be installed:';
+          $('#wa-error-title').textContent = t('channels.missingDependency');
+          $('#wa-error-msg').textContent = t('channels.missingDependencyDesc');
           const hint = $('#wa-error-hint');
           hint.textContent = res.error || 'Run: pip install neonize';
           hint.classList.remove('hidden');
           $('#wa-retry').classList.add('hidden');
         } else {
-          $('#wa-error-msg').textContent = res.error || 'Failed to generate QR code';
+          $('#wa-error-msg').textContent = res.error || t('channels.qrFailed');
         }
         showView('wa-error');
         return;
@@ -495,7 +497,7 @@ function showWhatsAppModal(pageContainer) {
     pollTimer = setInterval(async () => {
       elapsed += 2;
       const timerEl = $('#wa-qr-timer');
-      if (timerEl) timerEl.textContent = `Waiting for scan... (${elapsed}s)`;
+      if (timerEl) timerEl.textContent = `${t('channels.waitingForScan')} (${elapsed}s)`;
       try {
         const status = await api.get('/api/channels/whatsapp/qr/status');
         if (status.connected) {
@@ -511,7 +513,7 @@ function showWhatsAppModal(pageContainer) {
         }
         if (status.status === 'error') {
           stopPolling();
-          $('#wa-error-msg').textContent = status.error || 'Connection error';
+          $('#wa-error-msg').textContent = status.error || t('channels.connectionError');
           showView('wa-error');
           return;
         }
@@ -535,7 +537,7 @@ function showWhatsAppModal(pageContainer) {
     } catch (e) {
       const r = $('#wa-result');
       r.classList.remove('hidden');
-      r.textContent = `Logout error: ${e.message}`;
+      r.textContent = t('channels.logoutError', {error: e.message});
       r.className = 'text-xs text-red-400 mt-2';
     }
   });
@@ -549,7 +551,7 @@ function showWhatsAppModal(pageContainer) {
     if (!token || !phone) {
       const r = $('#wa-result');
       r.classList.remove('hidden');
-      r.textContent = 'Access token and phone number ID are required';
+      r.textContent = t('channels.requiredFields');
       r.className = 'text-xs text-red-400 mt-2';
       return;
     }
@@ -562,17 +564,17 @@ function showWhatsAppModal(pageContainer) {
       const r = $('#wa-result');
       r.classList.remove('hidden');
       if (res.ok) {
-        r.textContent = 'WhatsApp Business API configured!';
+        r.textContent = t('channels.waBusinessConfigured');
         r.className = 'text-xs text-emerald-400 mt-2';
         setTimeout(() => { cleanup(); render(pageContainer); }, 1000);
       } else {
-        r.textContent = res.message || 'Configuration issue';
+        r.textContent = res.message || t('channels.configIssue');
         r.className = 'text-xs text-amber-400 mt-2';
       }
     } catch (e) {
       const r = $('#wa-result');
       r.classList.remove('hidden');
-      r.textContent = `Error: ${e.message}`;
+      r.textContent = t('common.errorPrefix', {error: e.message});
       r.className = 'text-xs text-red-400 mt-2';
     }
   });
@@ -599,7 +601,7 @@ function showConfigModal(channelId, schema, current, pageContainer) {
 
   const fields = Object.entries(schema || {});
   if (fields.length === 0) {
-    alert('No configuration schema available for this channel.');
+    alert(t('channels.noSchema'));
     return;
   }
 
@@ -607,7 +609,7 @@ function showConfigModal(channelId, schema, current, pageContainer) {
   overlay.className = 'fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4';
   overlay.innerHTML = `
     <div class="bg-surface-800 rounded-xl border border-surface-600 p-6 w-full max-w-lg shadow-2xl">
-      <h3 class="text-sm font-semibold text-white mb-4">Configure ${channelId}</h3>
+      <h3 class="text-sm font-semibold text-white mb-4">${t('channels.configureChannel', { channel: channelId })}</h3>
       <div class="space-y-3" id="config-fields">
         ${fields.map(([key, spec]) => `
           <div>
@@ -621,8 +623,8 @@ function showConfigModal(channelId, schema, current, pageContainer) {
         `).join('')}
       </div>
       <div class="flex justify-end gap-2 mt-4">
-        <button id="cfg-cancel" class="px-3 py-1.5 rounded bg-surface-600 text-zinc-400 text-sm hover:bg-surface-500">Cancel</button>
-        <button id="cfg-save" class="px-3 py-1.5 rounded bg-emerald-600 text-white text-sm hover:bg-emerald-500 font-medium">Save</button>
+        <button id="cfg-cancel" class="px-3 py-1.5 rounded bg-surface-600 text-zinc-400 text-sm hover:bg-surface-500">${t('common.cancel')}</button>
+        <button id="cfg-save" class="px-3 py-1.5 rounded bg-emerald-600 text-white text-sm hover:bg-emerald-500 font-medium">${t('common.save')}</button>
       </div>
       <div id="cfg-result" class="text-xs mt-2 hidden"></div>
     </div>
@@ -644,16 +646,16 @@ function showConfigModal(channelId, schema, current, pageContainer) {
       const res = await api.post(`/api/channels/${channelId}/configure`, configData);
       resultDiv.classList.remove('hidden');
       if (res.ok) {
-        resultDiv.textContent = 'Configured successfully!';
+        resultDiv.textContent = t('channels.configuredSuccess');
         resultDiv.className = 'text-xs text-emerald-400 mt-2';
         setTimeout(() => { overlay.remove(); render(pageContainer); }, 1000);
       } else {
-        resultDiv.textContent = res.message || 'Configuration issue';
+        resultDiv.textContent = res.message || t('channels.configIssue');
         resultDiv.className = 'text-xs text-amber-400 mt-2';
       }
     } catch (e) {
       resultDiv.classList.remove('hidden');
-      resultDiv.textContent = `Error: ${e.message}`;
+      resultDiv.textContent = t('common.errorPrefix', {error: e.message});
       resultDiv.className = 'text-xs text-red-400 mt-2';
     }
   });

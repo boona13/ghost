@@ -2,6 +2,7 @@
 
 const api = window.GhostAPI;
 const u = window.GhostUtils;
+const t = (key, params) => window.GhostI18n?.t(key, params) ?? key;
 
 let _currentTab = 'history';
 let _expandedDiff = null;
@@ -21,13 +22,13 @@ export async function render(container) {
     <div class="space-y-6">
       <div class="flex items-center justify-between">
         <div>
-          <h1 class="text-2xl font-bold text-white">Self-Evolution</h1>
-          <p class="text-sm text-zinc-500 mt-1">Ghost can modify its own codebase, test changes, and deploy them safely</p>
+          <h1 class="text-2xl font-bold text-white">${t('evolve.title')}</h1>
+          <p class="text-sm text-zinc-500 mt-1">${t('evolve.subtitle')}</p>
         </div>
         <div class="flex items-center gap-2">
           <span class="px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider"
                 style="background:rgba(139,92,246,0.15);color:#a78bfa;border:1px solid rgba(139,92,246,0.3)">
-            ${stats.total_evolutions} evolution${stats.total_evolutions !== 1 ? 's' : ''}
+            ${stats.total_evolutions} ${t('evolve.evolutions')}
           </span>
         </div>
       </div>
@@ -35,23 +36,23 @@ export async function render(container) {
       <!-- Stats cards -->
       <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
         <div class="stat-card text-center">
-          <div class="text-xs text-zinc-500">Total</div>
+          <div class="text-xs text-zinc-500">${t('common.total')}</div>
           <div class="text-lg font-bold text-white">${stats.total_evolutions}</div>
         </div>
         <div class="stat-card text-center">
-          <div class="text-xs text-zinc-500">Deployed</div>
+          <div class="text-xs text-zinc-500">${t('evolve.deployed')}</div>
           <div class="text-lg font-bold text-emerald-400">${stats.deployed}</div>
         </div>
         <div class="stat-card text-center">
-          <div class="text-xs text-zinc-500">Rolled Back</div>
+          <div class="text-xs text-zinc-500">${t('evolve.rolledBack')}</div>
           <div class="text-lg font-bold text-amber-400">${stats.rolled_back}</div>
         </div>
         <div class="stat-card text-center">
-          <div class="text-xs text-zinc-500">Pending</div>
+          <div class="text-xs text-zinc-500">${t('common.pending')}</div>
           <div class="text-lg font-bold ${pending.length > 0 ? 'text-rose-400' : 'text-zinc-400'}">${stats.pending_approvals}</div>
         </div>
         <div class="stat-card text-center">
-          <div class="text-xs text-zinc-500">Backups</div>
+          <div class="text-xs text-zinc-500">${t('evolve.backups')}</div>
           <div class="text-lg font-bold text-blue-400">${stats.backups}</div>
         </div>
       </div>
@@ -59,11 +60,11 @@ export async function render(container) {
       <!-- Tabs -->
       <div class="flex gap-1 border-b border-surface-600/50 pb-0">
         <button data-tab="history" class="evo-tab ${_currentTab === 'history' ? 'active' : ''}">
-          History
+          ${t('evolve.history')}
           <span class="ml-1 text-[10px] opacity-60">${history.length}</span>
         </button>
         <button data-tab="pending" class="evo-tab ${_currentTab === 'pending' ? 'active' : ''}">
-          Pending Approvals
+          ${t('evolve.pendingApprovals')}
           ${pending.length > 0 ? '<span class="ml-1 w-4 h-4 rounded-full bg-rose-500 text-white text-[10px] inline-flex items-center justify-center">' + pending.length + '</span>' : ''}
         </button>
       </div>
@@ -101,8 +102,8 @@ function renderHistory(el, history) {
     el.innerHTML = `
       <div class="text-center py-16">
         <div class="text-4xl mb-3 opacity-30">🧬</div>
-        <div class="text-zinc-500">No evolutions yet</div>
-        <div class="text-xs text-zinc-600 mt-1">Ask Ghost to modify its own code to see evolution history here</div>
+        <div class="text-zinc-500">${t('evolve.noEvolutions')}</div>
+        <div class="text-xs text-zinc-600 mt-1">${t('evolve.noEvoDesc')}</div>
       </div>
     `;
     return;
@@ -131,9 +132,9 @@ function renderHistory(el, history) {
   el.querySelectorAll('[data-action="rollback"]').forEach(btn => {
     btn.addEventListener('click', async () => {
       const evoId = btn.dataset.evoId;
-      if (!confirm('Rollback to the backup from evolution ' + evoId + '? Ghost will restart.')) return;
+      if (!confirm(t('evolve.rollbackConfirm', { id: evoId }))) return;
       const res = await api.post('/api/evolve/rollback/' + evoId);
-      u.toast(res.ok ? 'Rollback initiated' : ('Rollback failed: ' + res.message), res.ok ? 'success' : 'error');
+      u.toast(res.ok ? t('evolve.rollbackInitiated') : (t('evolve.rollbackFailed') + ' ' + res.message), res.ok ? 'success' : 'error');
     });
   });
 }
@@ -141,20 +142,20 @@ function renderHistory(el, history) {
 
 function renderEvolutionCard(evo) {
   const statusConfig = {
-    deployed: { color: 'emerald', icon: '✓', label: 'Deployed' },
-    rolled_back: { color: 'amber', icon: '↩', label: 'Rolled Back' },
-    tested_pass: { color: 'blue', icon: '✓', label: 'Tests Passed' },
-    tested_fail: { color: 'red', icon: '✗', label: 'Tests Failed' },
-    planned: { color: 'purple', icon: '◎', label: 'Planned' },
-    pending_approval: { color: 'amber', icon: '⏳', label: 'Awaiting Approval' },
-    approved: { color: 'blue', icon: '✓', label: 'Approved' },
+    deployed: { color: 'emerald', icon: '✓', label: t('evolve.deployed') },
+    rolled_back: { color: 'amber', icon: '↩', label: t('evolve.rolledBack') },
+    tested_pass: { color: 'blue', icon: '✓', label: t('evolve.testsPassed') },
+    tested_fail: { color: 'red', icon: '✗', label: t('evolve.testsFailed') },
+    planned: { color: 'purple', icon: '◎', label: t('evolve.planned') },
+    pending_approval: { color: 'amber', icon: '⏳', label: t('evolve.awaitingApproval') },
+    approved: { color: 'blue', icon: '✓', label: t('evolve.approvedStatus') },
   };
 
   const sc = statusConfig[evo.status] || { color: 'zinc', icon: '?', label: evo.status };
   const time = evo.created_at ? u.formatTime(evo.created_at) : '—';
   const changes = evo.changes || [];
   const files = changes.map(c => c.file).filter(Boolean);
-  const fileList = files.length ? files.join(', ') : (evo.files || []).join(', ') || 'no files';
+  const fileList = files.length ? files.join(', ') : (evo.files || []).join(', ') || t('evolve.noFiles');
 
   return `
     <div class="evo-card rounded-lg p-4" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06)">
@@ -167,12 +168,12 @@ function renderEvolutionCard(evo) {
             </span>
             <span class="text-[10px] font-mono text-zinc-600">${evo.id}</span>
           </div>
-          <div class="text-sm text-white font-medium">${u.escapeHtml(evo.description || 'No description')}</div>
+          <div class="text-sm text-white font-medium">${u.escapeHtml(evo.description || t('common.noDescription'))}</div>
           <div class="flex items-center gap-3 mt-1.5 text-[11px] text-zinc-500">
             <span>${time}</span>
             <span class="text-zinc-700">|</span>
-            <span title="${u.escapeHtml(fileList)}">${files.length || (evo.files || []).length} file${(files.length || (evo.files || []).length) !== 1 ? 's' : ''}</span>
-            ${evo.level ? '<span class="text-zinc-700">|</span><span>Level ' + evo.level + '</span>' : ''}
+            <span title="${u.escapeHtml(fileList)}">${t('evolve.fileCount', {n: files.length || (evo.files || []).length})}</span>
+            ${evo.level ? '<span class="text-zinc-700">|</span><span>' + t('evolve.level', {n: evo.level}) + '</span>' : ''}
           </div>
         </div>
         <div class="flex items-center gap-1.5 flex-shrink-0">
@@ -194,7 +195,7 @@ async function showDiff(btn, evoId) {
   const changes = data.changes || [];
 
   const diffHtml = changes.map(change => {
-    const lines = (change.diff || '(no diff)').split('\n');
+    const lines = (change.diff || t('evolve.noDiff')).split('\n');
     const rendered = lines.map(line => {
       let cls = 'text-zinc-500';
       if (line.startsWith('+') && !line.startsWith('+++')) cls = 'text-emerald-400';
@@ -215,7 +216,7 @@ async function showDiff(btn, evoId) {
 
   const diffContainer = document.createElement('div');
   diffContainer.className = 'diff-container mt-3 pt-3 border-t border-surface-600/30';
-  diffContainer.innerHTML = diffHtml || '<div class="text-zinc-600 text-sm">No diff available</div>';
+  diffContainer.innerHTML = diffHtml || '<div class="text-zinc-600 text-sm">' + t('evolve.noDiff') + '</div>';
   card.appendChild(diffContainer);
 }
 
@@ -225,8 +226,8 @@ function renderPending(el, pending, container) {
     el.innerHTML = `
       <div class="text-center py-16">
         <div class="text-4xl mb-3 opacity-30">✓</div>
-        <div class="text-zinc-500">No pending approvals</div>
-        <div class="text-xs text-zinc-600 mt-1">High-level evolutions (core code changes) require your approval before they take effect</div>
+        <div class="text-zinc-500">${t('evolve.noPendingApprovals')}</div>
+        <div class="text-xs text-zinc-600 mt-1">${t('evolve.pendingApprovalsDesc')}</div>
       </div>
     `;
     return;
@@ -240,23 +241,23 @@ function renderPending(el, pending, container) {
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2 mb-1">
                 <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                  Awaiting Approval
+                  ${t('evolve.awaitingApproval')}
                 </span>
                 <span class="text-[10px] font-mono text-zinc-600">${evo.id}</span>
-                ${evo.level ? '<span class="text-[10px] text-zinc-600">Level ' + evo.level + '</span>' : ''}
+                ${evo.level ? '<span class="text-[10px] text-zinc-600">' + t('evolve.level', {n: evo.level}) + '</span>' : ''}
               </div>
-              <div class="text-sm text-white font-medium">${u.escapeHtml(evo.description || 'No description')}</div>
+              <div class="text-sm text-white font-medium">${u.escapeHtml(evo.description || t('common.noDescription'))}</div>
               <div class="text-[11px] text-zinc-500 mt-1">
-                Files: ${(evo.files || []).map(f => '<code class="text-zinc-400">' + u.escapeHtml(f) + '</code>').join(', ') || 'none listed'}
+                ${t('evolve.files')} ${(evo.files || []).map(f => '<code class="text-zinc-400">' + u.escapeHtml(f) + '</code>').join(', ') || t('evolve.noneListed')}
               </div>
               <div class="text-[11px] text-zinc-600 mt-0.5">${evo.created_at ? u.formatTime(evo.created_at) : ''}</div>
             </div>
             <div class="flex items-center gap-2 flex-shrink-0">
               <button data-action="approve" data-evo-id="${evo.id}" class="px-3 py-1.5 rounded text-xs font-medium bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 transition-colors">
-                Approve
+                ${t('common.approve')}
               </button>
               <button data-action="reject" data-evo-id="${evo.id}" class="px-3 py-1.5 rounded text-xs font-medium bg-rose-500/20 text-rose-400 border border-rose-500/30 hover:bg-rose-500/30 transition-colors">
-                Reject
+                ${t('common.reject')}
               </button>
             </div>
           </div>
@@ -269,7 +270,7 @@ function renderPending(el, pending, container) {
     btn.addEventListener('click', async () => {
       const evoId = btn.dataset.evoId;
       const res = await api.post('/api/evolve/approve/' + evoId);
-      u.toast(res.ok ? 'Evolution approved' : 'Failed: ' + res.message, res.ok ? 'success' : 'error');
+      u.toast(res.ok ? t('evolve.evoApproved') : t('common.failedWithError', {error: res.message}), res.ok ? 'success' : 'error');
       if (res.ok) render(container);
     });
   });
@@ -277,9 +278,9 @@ function renderPending(el, pending, container) {
   el.querySelectorAll('[data-action="reject"]').forEach(btn => {
     btn.addEventListener('click', async () => {
       const evoId = btn.dataset.evoId;
-      if (!confirm('Reject evolution ' + evoId + '? The backup will be removed.')) return;
+      if (!confirm(t('evolve.rejectConfirm', { id: evoId }))) return;
       const res = await api.post('/api/evolve/reject/' + evoId);
-      u.toast(res.ok ? 'Evolution rejected' : 'Failed: ' + res.message, res.ok ? 'success' : 'error');
+      u.toast(res.ok ? t('evolve.evoRejected') : t('common.failedWithError', {error: res.message}), res.ok ? 'success' : 'error');
       if (res.ok) render(container);
     });
   });

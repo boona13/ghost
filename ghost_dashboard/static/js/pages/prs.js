@@ -1,5 +1,7 @@
 /** Pull Requests page — PR list, detail view with diff and discussion thread */
 
+const t = (key, params) => window.GhostI18n?.t(key, params) ?? key;
+
 export async function render(container) {
   const { GhostAPI: api, GhostUtils: u } = window;
 
@@ -20,35 +22,35 @@ export async function render(container) {
 
   container.innerHTML = `
     <div class="flex items-center justify-between mb-1">
-      <h1 class="page-header">Pull Requests</h1>
+      <h1 class="page-header">${t('prs.title')}</h1>
     </div>
-    <p class="page-desc">Code review history — Ghost's Developer and Reviewer personas discuss every change before it ships.</p>
+    <p class="page-desc">${t('prs.subtitle')}</p>
 
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
       <div class="stat-card">
-        <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Total</div>
+        <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">${t('common.total')}</div>
         <div class="text-xl font-bold text-ghost-400">${stats.total || 0}</div>
       </div>
       <div class="stat-card">
-        <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Merged</div>
+        <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">${t('prs.merged')}</div>
         <div class="text-xl font-bold text-emerald-400">${stats.merged || 0}</div>
       </div>
       <div class="stat-card">
-        <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Open</div>
+        <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">${t('prs.open')}</div>
         <div class="text-xl font-bold text-amber-400">${(stats.open || 0) + (stats.reviewing || 0)}</div>
       </div>
       <div class="stat-card">
-        <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Blocked / Rejected</div>
+        <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">${t('prs.blocked')}</div>
         <div class="text-xl font-bold text-red-400">${(stats.blocked || 0) + (stats.rejected || 0)}</div>
       </div>
     </div>
 
     <div class="border-b border-surface-600/30 mb-4">
       <nav class="flex gap-1" id="pr-tabs">
-        ${prTab('all', 'All', stats.total || 0, true)}
-        ${prTab('merged', 'Merged', stats.merged || 0)}
-        ${prTab('open', 'Open', (stats.open || 0) + (stats.reviewing || 0))}
-        ${prTab('blocked', 'Blocked', (stats.blocked || 0) + (stats.rejected || 0))}
+        ${prTab('all', t('common.all'), stats.total || 0, true)}
+        ${prTab('merged', t('prs.filterMerged'), stats.merged || 0)}
+        ${prTab('open', t('prs.filterOpen'), (stats.open || 0) + (stats.reviewing || 0))}
+        ${prTab('blocked', t('prs.filterBlocked'), (stats.blocked || 0) + (stats.rejected || 0))}
       </nav>
     </div>
 
@@ -94,7 +96,7 @@ function renderPrList(prs, filter, u) {
   });
 
   if (!filtered.length) {
-    return '<div class="text-center py-12 text-xs text-zinc-600">No pull requests found</div>';
+    return `<div class="text-center py-12 text-xs text-zinc-600">${t('prs.noPrs')}</div>`;
   }
 
   return filtered.map(pr => {
@@ -109,8 +111,8 @@ function renderPrList(prs, filter, u) {
               <span class="badge ${badge}">${pr.status}${verdict}</span>
             </div>
             <div class="flex items-center gap-3 text-[10px] text-zinc-600">
-              <span>${pr.files_changed?.length || 0} file(s)</span>
-              <span>${pr.review_rounds}/${pr.max_rounds} rounds</span>
+              <span>${t('prs.fileCount', {n: pr.files_changed?.length || 0})}</span>
+              <span>${pr.review_rounds}/${pr.max_rounds} ${t('prs.roundsLabel')}</span>
               <span>${pr.branch || ''}</span>
               <span>${new Date(pr.created_at).toLocaleDateString()}</span>
             </div>
@@ -132,7 +134,7 @@ function prStatusBadge(status) {
 async function renderPrDetail(container, prId, api, u) {
   const res = await api.get(`/api/prs/${prId}`);
   if (!res.ok) {
-    container.innerHTML = '<div class="text-center py-12 text-xs text-red-400">PR not found</div>';
+    container.innerHTML = `<div class="text-center py-12 text-xs text-red-400">${t('prs.prNotFound')}</div>`;
     return;
   }
 
@@ -149,7 +151,7 @@ async function renderPrDetail(container, prId, api, u) {
     <div class="rounded-lg px-4 py-3 mb-4 ${vc.bg}">
       <span class="text-xs font-bold ${vc.text}">${pr.verdict.toUpperCase()}</span>
       ${pr.blocked_reason ? `<span class="text-[10px] text-zinc-400 ml-2">— ${u.escapeHtml(pr.blocked_reason)}</span>` : ''}
-      ${pr.merged_at ? `<span class="text-[10px] text-zinc-500 ml-2">Merged ${new Date(pr.merged_at).toLocaleString()}</span>` : ''}
+      ${pr.merged_at ? `<span class="text-[10px] text-zinc-500 ml-2">${t('prs.mergedAt')}${new Date(pr.merged_at).toLocaleString()}</span>` : ''}
     </div>` : '';
 
   const canOverride = pr.status !== 'merged';
@@ -157,7 +159,7 @@ async function renderPrDetail(container, prId, api, u) {
   container.innerHTML = `
     <button id="pr-back" class="btn btn-ghost btn-sm mb-4 flex items-center gap-1">
       <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
-      Back to PRs
+      ${t('prs.backToPrs')}
     </button>
 
     <div class="stat-card mb-4">
@@ -167,10 +169,10 @@ async function renderPrDetail(container, prId, api, u) {
       </div>
       <p class="text-xs text-zinc-400 mb-2">${u.escapeHtml(pr.description || '')}</p>
       <div class="flex items-center gap-4 text-[10px] text-zinc-500">
-        <span>Branch: <span class="text-zinc-300">${pr.branch}</span></span>
-        <span>Rounds: ${pr.review_rounds}/${pr.max_rounds}</span>
-        <span>Files: ${pr.files_changed?.join(', ') || 'none'}</span>
-        ${pr.feature_id ? `<span>Feature: <span class="text-ghost-400">${pr.feature_id}</span></span>` : ''}
+        <span>${t('prs.branchLabel')}<span class="text-zinc-300">${pr.branch}</span></span>
+        <span>${t('prs.roundsCount')}${pr.review_rounds}/${pr.max_rounds}</span>
+        <span>${t('prs.filesLabel')}${pr.files_changed?.join(', ') || t('prs.none')}</span>
+        ${pr.feature_id ? `<span>${t('prs.featureLabel')}<span class="text-ghost-400">${pr.feature_id}</span></span>` : ''}
       </div>
     </div>
 
@@ -178,19 +180,19 @@ async function renderPrDetail(container, prId, api, u) {
 
     ${canOverride ? `
     <div class="flex gap-2 mb-4">
-      ${pr.status !== 'approved' && pr.status !== 'blocked' ? `<button id="pr-force-approve" class="btn btn-primary btn-sm" style="padding:0.3rem 0.6rem;font-size:10px">Force Approve + Merge</button>` : ''}
-      ${pr.status !== 'blocked' ? `<button id="pr-force-block" class="btn btn-danger btn-sm" style="padding:0.3rem 0.6rem;font-size:10px">Force Block</button>` : ''}
-      <button id="pr-force-merge" class="btn btn-ghost btn-sm" style="padding:0.3rem 0.6rem;font-size:10px;border:1px solid rgba(139,92,246,0.3)">Force Merge</button>
+      ${pr.status !== 'approved' && pr.status !== 'blocked' ? `<button id="pr-force-approve" class="btn btn-primary btn-sm" style="padding:0.3rem 0.6rem;font-size:10px">${t('prs.forceApprove')}</button>` : ''}
+      ${pr.status !== 'blocked' ? `<button id="pr-force-block" class="btn btn-danger btn-sm" style="padding:0.3rem 0.6rem;font-size:10px">${t('prs.forceBlock')}</button>` : ''}
+      <button id="pr-force-merge" class="btn btn-ghost btn-sm" style="padding:0.3rem 0.6rem;font-size:10px;border:1px solid rgba(139,92,246,0.3)">${t('prs.forceMerge')}</button>
     </div>` : ''}
 
     <details class="mb-4" open>
-      <summary class="text-xs font-semibold text-white cursor-pointer mb-2">Diff</summary>
+      <summary class="text-xs font-semibold text-white cursor-pointer mb-2">${t('prs.diff')}</summary>
       <div class="stat-card overflow-x-auto">
         <pre class="text-[11px] leading-relaxed font-mono whitespace-pre-wrap" id="pr-diff"></pre>
       </div>
     </details>
 
-    <h3 class="text-xs font-semibold text-white mb-3">Discussion (${pr.discussions?.length || 0} messages)</h3>
+    <h3 class="text-xs font-semibold text-white mb-3">${t('prs.discussion', {n: pr.discussions?.length || 0})}</h3>
     <div id="pr-discussion" class="space-y-3 mb-6">
       ${renderDiscussion(pr.discussions || [], u)}
     </div>
@@ -209,27 +211,27 @@ async function renderPrDetail(container, prId, api, u) {
 
   if (canOverride) {
     document.getElementById('pr-force-approve')?.addEventListener('click', async () => {
-      if (!confirm('Force-approve and merge this PR? Ghost will restart.')) return;
+      if (!confirm(t('prs.forceApproveConfirm'))) return;
       const r = await api.post(`/api/prs/${prId}/force-approve`);
-      if (r.ok) u.toast(r.message || 'Force approved and merged');
-      else u.toast(r.error || 'Approve failed', 'error');
+      if (r.ok) u.toast(r.message || t('prs.forceApproved'));
+      else u.toast(r.error || t('prs.approveFailed'), 'error');
       await renderPrDetail(container, prId, api, u);
     });
 
     document.getElementById('pr-force-block')?.addEventListener('click', async () => {
-      const reason = prompt('Block reason:');
+      const reason = prompt(t('prs.blockReason'));
       if (!reason) return;
       const r = await api.post(`/api/prs/${prId}/force-block`, { reason });
-      if (r.ok) u.toast(r.message || 'PR blocked');
-      else u.toast(r.error || 'Block failed', 'error');
+      if (r.ok) u.toast(r.message || t('prs.prBlocked'));
+      else u.toast(r.error || t('prs.blockFailed'), 'error');
       await renderPrDetail(container, prId, api, u);
     });
 
     document.getElementById('pr-force-merge')?.addEventListener('click', async () => {
-      if (!confirm('Force-merge this PR without review? Ghost will restart.')) return;
+      if (!confirm(t('prs.forceMergeConfirm'))) return;
       const r = await api.post(`/api/prs/${prId}/force-merge`);
-      if (r.ok) u.toast(r.message || 'Force merged');
-      else u.toast(r.error || 'Merge failed', 'error');
+      if (r.ok) u.toast(r.message || t('prs.forceMerged'));
+      else u.toast(r.error || t('prs.mergeFailed'), 'error');
       await renderPrDetail(container, prId, api, u);
     });
   }
@@ -237,7 +239,7 @@ async function renderPrDetail(container, prId, api, u) {
 
 function renderDiscussion(discussions, u) {
   if (!discussions.length) {
-    return '<div class="text-center py-8 text-xs text-zinc-600">No discussion yet</div>';
+    return `<div class="text-center py-8 text-xs text-zinc-600">${t('prs.noDiscussion')}</div>`;
   }
 
   let currentRound = 0;
@@ -246,17 +248,17 @@ function renderDiscussion(discussions, u) {
   for (const d of discussions) {
     if (d.round !== currentRound) {
       currentRound = d.round;
-      parts.push(`<div class="text-[10px] font-semibold text-zinc-600 uppercase tracking-wide pt-2">Round ${currentRound}</div>`);
+      parts.push(`<div class="text-[10px] font-semibold text-zinc-600 uppercase tracking-wide pt-2">${t('prs.round', {n: currentRound})}</div>`);
     }
 
     const isReviewer = d.role === 'reviewer';
-    const accent = isReviewer ? 'border-l-red-500/50' : 'border-l-ghost-500/50';
-    const label = isReviewer ? 'Reviewer' : 'Developer';
+    const accentColor = isReviewer ? 'rgba(239,68,68,0.5)' : 'rgba(139,92,246,0.5)';
+    const label = isReviewer ? t('prs.reviewer') : t('prs.developer');
     const labelColor = isReviewer ? 'text-red-400' : 'text-ghost-400';
     const bg = isReviewer ? 'bg-red-500/5' : 'bg-ghost-500/5';
 
     parts.push(`
-      <div class="stat-card border-l-2 ${accent} ${bg}" style="border-color:inherit">
+      <div class="stat-card ${bg}" style="border-inline-start: 2px solid ${accentColor}">
         <div class="flex items-center gap-2 mb-2">
           <span class="text-[10px] font-bold ${labelColor}">${label}</span>
           <span class="text-[10px] text-zinc-600">${new Date(d.timestamp).toLocaleString()}</span>

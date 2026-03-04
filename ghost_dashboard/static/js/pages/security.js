@@ -1,5 +1,7 @@
 /** Security Audit page — AI-driven autonomous audit via evolve loop */
 
+const t = (key, params) => window.GhostI18n?.t(key, params) ?? key;
+
 let _auditEventSource = null;
 
 export async function render(container) {
@@ -8,12 +10,12 @@ export async function render(container) {
   if (_auditEventSource) { _auditEventSource.close(); _auditEventSource = null; }
 
   container.innerHTML = `
-    <h1 class="page-header">Security Audit</h1>
-    <p class="page-desc">Ghost's AI performs a comprehensive security audit — scanning, investigating, and autonomously fixing issues through the evolve loop with rollback checkpoints</p>
+    <h1 class="page-header">${t('security.title')}</h1>
+    <p class="page-desc">${t('security.subtitle')}</p>
 
     <div class="flex gap-3 mb-6 flex-wrap">
-      <button id="btn-ai-audit" class="btn btn-primary">Run Security Audit</button>
-      <button id="btn-stop-audit" class="btn btn-danger" style="display:none">Stop Audit</button>
+      <button id="btn-ai-audit" class="btn btn-primary">${t('security.runAudit')}</button>
+      <button id="btn-stop-audit" class="btn btn-danger" style="display:none">${t('security.stopAudit')}</button>
     </div>
 
     <div id="audit-status" class="mb-4"></div>
@@ -26,7 +28,7 @@ export async function render(container) {
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
             d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/>
         </svg>
-        API Key Posture
+        ${t('security.keyPosture')}
       </h2>
       <div id="key-posture-content">
         <div class="flex items-center gap-2 text-sm text-zinc-500 animate-pulse">
@@ -34,7 +36,7 @@ export async function render(container) {
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
           </svg>
-          <span>Analyzing key posture...</span>
+          <span>${t('security.analyzingPosture')}</span>
         </div>
       </div>
     </div>
@@ -64,13 +66,13 @@ export async function render(container) {
           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
           <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
         </svg>
-        <span>Ghost AI is auditing your system...</span>
+        <span>${t('security.aiAuditing')}</span>
       </div>`;
 
     try {
       const resp = await api.post('/api/security/ai-audit', {});
       if (!resp.ok) {
-        statusEl.innerHTML = `<div class="text-red-400 text-xs">${u.escapeHtml(resp.error || 'Failed to start audit')}</div>`;
+        statusEl.innerHTML = `<div class="text-red-400 text-xs">${u.escapeHtml(resp.error || t('security.failedToStart'))}</div>`;
         resetButtons();
         return;
       }
@@ -101,14 +103,14 @@ export async function render(container) {
               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
               <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
             </svg>
-            <span>Step ${stepCount}: ${u.escapeHtml(step.tool)}...</span>
+            <span>${t('security.stepN', {n: stepCount})}: ${u.escapeHtml(step.tool)}...</span>
           </div>`;
 
         const stepDiv = document.createElement('div');
         stepDiv.className = 'security-step';
         stepDiv.innerHTML = `
           <div class="flex items-center gap-2 text-[11px]">
-            <span class="text-ghost-400 font-mono font-medium">Step ${step.step}</span>
+            <span class="text-ghost-400 font-mono font-medium">${t('security.stepN', {n: step.step})}</span>
             <span class="text-zinc-400 font-mono">${u.escapeHtml(step.tool)}</span>
             <span class="text-zinc-600 ml-auto">${new Date(step.time).toLocaleTimeString()}</span>
           </div>
@@ -128,8 +130,8 @@ export async function render(container) {
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
             </svg>
-            <span>AI Audit complete</span>
-            <span class="text-zinc-500 text-xs">${data.tools_used?.length || 0} tools used, ${data.elapsed}s</span>
+            <span>${t('security.auditComplete')}</span>
+            <span class="text-zinc-500 text-xs">${data.tools_used?.length || 0} ${t('security.toolsUsed')}, ${data.elapsed}s</span>
           </div>`;
 
         if (stepCount > 0) {
@@ -143,9 +145,9 @@ export async function render(container) {
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                   d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
               </svg>
-              <span class="text-sm font-semibold text-white">Ghost AI Security Report</span>
+              <span class="text-sm font-semibold text-white">${t('security.aiReport')}</span>
             </div>
-            <div class="prose-ghost text-xs leading-relaxed">${formatMarkdown(data.result || '(No report generated)')}</div>
+            <div class="prose-ghost text-xs leading-relaxed">${formatMarkdown(data.result || t('security.noReport'))}</div>
           </div>`;
 
         resetButtons();
@@ -156,7 +158,7 @@ export async function render(container) {
         _auditEventSource = null;
         activeSessionId = null;
 
-        statusEl.innerHTML = `<div class="text-red-400 text-xs">Audit error: ${u.escapeHtml(data.error)}</div>`;
+        statusEl.innerHTML = `<div class="text-red-400 text-xs">${t('security.auditError')} ${u.escapeHtml(data.error)}</div>`;
         resetButtons();
       }
     };
@@ -165,7 +167,7 @@ export async function render(container) {
       _auditEventSource.close();
       _auditEventSource = null;
       activeSessionId = null;
-      statusEl.innerHTML = '<div class="text-amber-400 text-xs">Connection lost during audit</div>';
+      statusEl.innerHTML = `<div class="text-amber-400 text-xs">${t('security.connectionLost')}</div>`;
       resetButtons();
     };
   }
@@ -175,7 +177,7 @@ export async function render(container) {
     stopBtn.disabled = true;
     try {
       await api.post(`/api/security/ai-audit/stop/${activeSessionId}`);
-      statusEl.innerHTML = '<div class="text-zinc-400 text-xs">Audit stopped</div>';
+      statusEl.innerHTML = `<div class="text-zinc-400 text-xs">${t('security.auditStopped')}</div>`;
     } catch { /* will resolve */ }
     resetButtons();
   });
@@ -191,12 +193,12 @@ export async function render(container) {
     try {
       const resp = await api.post('/api/security/key-posture', {});
       if (!resp.ok) {
-        postureEl.innerHTML = `<div class="text-red-400 text-xs">Failed to load key posture: ${u.escapeHtml(resp.error || 'Unknown error')}</div>`;
+        postureEl.innerHTML = `<div class="text-red-400 text-xs">${t('security.failedToLoadPosture')} ${u.escapeHtml(resp.error || t('common.unknownError'))}</div>`;
         return;
       }
       renderKeyPosture(resp);
     } catch (err) {
-      postureEl.innerHTML = `<div class="text-red-400 text-xs">Error: ${u.escapeHtml(err.message)}</div>`;
+      postureEl.innerHTML = `<div class="text-red-400 text-xs">${u.escapeHtml(err.message)}</div>`;
     }
   }
 
@@ -213,9 +215,9 @@ export async function render(container) {
     const badgeClass = posture === 'green' ? 'badge-green' : 
                        posture === 'yellow' ? 'badge-yellow' : 
                        posture === 'red' ? 'badge-red' : 'badge-zinc';
-    const badgeText = posture === 'green' ? 'Healthy' : 
-                      posture === 'yellow' ? 'Warning' : 
-                      posture === 'red' ? 'Critical' : 'Unknown';
+    const badgeText = posture === 'green' ? t('security.healthy') : 
+                      posture === 'yellow' ? t('security.warning') : 
+                      posture === 'red' ? t('security.critical') : t('security.unknown');
 
     let findingsHtml = '';
     if (findings && findings.length > 0) {
@@ -240,7 +242,7 @@ export async function render(container) {
               <span class="text-xs font-medium text-white">${u.escapeHtml(f.title)}</span>
             </div>
             <div class="text-[11px] text-zinc-400 mb-1">${u.escapeHtml(f.check_id)}</div>
-            ${f.remediation ? `<div class="text-[11px] text-zinc-500"><span class="text-ghost-400">Remediation:</span> ${u.escapeHtml(f.remediation)}</div>` : ''}
+            ${f.remediation ? `<div class="text-[11px] text-zinc-500"><span class="text-ghost-400">${t('security.remediation')}</span> ${u.escapeHtml(f.remediation)}</div>` : ''}
             ${evidenceHtml}
           </div>
         `;
@@ -250,7 +252,7 @@ export async function render(container) {
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
         </svg>
-        No key posture issues detected
+        ${t('security.noIssues')}
       </div>`;
     }
 
@@ -259,12 +261,12 @@ export async function render(container) {
         <div class="flex items-center justify-between mb-3">
           <div class="flex items-center gap-3">
             <span class="badge ${badgeClass}">${badgeText}</span>
-            <span class="text-xs text-zinc-400">${finding_count} finding${finding_count !== 1 ? 's' : ''}</span>
+            <span class="text-xs text-zinc-400">${finding_count} ${t('security.findings')}</span>
           </div>
           <div class="flex gap-2 text-[10px]">
-            ${summary.critical > 0 ? `<span class="text-red-400">${summary.critical} critical</span>` : ''}
-            ${summary.warning > 0 ? `<span class="text-amber-400">${summary.warning} warning</span>` : ''}
-            ${summary.info > 0 ? `<span class="text-blue-400">${summary.info} info</span>` : ''}
+            ${summary.critical > 0 ? `<span class="text-red-400">${summary.critical} ${t('security.critical')}</span>` : ''}
+            ${summary.warning > 0 ? `<span class="text-amber-400">${summary.warning} ${t('security.warning')}</span>` : ''}
+            ${summary.info > 0 ? `<span class="text-blue-400">${summary.info} ${t('security.info')}</span>` : ''}
           </div>
         </div>
         <div class="findings-list">
@@ -287,7 +289,7 @@ function collapseSteps(container, count) {
       <svg class="w-3 h-3 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
       </svg>
-      <span>${count} audit steps</span>
+      <span>${count} ${t('security.auditSteps')}</span>
     </button>
   `;
   container.insertBefore(summary, container.firstChild);

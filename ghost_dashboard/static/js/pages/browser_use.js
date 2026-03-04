@@ -1,5 +1,7 @@
 /** Browser-Use page — AI-native browser automation dashboard */
 
+const t = (key, params) => window.GhostI18n?.t(key, params) ?? key;
+
 export async function render(container) {
   const { GhostAPI: api } = window;
 
@@ -8,12 +10,12 @@ export async function render(container) {
   let isAvailable = false;
 
   container.innerHTML = `
-    <div class="page-header">Browser-Use Automation</div>
-    <div class="page-desc">AI-native browser automation using browser-use library</div>
+    <div class="page-header">${t('browser_use.title')}</div>
+    <div class="page-desc">${t('browser_use.subtitle')}</div>
     
     <div id="bu-status-banner" class="stat-card mb-4 hidden">
       <div class="text-zinc-300 text-sm">
-        browser-use not installed. Install with: <code class="bg-surface-700 px-2 py-1 rounded">pip install browser-use</code>
+        ${t('browser_use.notInstalled')}
       </div>
     </div>
 
@@ -21,11 +23,11 @@ export async function render(container) {
       <div class="lg:col-span-1">
         <div class="stat-card">
           <div class="flex items-center justify-between mb-4">
-            <h3 class="text-white font-medium">Sessions</h3>
-            <button id="bu-new-session" class="btn btn-primary btn-sm">New</button>
+            <h3 class="text-white font-medium">${t('browser_use.sessions')}</h3>
+            <button id="bu-new-session" class="btn btn-primary btn-sm">${t('browser_use.newSession')}</button>
           </div>
           <div id="bu-sessions-list" class="space-y-2 max-h-96 overflow-y-auto">
-            <div class="text-zinc-500 text-sm text-center py-4">Loading...</div>
+            <div class="text-zinc-500 text-sm text-center py-4">${t('common.loading')}</div>
           </div>
         </div>
       </div>
@@ -34,79 +36,79 @@ export async function render(container) {
         <div id="bu-detail-panel" class="stat-card hidden">
           <div class="flex items-center justify-between mb-4">
             <div>
-              <h3 class="text-white font-medium" id="bu-detail-title">Session</h3>
+              <h3 class="text-white font-medium" id="bu-detail-title">${t('browser_use.session')}</h3>
               <p class="text-zinc-500 text-xs" id="bu-detail-url"></p>
             </div>
             <div class="flex gap-2">
               <span id="bu-detail-status" class="badge badge-zinc">idle</span>
-              <button id="bu-close-session" class="btn btn-danger btn-sm">Close</button>
+              <button id="bu-close-session" class="btn btn-danger btn-sm">${t('browser_use.close')}</button>
             </div>
           </div>
 
           <div class="mb-4">
-            <label class="form-label">Task Description</label>
+            <label class="form-label">${t('browser_use.taskDescription')}</label>
             <textarea id="bu-task-input" class="form-input w-full" rows="3" 
-              placeholder="Describe what the AI should do..."></textarea>
+              placeholder="${t('browser_use.taskPlaceholder')}"></textarea>
             <div class="flex items-center gap-3 mt-2">
               <label class="flex items-center gap-2 text-zinc-400 text-xs">
-                <input type="checkbox" id="bu-headless" checked> Headless
+                <input type="checkbox" id="bu-headless" checked> ${t('browser_use.headless')}
               </label>
-              <button id="bu-run-task" class="btn btn-primary btn-sm ml-auto">Run Task</button>
+              <button id="bu-run-task" class="btn btn-primary btn-sm ml-auto">${t('browser_use.runTask')}</button>
             </div>
           </div>
 
           <div class="flex gap-2 mb-4">
-            <button id="bu-get-html" class="btn btn-secondary btn-sm">Get HTML</button>
-            <button id="bu-screenshot" class="btn btn-secondary btn-sm">Screenshot</button>
-            <button id="bu-navigate-btn" class="btn btn-secondary btn-sm">Navigate</button>
+            <button id="bu-get-html" class="btn btn-secondary btn-sm">${t('browser_use.getHtml')}</button>
+            <button id="bu-screenshot" class="btn btn-secondary btn-sm">${t('browser_use.screenshot')}</button>
+            <button id="bu-navigate-btn" class="btn btn-secondary btn-sm">${t('browser_use.navigate')}</button>
           </div>
 
           <div id="bu-output-panel" class="hidden">
             <div class="flex items-center justify-between mb-2">
-              <span class="text-zinc-400 text-xs">Output</span>
-              <button id="bu-clear-output" class="text-zinc-500 hover:text-zinc-300 text-xs">Clear</button>
+              <span class="text-zinc-400 text-xs">${t('browser_use.output')}</span>
+              <button id="bu-clear-output" class="text-zinc-500 hover:text-zinc-300 text-xs">${t('common.clear')}</button>
             </div>
             <pre id="bu-output-content" class="bg-surface-800 p-3 rounded text-xs text-zinc-300 overflow-auto max-h-64 font-mono"></pre>
           </div>
 
           <div class="mt-4">
-            <h4 class="text-zinc-400 text-xs mb-2">History</h4>
+            <h4 class="text-zinc-400 text-xs mb-2">${t('browser_use.historyLabel')}</h4>
             <div id="bu-history-list" class="space-y-2 max-h-48 overflow-y-auto">
-              <div class="text-zinc-600 text-xs">No history yet</div>
+              <div class="text-zinc-600 text-xs">${t('browser_use.noHistory')}</div>
             </div>
           </div>
         </div>
 
         <div id="bu-empty-state" class="stat-card text-center py-12">
-          <p class="text-zinc-500">Select a session or create a new one</p>
+          <p class="text-zinc-500">${t('browser_use.selectOrCreate')}</p>
         </div>
       </div>
     </div>
 
     <div id="bu-new-modal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50">
       <div class="stat-card w-full max-w-md">
-        <h3 class="text-white font-medium mb-4">New Browser Session</h3>
+        <h3 class="text-white font-medium mb-4">${t('browser_use.newBrowserSession')}</h3>
         <div class="mb-4">
-          <label class="form-label">Starting URL</label>
+          <label class="form-label">${t('browser_use.startingUrl')}</label>
           <input type="text" id="bu-new-url" class="form-input w-full" value="https://google.com">
         </div>
         <div class="flex justify-end gap-2">
-          <button id="bu-cancel-new" class="btn btn-ghost">Cancel</button>
-          <button id="bu-confirm-new" class="btn btn-primary">Create</button>
+          <button id="bu-cancel-new" class="btn btn-ghost">${t('common.cancel')}</button>
+          <button id="bu-confirm-new" class="btn btn-primary">${t('common.create')}</button>
         </div>
       </div>
     </div>
 
     <div id="bu-navigate-modal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50">
       <div class="stat-card w-full max-w-md">
-        <h3 class="text-white font-medium mb-4">Navigate to URL</h3>
+        <h3 class="text-white font-medium mb-4">${t('browser_use.navigateToUrl')}</h3>
         <div class="mb-4">
-          <label class="form-label">URL</label>
-          <input type="text" id="bu-navigate-url" class="form-input w-full" placeholder="https://example.com">
+          <label class="form-label">${t('browser_use.urlLabel')}</label>
+          <input type="text" id="bu-navigate-url" class="form-input w-full" placeholder="${t('browser_use.urlPlaceholder')}">
         </div>
         <div class="flex justify-end gap-2">
-          <button id="bu-cancel-navigate" class="btn btn-ghost">Cancel</button>
-          <button id="bu-confirm-navigate" class="btn btn-primary">Navigate</button>
+          <button id="bu-cancel-navigate" class="btn btn-ghost">${t('common.cancel')}</button>
+          <button id="bu-confirm-navigate" class="btn btn-primary">${t('browser_use.navigate')}</button>
         </div>
       </div>
     </div>
@@ -159,13 +161,13 @@ export async function render(container) {
       if (!isAvailable) statusBanner.classList.remove('hidden');
       renderSessionsList();
     } catch (err) {
-      sessionsList.innerHTML = `<div class="text-red-400 text-sm text-center">Failed to load</div>`;
+      sessionsList.innerHTML = `<div class="text-red-400 text-sm text-center">${t('browser_use.failedToLoad')}</div>`;
     }
   }
 
   function renderSessionsList() {
     if (sessions.length === 0) {
-      sessionsList.innerHTML = `<div class="text-zinc-500 text-sm text-center py-4">No active sessions</div>`;
+      sessionsList.innerHTML = `<div class="text-zinc-500 text-sm text-center py-4">${t('browser_use.noActiveSessions')}</div>`;
       return;
     }
     sessionsList.innerHTML = sessions.map(s => `
@@ -215,13 +217,13 @@ export async function render(container) {
         <div class="bg-surface-700 p-2 rounded text-xs">
           <div class="flex justify-between">
             <span class="text-zinc-400">${new Date(h.timestamp).toLocaleTimeString()}</span>
-            <span class="badge ${h.success ? 'badge-green' : 'badge-red'}">${h.success ? 'OK' : 'ERR'}</span>
+            <span class="badge ${h.success ? 'badge-green' : 'badge-red'}">${h.success ? t('common.ok') : t('common.err')}</span>
           </div>
           <div class="text-zinc-300 truncate">${h.task}</div>
         </div>
       `).join('');
     } else {
-      historyList.innerHTML = '<div class="text-zinc-600 text-xs">No history yet</div>';
+      historyList.innerHTML = `<div class="text-zinc-600 text-xs">${t('browser_use.noHistory')}</div>`;
     }
   }
 
@@ -247,27 +249,27 @@ export async function render(container) {
         selectSession(data.session_id);
       }
     } catch (err) {
-      alert('Failed to create session: ' + err);
+      alert(t('browser_use.failedCreate') + ' ' + err);
     }
   });
 
   container.querySelector('#bu-close-session').addEventListener('click', async () => {
     if (!selectedSession) return;
-    if (!confirm(`Close session ${selectedSession.id}?`)) return;
+    if (!confirm(t('browser_use.closeConfirm', {id: selectedSession.id}))) return;
     try {
       await api.del(`/api/browser-use/sessions/${selectedSession.id}`);
       selectedSession = null;
       await loadSessions();
       renderSessionDetail();
     } catch (err) {
-      alert('Failed to close session: ' + err);
+      alert(t('browser_use.failedClose') + ' ' + err);
     }
   });
 
   container.querySelector('#bu-run-task').addEventListener('click', async () => {
     if (!selectedSession) return;
     const task = taskInput.value.trim();
-    if (!task) return alert('Enter a task description');
+    if (!task) return alert(t('browser_use.enterTask'));
     detailStatus.textContent = 'running';
     detailStatus.className = 'badge badge-blue';
     try {
@@ -313,7 +315,7 @@ export async function render(container) {
 
   container.querySelector('#bu-confirm-navigate').addEventListener('click', async () => {
     const url = container.querySelector('#bu-navigate-url').value.trim();
-    if (!url) return alert('Enter a URL');
+    if (!url) return alert(t('browser_use.navigateToUrl'));
     try {
       const data = await api.post(`/api/browser-use/sessions/${selectedSession.id}/navigate`, { url });
       showOutput(data);

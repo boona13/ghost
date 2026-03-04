@@ -1,5 +1,7 @@
 /** Models page — multi-provider model browser with fallback chain */
 
+const t = (key, params) => window.GhostI18n?.t(key, params) ?? key;
+
 let allModels = [];
 let providerData = [];
 let activeTab = 'openrouter';
@@ -39,8 +41,8 @@ export async function render(container) {
   const tiers = [...new Set(allModels.map(m => m.tier).filter(Boolean))].sort();
 
   container.innerHTML = `
-    <h1 class="page-header">Models</h1>
-    <p class="page-desc">Multi-provider model management</p>
+    <h1 class="page-header">${t('models.title')}</h1>
+    <p class="page-desc">${t('models.subtitle')}</p>
 
     <!-- Provider Status Bar -->
     <div class="flex flex-wrap gap-2 mb-4" id="provider-tabs">
@@ -51,7 +53,7 @@ export async function render(container) {
           ${p.id === primaryProvider ? '<span class="text-[9px] text-ghost-400 ml-1">★</span>' : ''}
         </button>
       `).join('')}
-      <button class="provider-tab add-provider-tab" id="btn-add-provider">+ Add</button>
+      <button class="provider-tab add-provider-tab" id="btn-add-provider">${t('models.addBtn')}</button>
     </div>
 
     <!-- Current Model & Chain -->
@@ -59,12 +61,12 @@ export async function render(container) {
       <div class="stat-card">
         <div class="flex items-center justify-between">
           <div>
-            <div class="text-xs text-zinc-500 mb-1">Active Model</div>
+            <div class="text-xs text-zinc-500 mb-1">${t('models.activeModel')}</div>
             <div class="text-lg font-bold text-white font-mono">${u.escapeHtml(chain.active || current)}</div>
           </div>
           <div class="text-right">
-            <div class="text-xs text-zinc-500 mb-1">API Key</div>
-            <div class="text-sm ${modelsResp.has_api_key ? 'text-emerald-400' : 'text-red-400'}">${modelsResp.has_api_key ? '● Connected' : '○ Not set'}</div>
+            <div class="text-xs text-zinc-500 mb-1">${t('models.apiKey')}</div>
+            <div class="text-sm ${modelsResp.has_api_key ? 'text-emerald-400' : 'text-red-400'}">${modelsResp.has_api_key ? t('models.connectedDot') : t('models.notSet')}</div>
             ${modelsResp.api_key_masked ? `<div class="text-[10px] text-zinc-600 font-mono">${modelsResp.api_key_masked}</div>` : ''}
           </div>
         </div>
@@ -73,10 +75,10 @@ export async function render(container) {
       <div class="stat-card">
         <div class="chain-card-header">
           <div>
-            <div class="text-xs text-zinc-500 mb-0.5">LLM Provider Fallback Order</div>
-            <div class="text-[10px] text-zinc-600">Drag to reorder. First configured provider is tried first. ★ = primary.</div>
+            <div class="text-xs text-zinc-500 mb-0.5">${t('models.fallbackOrder')}</div>
+            <div class="text-[10px] text-zinc-600">${t('models.fallbackOrderDesc')}</div>
           </div>
-          <button class="btn btn-primary btn-sm" id="btn-save-provider-order" style="font-size:10px;padding:3px 10px">Save Order</button>
+          <button class="btn btn-primary btn-sm" id="btn-save-provider-order" style="font-size:10px;padding:3px 10px">${t('models.saveOrder')}</button>
         </div>
         <div class="chain-list" id="llm-provider-chain">
           ${(() => {
@@ -98,12 +100,12 @@ export async function render(container) {
                 '<span class="grip">⠿</span>' +
                 '<span class="pos">' + (i + 1) + '</span>' +
                 '<span class="provider-name" style="text-decoration:none">' +
-                  (isPrimary ? '<span style="color:#a78bfa;margin-right:4px">★</span>' : '') +
+                  (isPrimary ? '<span style="color:#a78bfa;margin-inline-end:4px">★</span>' : '') +
                   u.escapeHtml(name) +
-                  (configured ? '<span style="color:#34d399;margin-left:6px;font-size:9px">●</span>' : '<span style="color:rgba(255,255,255,0.2);margin-left:6px;font-size:9px">○</span>') +
+                  (configured ? '<span style="color:#34d399;margin-inline-start:6px;font-size:9px">●</span>' : '<span style="color:rgba(255,255,255,0.2);margin-inline-start:6px;font-size:9px">○</span>') +
                 '</span>' +
                 (activeModel ? '<span style="font-size:9px;color:rgba(255,255,255,0.25);font-family:monospace;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + u.escapeHtml(activeModel) + '">' + u.escapeHtml(activeModel) + '</span>' : '') +
-                (failed ? '<span style="font-size:9px;color:rgba(239,68,68,0.5)">fail</span>' : '') +
+                (failed ? '<span style="font-size:9px;color:rgba(239,68,68,0.5)">' + t('common.fail') + '</span>' : '') +
                 '</div>';
             }).join('');
           })()}
@@ -115,10 +117,10 @@ export async function render(container) {
     <div class="stat-card mb-6" id="or-fallback-section">
       <div class="chain-card-header">
         <div>
-          <div class="text-xs text-zinc-500 mb-0.5">OpenRouter Model Fallback Chain</div>
-          <div class="text-[10px] text-zinc-600">Drag to reorder. When the primary model fails, Ghost tries these in order.</div>
+          <div class="text-xs text-zinc-500 mb-0.5">${t('models.orFallbackChain')}</div>
+          <div class="text-[10px] text-zinc-600">${t('models.orFallbackChainDesc')}</div>
         </div>
-        <button class="btn btn-primary btn-sm" id="btn-save-or-fallback" style="font-size:10px;padding:3px 10px">Save</button>
+        <button class="btn btn-primary btn-sm" id="btn-save-or-fallback" style="font-size:10px;padding:3px 10px">${t('common.save')}</button>
       </div>
       <div class="chain-list" id="or-model-chain">
         ${(() => {
@@ -136,44 +138,44 @@ export async function render(container) {
               '<span class="grip">⠿</span>' +
               '<span class="pos">' + (i + 1) + '</span>' +
               '<span class="provider-name" style="text-decoration:none;font-family:ui-monospace,monospace;font-size:11px">' +
-                (isPrimary ? '<span style="color:#a78bfa;margin-right:4px">★</span>' : '') +
+                (isPrimary ? '<span style="color:#a78bfa;margin-inline-end:4px">★</span>' : '') +
                 u.escapeHtml(mid) +
-                (isActive ? '<span style="color:#34d399;margin-left:6px;font-size:9px">● active</span>' : '') +
-                (hasFail ? '<span style="color:rgba(239,68,68,0.5);margin-left:6px;font-size:9px">fail</span>' : '') +
+                (isActive ? '<span style="color:#34d399;margin-inline-start:6px;font-size:9px">' + t('common.activeDot') + '</span>' : '') +
+                (hasFail ? '<span style="color:rgba(239,68,68,0.5);margin-inline-start:6px;font-size:9px">' + t('common.fail') + '</span>' : '') +
               '</span>' +
-              (i > 0 ? '<button class="or-remove-model" data-model="' + u.escapeHtml(mid) + '" style="background:none;border:none;color:rgba(255,255,255,0.2);cursor:pointer;font-size:14px;padding:0 4px;line-height:1" title="Remove">×</button>' : '') +
+              (i > 0 ? '<button class="or-remove-model" data-model="' + u.escapeHtml(mid) + '" style="background:none;border:none;color:rgba(255,255,255,0.2);cursor:pointer;font-size:14px;padding:0 4px;line-height:1" title="' + t('common.remove') + '">×</button>' : '') +
               '</div>';
           }).join('');
         })()}
       </div>
       <div class="flex gap-2 mt-3">
-        <input id="or-add-model-input" type="text" class="form-input flex-1 font-mono" style="font-size:11px" placeholder="Add model ID (e.g. anthropic/claude-sonnet-4)">
-        <button id="btn-or-add-model" class="btn btn-ghost btn-sm" style="font-size:10px">+ Add</button>
+        <input id="or-add-model-input" type="text" class="form-input flex-1 font-mono" style="font-size:11px" placeholder="${t('models.addModelPlaceholder')}">
+        <button id="btn-or-add-model" class="btn btn-ghost btn-sm" style="font-size:10px">${t('models.addBtn')}</button>
       </div>
     </div>
 
     <!-- Model Selection -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
       <div>
-        <label class="form-label">Custom Model ID</label>
+        <label class="form-label">${t('models.customModelId')}</label>
         <div class="flex gap-2">
-          <input id="custom-model" type="text" class="form-input flex-1 font-mono" placeholder="model-name" value="${u.escapeHtml(current)}">
-          <button id="btn-set-model" class="btn btn-primary">Set</button>
+          <input id="custom-model" type="text" class="form-input flex-1 font-mono" placeholder="${t('models.modelNamePlaceholder')}" value="${u.escapeHtml(current)}">
+          <button id="btn-set-model" class="btn btn-primary">${t('models.set')}</button>
         </div>
       </div>
       <div>
-        <label class="form-label">OpenRouter API Key</label>
+        <label class="form-label">${t('models.orApiKey')}</label>
         <div class="flex gap-2">
-          <input id="api-key-input" type="password" class="form-input flex-1 font-mono" placeholder="sk-or-...">
-          <button id="btn-toggle-key" class="btn btn-ghost btn-sm">Show</button>
-          <button id="btn-save-key" class="btn btn-secondary">Save</button>
+          <input id="api-key-input" type="password" class="form-input flex-1 font-mono" placeholder="${t('models.orApiKeyPlaceholder')}">
+          <button id="btn-toggle-key" class="btn btn-ghost btn-sm">${t('models.show')}</button>
+          <button id="btn-save-key" class="btn btn-secondary">${t('common.save')}</button>
         </div>
       </div>
     </div>
 
     <!-- Provider Key Management -->
     <div id="provider-keys-section" class="stat-card mb-6 hidden">
-      <h3 class="text-sm font-semibold text-white mb-3" id="provider-keys-title">Manage Keys</h3>
+      <h3 class="text-sm font-semibold text-white mb-3" id="provider-keys-title">${t('models.manageKeys')}</h3>
       <div id="provider-keys-content"></div>
     </div>
 
@@ -181,17 +183,17 @@ export async function render(container) {
     <div class="stat-card mb-6" id="responses-capabilities-section">
       <div class="flex items-start justify-between gap-3 mb-3">
         <div>
-          <h3 class="text-sm font-semibold text-white">Responses Capabilities</h3>
-          <p class="text-xs text-zinc-500 mt-1">Control advanced responses features for hosted tools and networking.</p>
-          <div class="mt-1"><span class="badge badge-purple">Applies globally to OpenAI + OpenAI Codex</span></div>
+          <h3 class="text-sm font-semibold text-white">${t('models.responsesCapabilities')}</h3>
+          <p class="text-xs text-zinc-500 mt-1">${t('models.responsesCapabilitiesDesc')}</p>
+          <div class="mt-1"><span class="badge badge-purple">${t('models.appliesGlobally')}</span></div>
         </div>
-        <button id="btn-save-responses-capabilities" class="btn btn-primary btn-sm">Save Capabilities</button>
+        <button id="btn-save-responses-capabilities" class="btn btn-primary btn-sm">${t('models.saveCapabilities')}</button>
       </div>
       <div class="space-y-3">
         <div class="flex items-center justify-between gap-3 py-2 border-b border-surface-600/30">
           <div>
-            <label class="form-label !mb-0">Enable Responses Skills</label>
-            <div class="text-[11px] text-zinc-500">Allow responses-native skills in supported providers.</div>
+            <label class="form-label !mb-0">${t('models.enableResponsesSkills')}</label>
+            <div class="text-[11px] text-zinc-500">${t('models.enableResponsesSkillsDesc')}</div>
           </div>
           <button class="toggle ${responsesCapabilities.enable_responses_skills ? 'on' : ''}" id="toggle-enable-responses-skills" type="button" role="switch" aria-checked="${responsesCapabilities.enable_responses_skills ? 'true' : 'false'}">
             <span class="toggle-dot"></span>
@@ -200,8 +202,8 @@ export async function render(container) {
 
         <div class="flex items-center justify-between gap-3 py-2 border-b border-surface-600/30">
           <div>
-            <label class="form-label !mb-0">Enable Hosted Shell</label>
-            <div class="text-[11px] text-zinc-500">Allow shell execution in hosted responses environments.</div>
+            <label class="form-label !mb-0">${t('models.enableHostedShell')}</label>
+            <div class="text-[11px] text-zinc-500">${t('models.enableHostedShellDesc')}</div>
           </div>
           <button class="toggle ${responsesCapabilities.enable_hosted_shell ? 'on' : ''}" id="toggle-enable-hosted-shell" type="button" role="switch" aria-checked="${responsesCapabilities.enable_hosted_shell ? 'true' : 'false'}">
             <span class="toggle-dot"></span>
@@ -210,8 +212,8 @@ export async function render(container) {
 
         <div class="flex items-center justify-between gap-3 py-2">
           <div>
-            <label class="form-label !mb-0">Enable Container Networking</label>
-            <div class="text-[11px] text-zinc-500">Permit network access in hosted containers (requires Hosted Shell).</div>
+            <label class="form-label !mb-0">${t('models.enableContainerNetworking')}</label>
+            <div class="text-[11px] text-zinc-500">${t('models.enableContainerNetworkingDesc')}</div>
           </div>
           <button class="toggle ${responsesCapabilities.enable_container_networking ? 'on' : ''}" id="toggle-enable-container-networking" type="button" role="switch" aria-checked="${responsesCapabilities.enable_container_networking ? 'true' : 'false'}">
             <span class="toggle-dot"></span>
@@ -222,14 +224,14 @@ export async function render(container) {
 
     <!-- Filters -->
     <div class="flex flex-wrap gap-3 mb-4">
-      <input id="model-search" type="text" class="form-input flex-1" style="min-width:200px" placeholder="Search models...">
+      <input id="model-search" type="text" class="form-input flex-1" style="min-width:200px" placeholder="${t('models.searchModels')}">
       <select id="model-provider" class="form-input" style="width:150px">
-        <option value="">All Providers</option>
+        <option value="">${t('models.allProviders')}</option>
         ${providers.map(p => `<option value="${p}">${p}</option>`).join('')}
       </select>
       <select id="model-tier" class="form-input" style="width:130px">
-        <option value="">All Tiers</option>
-        ${tiers.map(t => `<option value="${t}">${t}</option>`).join('')}
+        <option value="">${t('models.allTiers')}</option>
+        ${tiers.map(ti => `<option value="${ti}">${ti}</option>`).join('')}
       </select>
     </div>
 
@@ -275,7 +277,7 @@ export async function render(container) {
 
     saveBtn.disabled = true;
     const oldText = saveBtn.textContent;
-    saveBtn.textContent = 'Saving...';
+    saveBtn.textContent = t('common.saving');
 
     try {
       const resp = await api.put('/api/responses-capabilities', payload);
@@ -283,9 +285,9 @@ export async function render(container) {
         ...responsesCapabilities,
         ...((resp && resp.responses_capabilities) || {}),
       };
-      u.toast('Responses capabilities saved');
+      u.toast(t('models.capabilitiesSaved'));
     } catch (e) {
-      u.toast('Failed to save capabilities: ' + e.message, 'error');
+      u.toast(t('models.failedSaveCapabilities', {error: e.message}), 'error');
     } finally {
       saveBtn.disabled = false;
       saveBtn.textContent = oldText;
@@ -322,7 +324,7 @@ export async function render(container) {
     if (!v) return;
     await api.put('/api/models', { model: v, provider: activeTab });
     providerModels[activeTab] = v;
-    u.toast(`Model set to ${v} for ${activeTab}`);
+    u.toast(t('models.modelSetTo', { model: v, provider: activeTab }));
     render(container);
   });
 
@@ -336,7 +338,7 @@ export async function render(container) {
     const k = keyInput.value.trim();
     if (!k) return;
     await api.put('/api/models', { api_key: k });
-    u.toast('API key saved');
+    u.toast(t('models.apiKeySaved'));
     keyInput.value = '';
     render(container);
   });
@@ -389,19 +391,19 @@ export async function render(container) {
       const btn = document.getElementById('btn-save-provider-order');
       const newOrder = [...llmChain.querySelectorAll('.chain-item')].map(el => el.dataset.provider);
       btn.disabled = true;
-      btn.textContent = 'Saving...';
+      btn.textContent = t('common.saving');
       try {
         await api.put('/api/setup/provider-order', { order: newOrder });
         const newPrimary = newOrder[0];
         if (newPrimary !== primaryProvider) {
           await api.put('/api/primary-provider', { provider: newPrimary });
         }
-        u.toast('Provider order saved');
+        u.toast(t('models.orderSaved'));
         render(container);
       } catch (e) {
-        u.toast('Failed: ' + e.message, 'error');
+        u.toast(t('common.failedWithError', {error: e.message}), 'error');
         btn.disabled = false;
-        btn.textContent = 'Save Order';
+        btn.textContent = t('models.saveOrder');
       }
     });
   }
@@ -450,7 +452,7 @@ export async function render(container) {
             const star = el.querySelector('.provider-name span[style*="color:#a78bfa"]');
             if (i === 0 && !star) {
               const nameEl = el.querySelector('.provider-name');
-              if (nameEl) nameEl.insertAdjacentHTML('afterbegin', '<span style="color:#a78bfa;margin-right:4px">★</span>');
+              if (nameEl) nameEl.insertAdjacentHTML('afterbegin', '<span style="color:#a78bfa;margin-inline-end:4px">★</span>');
             } else if (i > 0 && star) {
               star.remove();
             }
@@ -479,13 +481,13 @@ export async function render(container) {
       const mid = (input?.value || '').trim();
       if (!mid) return;
       const existing = [...orChain.querySelectorAll('.chain-item')].map(el => el.dataset.model);
-      if (existing.includes(mid)) { u.toast('Model already in chain', 'error'); return; }
+      if (existing.includes(mid)) { u.toast(t('models.modelAlreadyInChain'), 'error'); return; }
       const idx = existing.length + 1;
       const html = '<div class="chain-item" draggable="true" data-model="' + u.escapeHtml(mid) + '">' +
         '<span class="grip">⠿</span>' +
         '<span class="pos">' + idx + '</span>' +
         '<span class="provider-name" style="text-decoration:none;font-family:ui-monospace,monospace;font-size:11px">' + u.escapeHtml(mid) + '</span>' +
-        '<button class="or-remove-model" data-model="' + u.escapeHtml(mid) + '" style="background:none;border:none;color:rgba(255,255,255,0.2);cursor:pointer;font-size:14px;padding:0 4px;line-height:1" title="Remove">×</button>' +
+        '<button class="or-remove-model" data-model="' + u.escapeHtml(mid) + '" style="background:none;border:none;color:rgba(255,255,255,0.2);cursor:pointer;font-size:14px;padding:0 4px;line-height:1" title="' + t('common.remove') + '">×</button>' +
         '</div>';
       orChain.insertAdjacentHTML('beforeend', html);
       input.value = '';
@@ -499,20 +501,20 @@ export async function render(container) {
     document.getElementById('btn-save-or-fallback')?.addEventListener('click', async () => {
       const btn = document.getElementById('btn-save-or-fallback');
       const models = [...orChain.querySelectorAll('.chain-item')].map(el => el.dataset.model);
-      if (models.length === 0) { u.toast('Chain cannot be empty', 'error'); return; }
+      if (models.length === 0) { u.toast(t('models.chainCannotBeEmpty'), 'error'); return; }
       const newPrimary = models[0];
       const newFallbacks = models.slice(1);
       btn.disabled = true;
-      btn.textContent = 'Saving...';
+      btn.textContent = t('common.saving');
       try {
         await api.put('/api/config', { fallback_models: newFallbacks });
         await api.put('/api/models', { model: newPrimary, provider: 'openrouter' });
-        u.toast('OpenRouter fallback chain saved');
+        u.toast(t('models.orChainSaved'));
         render(container);
       } catch (e) {
-        u.toast('Failed: ' + e.message, 'error');
+        u.toast(t('common.failedWithError', {error: e.message}), 'error');
         btn.disabled = false;
-        btn.textContent = 'Save';
+        btn.textContent = t('common.save');
       }
     });
   }
@@ -528,12 +530,12 @@ async function loadProviderModels(providerId, current, container, u, api) {
       ? (providerModels['openrouter'] || current)
       : (providerModels[providerId] || '');
     customInput.value = tabModel;
-    customInput.placeholder = `Model for ${providerId}`;
+    customInput.placeholder = t('models.modelForProvider', {provider: providerId});
   }
 
   section.classList.remove('hidden');
   const title = document.getElementById('provider-keys-title');
-  title.textContent = `${prov?.name || providerId} Configuration`;
+  title.textContent = t('models.configFor', { provider: prov?.name || providerId });
   const content = document.getElementById('provider-keys-content');
   const isPrimary = providerId === primaryProvider;
   const isOpenRouter = providerId === 'openrouter';
@@ -545,28 +547,28 @@ async function loadProviderModels(providerId, current, container, u, api) {
     const authLabel = isOAuth ? 'OAuth' : (maskedKey || '');
     content.innerHTML = `
       <div class="flex items-center justify-between flex-wrap gap-2">
-        <div class="text-sm text-emerald-400">● Connected ${authLabel ? `<span class="text-zinc-500 font-mono text-xs ml-2">${u.escapeHtml(authLabel)}</span>` : ''} ${isPrimary ? '<span class="badge badge-purple ml-2">Primary</span>' : ''}</div>
+        <div class="text-sm text-emerald-400">${t('models.connectedDot')} ${authLabel ? `<span class="text-zinc-500 font-mono text-xs ml-2">${u.escapeHtml(authLabel)}</span>` : ''} ${isPrimary ? '<span class="badge badge-purple ml-2">' + t('models.primary') + '</span>' : ''}</div>
         <div class="flex gap-2 flex-wrap">
-          ${!isPrimary ? `<button class="btn btn-primary btn-sm set-primary-btn" data-provider="${providerId}">Set as Primary</button>` : ''}
-          ${isOAuth ? `<button class="btn btn-secondary btn-sm reauth-btn" data-provider="${providerId}">Re-authenticate</button>` : ''}
-          <button class="btn btn-ghost btn-sm test-prov-btn" data-provider="${providerId}">Test</button>
-          ${!isOpenRouter ? `<button class="btn btn-ghost btn-sm text-red-400 remove-prov-btn" data-provider="${providerId}">${isOAuth ? 'Disconnect' : 'Remove'}</button>` : ''}
+          ${!isPrimary ? `<button class="btn btn-primary btn-sm set-primary-btn" data-provider="${providerId}">${t('models.setAsPrimary')}</button>` : ''}
+          ${isOAuth ? `<button class="btn btn-secondary btn-sm reauth-btn" data-provider="${providerId}">${t('models.reauthenticate')}</button>` : ''}
+          <button class="btn btn-ghost btn-sm test-prov-btn" data-provider="${providerId}">${t('common.test')}</button>
+          ${!isOpenRouter ? `<button class="btn btn-ghost btn-sm text-red-400 remove-prov-btn" data-provider="${providerId}">${isOAuth ? t('common.disconnect') : t('common.remove')}</button>` : ''}
         </div>
       </div>
     `;
   } else {
-    const connectLabel = isOAuth ? 'Connect with OAuth' : 'Configure';
+    const connectLabel = isOAuth ? t('models.connectOAuth') : t('common.configure');
     content.innerHTML = `
       <div class="flex items-center justify-between flex-wrap gap-2">
         <div class="flex items-center gap-3">
-          <span class="text-sm text-zinc-500">Not connected</span>
+          <span class="text-sm text-zinc-500">${t('models.notConnected')}</span>
           ${isOAuth
             ? `<button class="btn btn-primary btn-sm reauth-btn" data-provider="${providerId}">${connectLabel}</button>`
             : `<button class="btn btn-primary btn-sm" onclick="window.location.href=window.location.pathname+'#setup'; setTimeout(()=>window.location.reload(),50)">${connectLabel}</button>`
           }
         </div>
         <div class="flex gap-2">
-          ${!isPrimary ? `<button class="btn btn-primary btn-sm set-primary-btn" data-provider="${providerId}">Set as Primary</button>` : ''}
+          ${!isPrimary ? `<button class="btn btn-primary btn-sm set-primary-btn" data-provider="${providerId}">${t('models.setAsPrimary')}</button>` : ''}
         </div>
       </div>
     `;
@@ -574,10 +576,10 @@ async function loadProviderModels(providerId, current, container, u, api) {
 
   content.querySelectorAll('.test-prov-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
-      btn.textContent = 'Testing...';
+      btn.textContent = t('common.testing');
       const result = await api.post(`/api/providers/${btn.dataset.provider}/test`);
-      btn.textContent = 'Test';
-      u.toast(result.ok ? 'Connection OK' : (result.error || 'Failed'), result.ok ? undefined : 'error');
+      btn.textContent = t('common.test');
+      u.toast(result.ok ? t('models.connectionOK') : (result.error || t('common.failed')), result.ok ? undefined : 'error');
     });
   });
 
@@ -585,11 +587,9 @@ async function loadProviderModels(providerId, current, container, u, api) {
     btn.addEventListener('click', async () => {
       const pid = btn.dataset.provider;
       const provInfo = providerData.find(p => p.id === pid);
-      const isOAuthProv = provInfo?.auth_type === 'oauth' || provInfo?.type === 'oauth';
-      const action = isOAuthProv ? 'Disconnect' : 'Remove';
-      if (!confirm(`${action} ${provInfo?.name || pid}? This will clear its credentials.`)) return;
+      if (!confirm(t('models.removeConfirm', { provider: provInfo?.name || pid }))) return;
       await api.post(`/api/setup/providers/${pid}/remove`);
-      u.toast(`${provInfo?.name || pid} ${isOAuthProv ? 'disconnected' : 'removed'}`);
+      u.toast(`${provInfo?.name || pid} ${(provInfo?.auth_type === 'oauth' || provInfo?.type === 'oauth') ? t('common.disconnecting') : t('models.removed')}`);
       render(container);
     });
   });
@@ -597,15 +597,15 @@ async function loadProviderModels(providerId, current, container, u, api) {
   content.querySelectorAll('.set-primary-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       btn.disabled = true;
-      btn.textContent = 'Setting...';
+      btn.textContent = t('common.saving');
       try {
         await api.put('/api/primary-provider', { provider: btn.dataset.provider });
-        u.toast(`${btn.dataset.provider} set as primary provider`);
+        u.toast(t('models.setPrimarySuccess', { provider: btn.dataset.provider }));
         render(container);
       } catch (e) {
-        u.toast('Failed: ' + e.message, 'error');
+        u.toast(t('common.failedWithError', {error: e.message}), 'error');
         btn.disabled = false;
-        btn.textContent = 'Set as Primary';
+        btn.textContent = t('models.setAsPrimary');
       }
     });
   });
@@ -614,36 +614,36 @@ async function loadProviderModels(providerId, current, container, u, api) {
     btn.addEventListener('click', async () => {
       const pid = btn.dataset.provider;
       btn.disabled = true;
-      btn.textContent = 'Starting OAuth...';
+      btn.textContent = t('models.startingOAuth');
       try {
         const resp = await api.post('/api/setup/oauth/codex/start');
         if (resp.auth_url) {
           window.open(resp.auth_url, '_blank', 'width=600,height=700');
-          btn.textContent = 'Waiting for auth...';
+          btn.textContent = t('models.waitingAuth');
           let attempts = 0;
           const poll = setInterval(async () => {
             attempts++;
             const status = await api.get('/api/setup/oauth/codex/status');
             if (status.authenticated) {
               clearInterval(poll);
-              u.toast('OpenAI Codex connected successfully!');
+              u.toast(t('models.codexConnected'));
               render(container);
             } else if (attempts > 60) {
               clearInterval(poll);
               btn.disabled = false;
-              btn.textContent = 'Re-authenticate';
-              u.toast('OAuth timed out — try again', 'error');
+              btn.textContent = t('models.reauthenticate');
+              u.toast(t('models.oauthTimeout'), 'error');
             }
           }, 2000);
         } else {
-          u.toast(resp.error || 'Failed to start OAuth', 'error');
+          u.toast(resp.error || t('models.oauthStartFailed'), 'error');
           btn.disabled = false;
-          btn.textContent = 'Re-authenticate';
+          btn.textContent = t('models.reauthenticate');
         }
       } catch (e) {
-        u.toast('OAuth error: ' + e.message, 'error');
+        u.toast(t('models.oauthError', {error: e.message}), 'error');
         btn.disabled = false;
-        btn.textContent = 'Re-authenticate';
+        btn.textContent = t('models.reauthenticate');
       }
     });
   });
@@ -686,10 +686,10 @@ function renderModels(models, current, container, u, api) {
   const count = document.getElementById('results-count');
   if (!grid) return;
 
-  count.textContent = models.length + ' models';
+  count.textContent = models.length + ' ' + t('models.title').toLowerCase();
 
   if (models.length === 0) {
-    grid.innerHTML = '<div class="text-sm text-zinc-600 col-span-3">No models match filters</div>';
+    grid.innerHTML = '<div class="text-sm text-zinc-600 col-span-3">' + t('models.noModelsMatch') + '</div>';
     return;
   }
 
@@ -728,7 +728,7 @@ function renderModels(models, current, container, u, api) {
           ${pIn !== undefined && pIn > 0 ? `<span>$${pIn}/M in</span>` : ''}
           ${pOut !== undefined && pOut > 0 ? `<span>$${pOut}/M out</span>` : ''}
         </div>
-        ${isCurrent ? `<div class="text-[10px] text-ghost-400 mt-1.5 font-medium">● Active for ${u.escapeHtml(activeTab)}</div>` : ''}
+        ${isCurrent ? `<div class="text-[10px] text-ghost-400 mt-1.5 font-medium">${t('models.activeFor', { provider: u.escapeHtml(activeTab) })}</div>` : ''}
       </div>
     `;
   }).join('');
@@ -741,7 +741,7 @@ function renderModels(models, current, container, u, api) {
 
       await api.put('/api/models', { model: id, provider });
       providerModels[provider] = id;
-      u.toast(`${id} set for ${provider}`);
+      u.toast(t('models.modelSetTo', { model: id, provider }));
       render(container);
     });
   });

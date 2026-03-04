@@ -63,34 +63,126 @@ GHOST_HOME = Path.home() / ".ghost"
 #  SSRF PROTECTION
 # ═════════════════════════════════════════════════════════════════════
 
+
+class SsrfBlockedError(ValueError):
+    """Raised when a URL is blocked by SSRF protection."""
+
+    def __init__(self, reason: str, host: str = "", url: str = ""):
+        self.reason = reason
+        self.host = host
+        self.blocked_url = url
+        super().__init__(reason)
+
+
 _BLOCKED_HOSTS = frozenset({
-    "metadata.google.internal", "169.254.169.254",
+    # GCP
+    "metadata.google.internal",
+    # AWS (IPv4 + IPv6)
+    "169.254.169.254", "fd00:ec2::254",
+    # Azure
+    "169.254.169.253",
+    # Oracle Cloud
+    "192.0.0.192",
+    # Alibaba Cloud
+    "100.100.100.200",
+    # Kubernetes
+    "kubernetes.default", "kubernetes.default.svc",
+    # Docker
+    "host.docker.internal",
 })
 
 _LOCAL_HOSTS = frozenset({
-    "localhost", "127.0.0.1", "0.0.0.0", "[::1]",
+    "localhost", "127.0.0.1", "0.0.0.0", "[::1]", "::1",
 })
+
+_BLOCKED_IP_NETWORKS = [
+    ipaddress.ip_network("169.254.0.0/16"),        # Link-local (AWS/Azure/GCP metadata)
+    ipaddress.ip_network("100.100.100.0/24"),       # Alibaba metadata
+    ipaddress.ip_network("192.0.0.192/32"),         # Oracle metadata
+    ipaddress.ip_network("fd00:ec2::/32"),           # AWS IPv6 metadata
+    ipaddress.ip_network("fe80::/10"),              # IPv6 link-local
+]
+
+_SENSITIVE_HEADERS = frozenset({
+    "authorization", "cookie", "x-api-key", "x-auth-token",
+    "proxy-authorization",
+})
+
+
+def _normalize_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address):
+    """Unwrap IPv6-mapped IPv4 addresses (::ffff:127.0.0.1 -> 127.0.0.1)."""
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+        return ip.ipv4_mapped
+    return ip
+
+
+def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Check if an IP is private, loopback, reserved, link-local, or in a blocked CIDR."""
+    ip = _normalize_ip(ip)
+    if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
+        return True
+    for net in _BLOCKED_IP_NETWORKS:
+        try:
+            if ip in net:
+                return True
+        except TypeError:
+            pass
+    return False
+
+
+def _resolve_and_pin(host: str, port: int = 443) -> str:
+    """DNS-pin: resolve a hostname once and return the first safe IP.
+
+    Prevents DNS rebinding attacks where a hostname resolves to a safe
+    IP during validation but a private IP during the actual connection.
+    Raises SsrfBlockedError if all resolved IPs are blocked.
+    """
+    try:
+        ip = ipaddress.ip_address(host)
+        if _is_blocked_ip(ip):
+            raise SsrfBlockedError(f"Blocked IP: {host}", host=host)
+        return str(ip)
+    except ValueError:
+        pass
+
+    try:
+        results = socket.getaddrinfo(host, port, socket.AF_UNSPEC,
+                                     socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise SsrfBlockedError(f"DNS resolution failed for {host}: {exc}",
+                               host=host) from exc
+
+    for family, _type, _proto, _canon, addr in results:
+        ip = ipaddress.ip_address(addr[0])
+        if not _is_blocked_ip(ip):
+            return str(ip)
+
+    raise SsrfBlockedError(
+        f"All resolved IPs for {host} are blocked (private/loopback/metadata)",
+        host=host,
+    )
 
 
 def validate_url(url: str, allow_local: bool = True) -> str:
     """Validate a URL is safe to fetch (blocks SSRF vectors).
 
-    Raises ValueError if the URL targets a blocked scheme, host, or IP.
+    Raises SsrfBlockedError if the URL targets a blocked scheme, host, or IP.
     Ghost is a single-user local agent, so localhost is allowed by default
     (needed for dashboard monitoring). Cloud metadata endpoints are always blocked.
     Set allow_local=False to also block localhost/private IPs.
     """
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
-        raise ValueError(f"Blocked scheme: {parsed.scheme!r}")
+        raise SsrfBlockedError(f"Blocked scheme: {parsed.scheme!r}",
+                               host="", url=url)
 
     host = (parsed.hostname or "").lower().strip(".")
     if not host:
-        raise ValueError("Empty hostname")
+        raise SsrfBlockedError("Empty hostname", url=url)
     if host in _BLOCKED_HOSTS:
-        raise ValueError(f"Blocked host: {host}")
+        raise SsrfBlockedError(f"Blocked host: {host}", host=host, url=url)
     if not allow_local and host in _LOCAL_HOSTS:
-        raise ValueError(f"Blocked host: {host}")
+        raise SsrfBlockedError(f"Blocked local host: {host}", host=host, url=url)
 
     if not allow_local:
         _check_ip(host)
@@ -98,23 +190,30 @@ def validate_url(url: str, allow_local: bool = True) -> str:
 
 
 def _check_ip(host: str):
-    """Check if a host resolves to a private/loopback/reserved IP."""
+    """Check if a host resolves to a private/loopback/reserved IP.
+
+    Handles IPv6-mapped IPv4 (::ffff:127.0.0.1) and checks against
+    cloud metadata CIDR ranges.
+    """
     try:
-        ip = ipaddress.ip_address(host)
+        ip = _normalize_ip(ipaddress.ip_address(host))
     except ValueError:
         try:
             resolved = socket.getaddrinfo(host, None, socket.AF_UNSPEC,
                                           socket.SOCK_STREAM)
             for _, _, _, _, addr in resolved:
-                ip = ipaddress.ip_address(addr[0])
-                if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
-                    raise ValueError(f"Host {host} resolves to blocked IP: {addr[0]}")
+                ip = _normalize_ip(ipaddress.ip_address(addr[0]))
+                if _is_blocked_ip(ip):
+                    raise SsrfBlockedError(
+                        f"Host {host} resolves to blocked IP: {addr[0]}",
+                        host=host,
+                    )
         except socket.gaierror:
             pass
         return
 
-    if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
-        raise ValueError(f"Blocked IP: {host}")
+    if _is_blocked_ip(ip):
+        raise SsrfBlockedError(f"Blocked IP: {host}", host=host)
 
 
 _DEFAULT_HEADERS = {
@@ -128,18 +227,42 @@ _DEFAULT_HEADERS = {
 }
 
 
+def _get_origin(url: str) -> str:
+    """Extract scheme+host+port origin for cross-origin comparison."""
+    p = urlparse(url)
+    port = p.port or (443 if p.scheme == "https" else 80)
+    return f"{p.scheme}://{(p.hostname or '').lower()}:{port}"
+
+
 def _safe_get(url: str, *, timeout: int = DEFAULT_TIMEOUT_S,
               max_bytes: int = MAX_RESPONSE_BYTES,
               max_redirects: int = MAX_REDIRECTS) -> requests.Response:
-    """HTTP GET with SSRF validation on every redirect hop."""
+    """HTTP GET with SSRF validation, DNS pinning, and header stripping.
+
+    Security measures on every redirect hop:
+      1. URL validation against blocked hosts/IPs/schemes
+      2. DNS pinning (resolve once, connect to that IP) to prevent rebinding
+      3. Strip sensitive headers (Authorization, Cookie, etc.) on cross-origin redirects
+    """
     session = requests.Session()
     session.max_redirects = max_redirects
     session.headers.update(_DEFAULT_HEADERS)
 
     prepared = session.prepare_request(requests.Request("GET", url))
     redirect_count = 0
+    prev_origin = _get_origin(url)
+
     while True:
         validate_url(prepared.url)
+
+        parsed = urlparse(prepared.url)
+        host = (parsed.hostname or "").lower()
+        if host not in _LOCAL_HOSTS:
+            try:
+                _resolve_and_pin(host, parsed.port or (443 if parsed.scheme == "https" else 80))
+            except SsrfBlockedError:
+                raise
+
         resp = session.send(prepared, allow_redirects=False,
                             timeout=timeout, stream=True)
 
@@ -151,7 +274,16 @@ def _safe_get(url: str, *, timeout: int = DEFAULT_TIMEOUT_S,
             if not location.startswith(("http://", "https://")):
                 from urllib.parse import urljoin
                 location = urljoin(prepared.url, location)
+
+            new_origin = _get_origin(location)
             prepared = session.prepare_request(requests.Request("GET", location))
+
+            if new_origin != prev_origin:
+                for hdr in list(prepared.headers.keys()):
+                    if hdr.lower() in _SENSITIVE_HEADERS:
+                        del prepared.headers[hdr]
+
+            prev_origin = new_origin
             resp.close()
             continue
         break
@@ -776,7 +908,7 @@ def fetch(url: str, extract_mode: str = "markdown",
 
     try:
         validate_url(url)
-    except ValueError as exc:
+    except (SsrfBlockedError, ValueError) as exc:
         return {"error": f"Blocked URL: {exc}"}
 
     start = time.time()
@@ -787,7 +919,7 @@ def fetch(url: str, extract_mode: str = "markdown",
         return {"error": f"Request timed out after {DEFAULT_TIMEOUT_S}s"}
     except requests.exceptions.ConnectionError as exc:
         return {"error": f"Connection failed: {exc}"}
-    except ValueError as exc:
+    except (SsrfBlockedError, ValueError) as exc:
         return {"error": f"Blocked during redirect: {exc}"}
     except Exception as exc:
         firecrawl_result = _extract_firecrawl(url, extract_mode, cfg)

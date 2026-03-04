@@ -1,5 +1,7 @@
 /** Configuration page — tabbed layout */
 
+const t = (key, params) => window.GhostI18n?.t(key, params) ?? key;
+
 export async function render(container) {
   const { GhostAPI: api, GhostUtils: u } = window;
   const data = await api.get('/api/config');
@@ -25,23 +27,23 @@ export async function render(container) {
     </div>`;
 
   const tabs = [
-    { id: 'general',  label: 'General',  icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z' },
-    { id: 'features', label: 'Features', icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
-    { id: 'voice',    label: 'Voice',    icon: 'M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z' },
-    { id: 'growth',   label: 'Growth',   icon: 'M13 7h8m0 0v8m0-8l-8 8-4-4-6 6' },
-    { id: 'security', label: 'Security', icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z' },
-    { id: 'models',   label: 'Models',   icon: 'M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z' },
+    { id: 'general',  label: t('config.general'),  icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z' },
+    { id: 'features', label: t('config.features'), icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
+    { id: 'voice',    label: t('config.voice'),    icon: 'M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z' },
+    { id: 'growth',   label: t('config.growth'),   icon: 'M13 7h8m0 0v8m0-8l-8 8-4-4-6 6' },
+    { id: 'security', label: t('config.security'), icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z' },
+    { id: 'models',   label: t('config.modelsTab'),   icon: 'M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z' },
   ];
 
   container.innerHTML = `
-    <h1 class="page-header">Configuration</h1>
-    <p class="page-desc">All Ghost settings — saved to ~/.ghost/config.json</p>
+    <h1 class="page-header">${t('config.title')}</h1>
+    <p class="page-desc">${t('config.subtitle')}</p>
 
     <div class="cfg-tabs">
-      ${tabs.map((t, i) => `
-        <button class="cfg-tab ${i === 0 ? 'active' : ''}" data-tab="${t.id}">
-          <svg class="inline-block w-3.5 h-3.5 mr-1 -mt-0.5 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${t.icon}"/></svg>
-          ${t.label}
+      ${tabs.map((tb, i) => `
+        <button class="cfg-tab ${i === 0 ? 'active' : ''}" data-tab="${tb.id}">
+          <svg class="inline-block w-3.5 h-3.5 mr-1 -mt-0.5 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${tb.icon}"/></svg>
+          ${tb.label}
         </button>
       `).join('')}
     </div>
@@ -50,39 +52,39 @@ export async function render(container) {
     <div class="cfg-tab-panel active" data-panel="general">
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div class="stat-card">
-          <h3 class="text-sm font-semibold text-white mb-3">Timing &amp; Limits</h3>
+          <h3 class="text-sm font-semibold text-white mb-3">${t('config.timingLimits')}</h3>
           <div class="grid grid-cols-2 gap-3">
-            ${numInput('poll_interval', 'Poll Interval (s)', 0.1, 10, 0.1)}
-            ${numInput('min_length', 'Min Text Length', 1, 200, 1)}
-            ${numInput('rate_limit_seconds', 'Rate Limit (s)', 0, 30, 1)}
-            ${numInput('max_input_chars', 'Max Input Chars', 500, 50000, 500)}
-            ${numInput('max_feed_items', 'Max Feed Items', 10, 500, 10)}
-            ${numInput('tool_loop_max_steps', 'Max Tool Steps', 1, 500, 10)}
+            ${numInput('poll_interval', t('config.pollInterval'), 0.1, 10, 0.1)}
+            ${numInput('min_length', t('config.minTextLength'), 1, 200, 1)}
+            ${numInput('rate_limit_seconds', t('config.rateLimit'), 0, 30, 1)}
+            ${numInput('max_input_chars', t('config.maxInputChars'), 500, 50000, 500)}
+            ${numInput('max_feed_items', t('config.maxFeedItems'), 10, 500, 10)}
+            ${numInput('tool_loop_max_steps', t('config.maxToolSteps'), 1, 500, 10)}
           </div>
         </div>
         <div class="stat-card">
-          <h3 class="text-sm font-semibold text-white mb-3">Current Model</h3>
+          <h3 class="text-sm font-semibold text-white mb-3">${t('status.currentModel')}</h3>
           <div class="font-mono text-sm text-ghost-400">${u.escapeHtml(cfg.model || defs.model)}</div>
-          <div class="text-[10px] text-zinc-600 mt-1">Change on the Models page</div>
+          <div class="text-[10px] text-zinc-600 mt-1">${t('config.changeOnModelsPage')}</div>
         </div>
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
         <div class="stat-card">
-          <h3 class="text-sm font-semibold text-white mb-3">Web Fetch</h3>
+          <h3 class="text-sm font-semibold text-white mb-3">${t('config.webFetch')}</h3>
           <div class="grid grid-cols-2 gap-3">
-            ${numInput('web_fetch_max_chars', 'Max Chars', 1000, 200000, 1000)}
-            ${numInput('web_fetch_timeout_seconds', 'Timeout (s)', 5, 120, 5)}
+            ${numInput('web_fetch_max_chars', t('config.maxChars'), 1000, 200000, 1000)}
+            ${numInput('web_fetch_timeout_seconds', t('config.timeout'), 5, 120, 5)}
           </div>
         </div>
         <div class="stat-card">
-          <h3 class="text-sm font-semibold text-white mb-3">Process Limits</h3>
+          <h3 class="text-sm font-semibold text-white mb-3">${t('config.processLimits')}</h3>
           <div class="grid grid-cols-2 gap-3">
-            ${numInput('max_shell_sessions', 'Shell Sessions', 1, 20, 1)}
-            ${numInput('max_background_processes', 'Background Procs', 1, 50, 1)}
-            ${numInput('dashboard_port', 'Dashboard Port', 1024, 65535, 1)}
+            ${numInput('max_shell_sessions', t('config.shellSessions'), 1, 20, 1)}
+            ${numInput('max_background_processes', t('config.backgroundProcs'), 1, 50, 1)}
+            ${numInput('dashboard_port', t('config.dashboardPort'), 1024, 65535, 1)}
           </div>
-          <div class="text-[10px] text-zinc-600 mt-2">Dashboard port change requires restart</div>
+          <div class="text-[10px] text-zinc-600 mt-2">${t('config.dashboardPortNote')}</div>
         </div>
       </div>
     </div>
@@ -90,7 +92,7 @@ export async function render(container) {
     <!-- ── Features ─────────────────────────────────────────── -->
     <div class="cfg-tab-panel" data-panel="features">
       <div class="stat-card">
-        <h3 class="text-sm font-semibold text-white mb-3">Feature Toggles</h3>
+        <h3 class="text-sm font-semibold text-white mb-3">${t('config.featureToggles')}</h3>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8">
           ${['enable_tool_loop','enable_memory_db','enable_plugins','enable_skills','enable_system_tools','enable_browser_tools','enable_browser_use','enable_channels','enable_cron','enable_evolve','enable_future_features','enable_integrations','enable_web_search','enable_web_fetch','enable_image_gen','enable_vision','enable_tts','enable_canvas','enable_security_audit','enable_session_memory','enable_mcp','enable_langfuse'].map(k => toggle(k)).join('')}
         </div>
@@ -98,52 +100,52 @@ export async function render(container) {
 
       <!-- Session Maintenance -->
       <div class="stat-card mt-4">
-        <h3 class="text-sm font-semibold text-white mb-1">Session Maintenance &amp; Auto-Cleanup</h3>
-        <div class="text-[10px] text-zinc-600 mb-3">Controls automatic cleanup of old session files. Requires <em>enable_session_memory</em>.</div>
+        <h3 class="text-sm font-semibold text-white mb-1">${t('config.sessionMaintenance')}</h3>
+        <div class="text-[10px] text-zinc-600 mb-3">${t('config.sessionMaintenanceDesc')}</div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div class="flex items-center justify-between py-2">
             <div>
-              <span class="text-sm text-zinc-300">Auto-cleanup</span>
-              <div class="text-[10px] text-zinc-600 mt-0.5">Periodically prune old/excess sessions</div>
+              <span class="text-sm text-zinc-300">${t('config.autoCleanup')}</span>
+              <div class="text-[10px] text-zinc-600 mt-0.5">${t('config.autoCleanupDesc')}</div>
             </div>
             <div class="toggle ${cfg.session_auto_cleanup !== false ? 'on' : ''}" data-toggle="session_auto_cleanup"><span class="toggle-dot"></span></div>
           </div>
-          ${numInput('session_max_count', 'Max Sessions', 10, 10000, 10)}
-          ${numInput('session_max_age_days', 'Max Age (days)', 1, 365, 1)}
-          ${numInput('session_disk_budget_mb', 'Disk Budget (MB)', 50, 10000, 50)}
+          ${numInput('session_max_count', t('config.maxSessions'), 10, 10000, 10)}
+          ${numInput('session_max_age_days', t('config.maxAgeDays'), 1, 365, 1)}
+          ${numInput('session_disk_budget_mb', t('config.diskBudgetMb'), 50, 10000, 50)}
         </div>
       </div>
 
       <!-- Langfuse Observability -->
       <div class="stat-card mt-4">
-        <h3 class="text-sm font-semibold text-white mb-1">Langfuse Observability</h3>
-        <div class="text-[10px] text-zinc-600 mb-3">LLM tracing, monitoring, and cost analytics. Requires <em>enable_langfuse</em> toggle above.</div>
+        <h3 class="text-sm font-semibold text-white mb-1">${t('config.langfuseObs')}</h3>
+        <div class="text-[10px] text-zinc-600 mb-3">${t('config.langfuseObsDesc')}</div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label class="form-label">Host URL</label>
+            <label class="form-label">${t('config.hostUrl')}</label>
             <input type="text" class="form-input w-full text-xs font-mono" data-key="langfuse_host" value="${u.escapeHtml(cfg.langfuse_host || 'https://cloud.langfuse.com')}" placeholder="https://cloud.langfuse.com">
           </div>
           <div>
-            <label class="form-label">Project ID</label>
+            <label class="form-label">${t('config.projectId')}</label>
             <input type="text" class="form-input w-full text-xs font-mono" data-key="langfuse_project_id" value="${u.escapeHtml(cfg.langfuse_project_id || '')}" placeholder="(optional)">
           </div>
           <div>
-            <label class="form-label">Public Key</label>
+            <label class="form-label">${t('config.publicKey')}</label>
             <input type="text" class="form-input w-full text-xs font-mono" data-key="langfuse_public_key" value="${u.escapeHtml(cfg.langfuse_public_key || '')}" placeholder="pk-lf-...">
           </div>
           <div>
-            <label class="form-label">Secret Key</label>
+            <label class="form-label">${t('config.secretKey')}</label>
             <input type="password" class="form-input w-full text-xs font-mono" data-key="langfuse_secret_key" value="${u.escapeHtml(cfg.langfuse_secret_key || '')}" placeholder="sk-lf-...">
           </div>
         </div>
-        <div class="text-[10px] text-zinc-500 mt-2">Get keys from <a href="https://cloud.langfuse.com" target="_blank" class="text-ghost-400 hover:underline">cloud.langfuse.com</a> or self-host. Changes require restart.</div>
+        <div class="text-[10px] text-zinc-500 mt-2">${t('config.langfuseKeysHint')}</div>
       </div>
 
       <!-- MCP -->
       <div class="stat-card mt-4">
-        <h3 class="text-sm font-semibold text-white mb-1">MCP (Model Context Protocol)</h3>
-        <div class="text-[10px] text-zinc-600 mb-2">Connect Ghost to external MCP tool servers. Enable the toggle above, then configure servers in <code class="bg-surface-700 px-1 rounded">~/.ghost/config.json</code> under <code class="bg-surface-700 px-1 rounded">mcp_servers</code>.</div>
-        <div class="text-[10px] text-zinc-500">See the <a href="#mcp" class="text-ghost-400 hover:underline">MCP page</a> for server management and status.</div>
+        <h3 class="text-sm font-semibold text-white mb-1">${t('config.mcpTitle')}</h3>
+        <div class="text-[10px] text-zinc-600 mb-2">${t('config.mcpDesc')}</div>
+        <div class="text-[10px] text-zinc-500">${t('config.mcpSeeMore')}</div>
       </div>
     </div>
 
@@ -152,56 +154,56 @@ export async function render(container) {
       <div class="stat-card" id="voice-section">
         <div class="flex items-center justify-between py-2 border-b border-surface-600/30 mb-4">
           <div>
-            <span class="text-sm text-zinc-300">Enable voice features</span>
-            <div class="text-[10px] text-zinc-600 mt-0.5">Voice Wake, Talk Mode, and push-to-talk mic in Chat</div>
+            <span class="text-sm text-zinc-300">${t('config.enableVoice')}</span>
+            <div class="text-[10px] text-zinc-600 mt-0.5">${t('config.enableVoiceDesc')}</div>
           </div>
           <div class="toggle ${cfg.enable_voice !== false ? 'on' : ''}" data-toggle="enable_voice"><span class="toggle-dot"></span></div>
         </div>
 
         <div id="voice-controls" class="mb-4">
           <div class="flex items-center gap-3 mb-2">
-            <span class="text-xs text-zinc-400">Status:</span>
-            <span id="voice-state" class="text-xs text-zinc-500">Loading…</span>
+            <span class="text-xs text-zinc-400">${t('common.status')}:</span>
+            <span id="voice-state" class="text-xs text-zinc-500">${t('common.loading')}</span>
           </div>
           <div class="flex gap-2">
-            <button id="btn-voice-wake" class="btn btn-sm" style="font-size:0.7rem">Start Wake</button>
-            <button id="btn-voice-talk" class="btn btn-sm" style="font-size:0.7rem">Start Talk</button>
-            <button id="btn-voice-stop" class="btn btn-sm btn-danger hidden" style="font-size:0.7rem">Stop</button>
+            <button id="btn-voice-wake" class="btn btn-sm" style="font-size:0.7rem">${t('config.startWake')}</button>
+            <button id="btn-voice-talk" class="btn btn-sm" style="font-size:0.7rem">${t('config.startTalk')}</button>
+            <button id="btn-voice-stop" class="btn btn-sm btn-danger hidden" style="font-size:0.7rem">${t('common.stop')}</button>
           </div>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label class="form-label">Wake Words</label>
-            <input type="text" class="form-input w-full text-xs" id="cfg-voice-wake-words" value="${(cfg.voice_wake_words || ['ghost','hey ghost']).join(', ')}" placeholder="ghost, hey ghost">
-            <div class="text-[10px] text-zinc-600 mt-1">Comma-separated trigger phrases</div>
+            <label class="form-label">${t('config.wakeWords')}</label>
+            <input type="text" class="form-input w-full text-xs" id="cfg-voice-wake-words" value="${(cfg.voice_wake_words || ['ghost','hey ghost']).join(', ')}" placeholder="${t('config.wakeWordsPlaceholder')}">
+            <div class="text-[10px] text-zinc-600 mt-1">${t('config.wakeWordsDesc')}</div>
           </div>
           <div>
-            <label class="form-label">STT Provider</label>
+            <label class="form-label">${t('config.sttProvider')}</label>
             <select class="form-input w-full text-xs" id="cfg-voice-stt">
-              <option value="auto" ${(cfg.voice_stt_provider||'auto')==='auto'?'selected':''}>Auto</option>
-              <option value="moonshine" ${cfg.voice_stt_provider==='moonshine'?'selected':''}>Moonshine</option>
-              <option value="openrouter" ${cfg.voice_stt_provider==='openrouter'?'selected':''}>OpenRouter</option>
-              <option value="whisper" ${cfg.voice_stt_provider==='whisper'?'selected':''}>Whisper</option>
-              <option value="groq" ${cfg.voice_stt_provider==='groq'?'selected':''}>Groq</option>
-              <option value="vosk" ${cfg.voice_stt_provider==='vosk'?'selected':''}>Vosk</option>
+              <option value="auto" ${(cfg.voice_stt_provider||'auto')==='auto'?'selected':''}>${t('config.sttAuto')}</option>
+              <option value="moonshine" ${cfg.voice_stt_provider==='moonshine'?'selected':''}>${t('config.sttMoonshine')}</option>
+              <option value="openrouter" ${cfg.voice_stt_provider==='openrouter'?'selected':''}>${t('config.sttOpenRouter')}</option>
+              <option value="whisper" ${cfg.voice_stt_provider==='whisper'?'selected':''}>${t('config.sttWhisper')}</option>
+              <option value="groq" ${cfg.voice_stt_provider==='groq'?'selected':''}>${t('config.sttGroq')}</option>
+              <option value="vosk" ${cfg.voice_stt_provider==='vosk'?'selected':''}>${t('config.sttVosk')}</option>
             </select>
           </div>
           <div>
-            <label class="form-label">Silence Threshold</label>
+            <label class="form-label">${t('config.silenceThreshold')}</label>
             <input type="number" class="form-input w-full text-xs" data-key="voice_silence_threshold" value="${cfg.voice_silence_threshold ?? 0.02}" min="0.001" max="1" step="0.005">
-            <div class="text-[10px] text-zinc-600 mt-1">Volume level below which is considered silence</div>
+            <div class="text-[10px] text-zinc-600 mt-1">${t('config.silenceThresholdDesc')}</div>
           </div>
           <div>
-            <label class="form-label">Silence Duration (s)</label>
+            <label class="form-label">${t('config.silenceDuration')}</label>
             <input type="number" class="form-input w-full text-xs" data-key="voice_silence_duration" value="${cfg.voice_silence_duration ?? 2.0}" min="0.5" max="10" step="0.5">
-            <div class="text-[10px] text-zinc-600 mt-1">Seconds of silence before ending capture</div>
+            <div class="text-[10px] text-zinc-600 mt-1">${t('config.silenceDurationDesc')}</div>
           </div>
         </div>
         <label class="flex items-center gap-2 cursor-pointer mt-4">
           <input id="cfg-voice-chime" type="checkbox" ${cfg.voice_chime !== false ? 'checked' : ''}
             class="w-3.5 h-3.5 rounded bg-surface-700 border-surface-600 text-ghost-500">
-          <span class="text-xs text-zinc-400">Chime on wake word detection</span>
+          <span class="text-xs text-zinc-400">${t('config.chimeOnWake')}</span>
         </label>
       </div>
     </div>
@@ -210,34 +212,34 @@ export async function render(container) {
     <div class="cfg-tab-panel" data-panel="growth">
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div class="stat-card">
-          <h3 class="text-sm font-semibold text-white mb-3">Self-Evolution</h3>
+          <h3 class="text-sm font-semibold text-white mb-3">${t('evolve.title')}</h3>
           <div class="flex items-center justify-between py-2 border-b border-surface-600/30 mb-3">
             <div>
-              <span class="text-sm text-zinc-300">Auto-approve all evolutions</span>
-              <div class="text-[10px] text-zinc-600 mt-0.5">Skip approval prompts — Ghost modifies itself autonomously</div>
+              <span class="text-sm text-zinc-300">${t('config.autoApproveEvo')}</span>
+              <div class="text-[10px] text-zinc-600 mt-0.5">${t('config.autoApproveEvoDesc')}</div>
             </div>
             <div class="toggle ${cfg.evolve_auto_approve ? 'on' : ''}" data-toggle="evolve_auto_approve"><span class="toggle-dot"></span></div>
           </div>
           <div class="flex items-center justify-between py-2">
             <div>
-              <span class="text-sm text-zinc-300">Max evolutions per hour</span>
-              <div class="text-[10px] text-zinc-600 mt-0.5">Rate limit on self-modifications</div>
+              <span class="text-sm text-zinc-300">${t('config.maxEvoPerHour')}</span>
+              <div class="text-[10px] text-zinc-600 mt-0.5">${t('config.maxEvoPerHourDesc')}</div>
             </div>
             <input type="number" min="1" max="100" class="bg-surface-700 text-white text-sm rounded px-2 py-1 w-20 text-right" data-key="max_evolutions_per_hour" value="${cfg.max_evolutions_per_hour ?? 25}">
           </div>
         </div>
 
         <div class="stat-card">
-          <h3 class="text-sm font-semibold text-white mb-3">Autonomous Growth</h3>
+          <h3 class="text-sm font-semibold text-white mb-3">${t('config.growth')}</h3>
           <div class="flex items-center justify-between py-2 border-b border-surface-600/30 mb-3">
             <div>
-              <span class="text-sm text-zinc-300">Enable autonomous growth</span>
-              <div class="text-[10px] text-zinc-600 mt-0.5">Ghost proactively improves itself on a schedule</div>
+              <span class="text-sm text-zinc-300">${t('config.enableGrowth')}</span>
+              <div class="text-[10px] text-zinc-600 mt-0.5">${t('config.enableGrowthDesc')}</div>
             </div>
             <div class="toggle ${cfg.enable_growth !== false ? 'on' : ''}" data-toggle="enable_growth"><span class="toggle-dot"></span></div>
           </div>
           <div class="space-y-2" id="growth-schedules-container"></div>
-          <div class="text-[10px] text-zinc-600 mt-2">Cron expressions — e.g. "0 */6 * * *" = every 6 hours</div>
+          <div class="text-[10px] text-zinc-600 mt-2">${t('config.cronExpressions')}</div>
         </div>
       </div>
     </div>
@@ -246,45 +248,45 @@ export async function render(container) {
     <div class="cfg-tab-panel" data-panel="security">
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div class="stat-card">
-          <h3 class="text-sm font-semibold text-white mb-3">Allowed Commands</h3>
+          <h3 class="text-sm font-semibold text-white mb-3">${t('config.allowedCommands')}</h3>
           <textarea id="allowed-commands" class="form-input w-full h-40 font-mono text-xs">${(cfg.allowed_commands || []).join(', ')}</textarea>
-          <div class="text-[10px] text-zinc-600 mt-1">Comma-separated list of shell commands Ghost is allowed to run</div>
+          <div class="text-[10px] text-zinc-600 mt-1">${t('config.allowedCommandsDesc')}</div>
         </div>
 
         <div class="stat-card">
-          <h3 class="text-sm font-semibold text-white mb-3">Allowed Roots</h3>
+          <h3 class="text-sm font-semibold text-white mb-3">${t('config.allowedRoots')}</h3>
           <textarea id="allowed-roots" class="form-input w-full h-40 font-mono text-xs">${(cfg.allowed_roots || []).join('\n')}</textarea>
-          <div class="text-[10px] text-zinc-600 mt-1">One path per line — directories Ghost can read/write</div>
+          <div class="text-[10px] text-zinc-600 mt-1">${t('config.allowedRootsDesc')}</div>
         </div>
 
         <div class="stat-card md:col-span-2">
           <div class="flex items-center justify-between mb-4">
-            <h3 class="text-sm font-semibold text-white">Dangerous Interpreter Policy</h3>
+            <h3 class="text-sm font-semibold text-white">${t('config.dangerousPolicy')}</h3>
             <div class="flex items-center gap-2">
-              <span class="text-xs text-zinc-400">Enable dangerous interpreters</span>
+              <span class="text-xs text-zinc-400">${t('config.enableDangerousInterpreters')}</span>
               <div class="toggle ${cfg.enable_dangerous_interpreters ? 'on' : ''}" data-toggle="enable_dangerous_interpreters" id="toggle-dangerous-interpreters"><span class="toggle-dot"></span></div>
             </div>
           </div>
-          <div class="text-[10px] text-zinc-600 mb-4">Controls access to python, pip, and other potentially dangerous shell commands. Requires confirmation to enable.</div>
+          <div class="text-[10px] text-zinc-600 mb-4">${t('config.dangerousPolicyDesc')}</div>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-6" id="dangerous-policy-container" style="${cfg.enable_dangerous_interpreters ? '' : 'opacity: 0.5; pointer-events: none;'}">
             <!-- Python Policy -->
             <div class="bg-surface-700/30 rounded p-3">
               <h4 class="text-xs font-medium text-ghost-400 mb-3 flex items-center gap-2">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
-                Python
+                ${t('config.python')}
               </h4>
               <div class="space-y-3">
                 <div class="flex items-center justify-between">
-                  <span class="text-xs text-zinc-400">Allow Python execution</span>
+                  <span class="text-xs text-zinc-400">${t('config.allowPython')}</span>
                   <div class="toggle ${(cfg.dangerous_command_policy?.python?.allow !== false) ? 'on' : ''}" data-toggle="python_allow"><span class="toggle-dot"></span></div>
                 </div>
                 <div class="flex items-center justify-between">
-                  <span class="text-xs text-zinc-400">Require workspace context</span>
+                  <span class="text-xs text-zinc-400">${t('config.requireWorkspace')}</span>
                   <div class="toggle ${cfg.dangerous_command_policy?.python?.require_workspace ? 'on' : ''}" data-toggle="python_require_workspace"><span class="toggle-dot"></span></div>
                 </div>
                 <div>
-                  <label class="text-xs text-zinc-500 block mb-1">Deny flags (comma-separated)</label>
+                  <label class="text-xs text-zinc-500 block mb-1">${t('config.denyFlags')}</label>
                   <input type="text" class="form-input w-full text-xs font-mono" id="python-deny-flags" value="${(cfg.dangerous_command_policy?.python?.deny_flags || []).join(', ')}" placeholder="-c, -m, exec, eval, compile, __import__, os.system, subprocess, pty">
                 </div>
               </div>
@@ -294,19 +296,19 @@ export async function render(container) {
             <div class="bg-surface-700/30 rounded p-3">
               <h4 class="text-xs font-medium text-amber-400 mb-3 flex items-center gap-2">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
-                Pip
+                ${t('config.pip')}
               </h4>
               <div class="space-y-3">
                 <div class="flex items-center justify-between">
-                  <span class="text-xs text-zinc-400">Allow pip execution</span>
+                  <span class="text-xs text-zinc-400">${t('config.allowPip')}</span>
                   <div class="toggle ${(cfg.dangerous_command_policy?.pip?.allow !== false) ? 'on' : ''}" data-toggle="pip_allow"><span class="toggle-dot"></span></div>
                 </div>
                 <div class="flex items-center justify-between">
-                  <span class="text-xs text-zinc-400">Require workspace context</span>
+                  <span class="text-xs text-zinc-400">${t('config.requireWorkspace')}</span>
                   <div class="toggle ${cfg.dangerous_command_policy?.pip?.require_workspace ? 'on' : ''}" data-toggle="pip_require_workspace"><span class="toggle-dot"></span></div>
                 </div>
                 <div>
-                  <label class="text-xs text-zinc-500 block mb-1">Allow subcommands (comma-separated)</label>
+                  <label class="text-xs text-zinc-500 block mb-1">${t('config.allowSubcommands')}</label>
                   <input type="text" class="form-input w-full text-xs font-mono" id="pip-allow-subcommands" value="${(cfg.dangerous_command_policy?.pip?.allow_subcommands || ['install', 'show', 'freeze', 'list', 'index']).join(', ')}" placeholder="install, show, freeze, list, index">
                 </div>
               </div>
@@ -317,13 +319,13 @@ export async function render(container) {
         <!-- Tool Registration Security -->
         <div class="stat-card md:col-span-2">
           <div class="flex items-center justify-between mb-2">
-            <h3 class="text-sm font-semibold text-white">Tool Registration Security</h3>
+            <h3 class="text-sm font-semibold text-white">${t('config.toolRegSecurity')}</h3>
             <div class="flex items-center gap-2">
-              <span class="text-xs text-zinc-400">Strict tool registration</span>
+              <span class="text-xs text-zinc-400">${t('config.strictToolReg')}</span>
               <div class="toggle ${cfg.strict_tool_registration !== false ? 'on' : ''}" data-toggle="strict_tool_registration"><span class="toggle-dot"></span></div>
             </div>
           </div>
-          <div class="text-[10px] text-zinc-600">When enabled, prevents tools from being shadowed or replaced by malicious registrations. Disable only for debugging.</div>
+          <div class="text-[10px] text-zinc-600">${t('config.strictToolRegDesc')}</div>
         </div>
       </div>
     </div>
@@ -331,70 +333,70 @@ export async function render(container) {
     <!-- ── Models ───────────────────────────────────────────── -->
     <div class="cfg-tab-panel" data-panel="models">
       <div class="stat-card mb-4">
-        <h3 class="text-sm font-semibold text-white mb-1">Anthropic (Claude) Settings</h3>
-        <div class="text-[10px] text-zinc-600 mb-3">These settings only apply when using the direct Anthropic API provider.</div>
+        <h3 class="text-sm font-semibold text-white mb-1">${t('config.anthropicSettings')}</h3>
+        <div class="text-[10px] text-zinc-600 mb-3">${t('config.anthropicOnlyNote')}</div>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
-            <label class="form-label">Reasoning Effort</label>
+            <label class="form-label">${t('config.reasoningEffort')}</label>
             <select class="form-input w-full text-xs" id="cfg-anthropic-effort">
-              <option value="low" ${(cfg.anthropic_effort||'high')==='low'?'selected':''}>Low (fastest)</option>
-              <option value="medium" ${(cfg.anthropic_effort||'high')==='medium'?'selected':''}>Medium (balanced)</option>
-              <option value="high" ${(cfg.anthropic_effort||'high')==='high'?'selected':''}>High (best quality)</option>
+              <option value="low" ${(cfg.anthropic_effort||'high')==='low'?'selected':''}>${t('config.effortLow')}</option>
+              <option value="medium" ${(cfg.anthropic_effort||'high')==='medium'?'selected':''}>${t('config.effortMedium')}</option>
+              <option value="high" ${(cfg.anthropic_effort||'high')==='high'?'selected':''}>${t('config.effortHigh')}</option>
             </select>
-            <div class="text-[10px] text-zinc-600 mt-1">Claude 4.6+ thinking depth</div>
+            <div class="text-[10px] text-zinc-600 mt-1">${t('config.effortDesc')}</div>
           </div>
           <div>
             <div class="flex items-center justify-between py-2">
               <div>
-                <span class="text-sm text-zinc-300">Context Compaction</span>
-                <div class="text-[10px] text-zinc-600 mt-0.5">Auto-compress long contexts</div>
+                <span class="text-sm text-zinc-300">${t('config.contextCompaction')}</span>
+                <div class="text-[10px] text-zinc-600 mt-0.5">${t('config.autoCompress')}</div>
               </div>
               <div class="toggle ${cfg.anthropic_context_compaction ? 'on' : ''}" data-toggle="anthropic_context_compaction"><span class="toggle-dot"></span></div>
             </div>
           </div>
           <div>
-            <label class="form-label">Compaction Ratio</label>
+            <label class="form-label">${t('config.compactionRatio')}</label>
             <input type="number" class="form-input w-full text-xs" data-key="anthropic_context_compaction_ratio" value="${cfg.anthropic_context_compaction_ratio ?? 0.5}" min="0" max="1" step="0.05">
-            <div class="text-[10px] text-zinc-600 mt-1">0.0–1.0 (higher = more aggressive)</div>
+            <div class="text-[10px] text-zinc-600 mt-1">${t('config.compactionRatioDesc')}</div>
           </div>
         </div>
       </div>
       <div class="stat-card mb-4">
-        <h3 class="text-sm font-semibold text-white mb-1">Skill Model Aliases</h3>
-        <div class="text-[10px] text-zinc-600 mb-3">Model aliases used by skills for per-skill model overrides. Built-in aliases: cheap, fast, capable, smart, vision, code. Changes take effect on next restart.</div>
+        <h3 class="text-sm font-semibold text-white mb-1">${t('config.skillModelAliases')}</h3>
+        <div class="text-[10px] text-zinc-600 mb-3">${t('config.skillModelAliasesDesc')}</div>
         <div id="skill-model-aliases-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3"></div>
         <div class="mt-3 pt-3 border-t border-surface-600/30">
           <div class="flex gap-2">
-            <input type="text" id="new-alias-name" class="form-input text-xs w-32" placeholder="alias name">
-            <input type="text" id="new-alias-model" class="form-input text-xs flex-1 font-mono" placeholder="provider/model-id">
-            <button id="btn-add-alias" class="btn btn-sm btn-primary">Add</button>
+            <input type="text" id="new-alias-name" class="form-input text-xs w-32" placeholder="${t('config.aliasName')}">
+            <input type="text" id="new-alias-model" class="form-input text-xs flex-1 font-mono" placeholder="${t('config.providerModelId')}">
+            <button id="btn-add-alias" class="btn btn-sm btn-primary">${t('common.add')}</button>
           </div>
         </div>
       </div>
       <div class="stat-card">
-        <h3 class="text-sm font-semibold text-white mb-1">Tool Models</h3>
-        <div class="text-[10px] text-zinc-600 mb-3">Override the model IDs used by each tool. Leave blank to use defaults. Changes take effect on next restart.</div>
+        <h3 class="text-sm font-semibold text-white mb-1">${t('config.toolModels')}</h3>
+        <div class="text-[10px] text-zinc-600 mb-3">${t('config.toolModelsDesc')}</div>
         <div id="tool-models-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3"></div>
       </div>
 
       <div class="stat-card mt-4">
-        <h3 class="text-sm font-semibold text-white mb-1">Provider Fallback Chains</h3>
-        <div class="text-[10px] text-zinc-600 mb-3">Drag to reorder provider priority for each capability. First available provider wins. Toggle off to skip a provider.</div>
+        <h3 class="text-sm font-semibold text-white mb-1">${t('config.providerFallbackChains')}</h3>
+        <div class="text-[10px] text-zinc-600 mb-3">${t('config.providerFallbackChainsDesc')}</div>
         <div id="provider-chains-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
       </div>
     </div>
 
     <!-- ── Save bar ─────────────────────────────────────────── -->
     <div class="flex gap-3 mt-6">
-      <button id="btn-save-config" class="btn btn-primary">Save Configuration</button>
-      <button id="btn-reset-config" class="btn btn-danger btn-sm">Reset to Defaults</button>
+      <button id="btn-save-config" class="btn btn-primary">${t('config.saveConfig')}</button>
+      <button id="btn-reset-config" class="btn btn-danger btn-sm">${t('config.resetDefaults')}</button>
     </div>
   `;
 
   // ── Tab switching ────────────────────────────────────────────
   container.querySelectorAll('.cfg-tab').forEach(btn => {
     btn.addEventListener('click', () => {
-      container.querySelectorAll('.cfg-tab').forEach(t => t.classList.remove('active'));
+      container.querySelectorAll('.cfg-tab').forEach(tb => tb.classList.remove('active'));
       container.querySelectorAll('.cfg-tab-panel').forEach(p => p.classList.remove('active'));
       btn.classList.add('active');
       const panel = container.querySelector(`[data-panel="${btn.dataset.tab}"]`);
@@ -404,16 +406,16 @@ export async function render(container) {
 
   // ── Growth schedules ─────────────────────────────────────────
   const routines = [
-    {id: 'tech_scout', label: 'Tech Scout', desc: 'Browse AI/tech news for improvements'},
-    {id: 'health_check', label: 'Health Check', desc: 'Test APIs, tools, disk, connectivity'},
-    {id: 'user_context', label: 'User Context', desc: 'Learn from emails & calendar'},
-    {id: 'skill_improver', label: 'Skill Improver', desc: 'Review and improve skills'},
-    {id: 'soul_evolver', label: 'Soul Evolver', desc: 'Reflect and refine SOUL.md'},
-    {id: 'bug_hunter', label: 'Bug Hunter', desc: 'Scan logs and fix errors'},
-    {id: 'competitive_intel', label: 'Competitive Intel', desc: 'Research OpenClaw for feature ideas'},
-    {id: 'content_health', label: 'Content Health', desc: 'Test web_fetch extraction quality'},
-    {id: 'security_patrol', label: 'Security Patrol', desc: 'Run security audit & auto-fix'},
-    {id: 'visual_monitor', label: 'Visual Monitor', desc: 'Analyze screenshots for anomalies'},
+    {id: 'tech_scout', label: t('config.routineTechScout'), desc: t('config.routineTechScoutDesc')},
+    {id: 'health_check', label: t('config.routineHealthCheck'), desc: t('config.routineHealthCheckDesc')},
+    {id: 'user_context', label: t('config.routineUserContext'), desc: t('config.routineUserContextDesc')},
+    {id: 'skill_improver', label: t('config.routineSkillImprover'), desc: t('config.routineSkillImproverDesc')},
+    {id: 'soul_evolver', label: t('config.routineSoulEvolver'), desc: t('config.routineSoulEvolverDesc')},
+    {id: 'bug_hunter', label: t('config.routineBugHunter'), desc: t('config.routineBugHunterDesc')},
+    {id: 'competitive_intel', label: t('config.routineCompetitiveIntel'), desc: t('config.routineCompetitiveIntelDesc')},
+    {id: 'content_health', label: t('config.routineContentHealth'), desc: t('config.routineContentHealthDesc')},
+    {id: 'security_patrol', label: t('config.routineSecurityPatrol'), desc: t('config.routineSecurityPatrolDesc')},
+    {id: 'visual_monitor', label: t('config.routineVisualMonitor'), desc: t('config.routineVisualMonitorDesc')},
   ];
   const defaultScheds = {tech_scout:'0 */12 * * *',health_check:'0 */2 * * *',user_context:'0 */4 * * *',skill_improver:'0 3 * * *',soul_evolver:'0 4 * * 0',bug_hunter:'0 */6 * * *',competitive_intel:'0 6 * * 1,4',content_health:'0 4 * * 0',security_patrol:'0 5 * * *',visual_monitor:'0 */8 * * *'};
   const schedContainer = container.querySelector('#growth-schedules-container');
@@ -432,26 +434,26 @@ export async function render(container) {
 
   // ── Tool models ──────────────────────────────────────────────
   const toolModelDefs = [
-    {key: 'image_gen_openrouter', label: 'Image Gen (OpenRouter)', def: 'google/gemini-3-pro-image-preview'},
-    {key: 'image_gen_gemini', label: 'Image Gen (Gemini)', def: 'gemini-3-pro-image-preview'},
-    {key: 'image_gen_openai', label: 'Image Gen (OpenAI)', def: 'gpt-image-1'},
-    {key: 'vision_openai', label: 'Vision (OpenAI)', def: 'gpt-4o'},
-    {key: 'vision_openrouter', label: 'Vision (OpenRouter)', def: 'openai/gpt-4o'},
-    {key: 'vision_gemini', label: 'Vision (Gemini)', def: 'gemini-2.5-flash'},
-    {key: 'vision_anthropic', label: 'Vision (Anthropic)', def: 'claude-sonnet-4-20250514'},
-    {key: 'vision_ollama', label: 'Vision (Ollama)', def: 'llava'},
-    {key: 'web_search_perplexity', label: 'Search (Perplexity/OR)', def: 'perplexity/sonar-pro'},
-    {key: 'web_search_perplexity_direct', label: 'Search (Perplexity Direct)', def: 'sonar-pro'},
-    {key: 'web_search_grok', label: 'Search (Grok)', def: 'grok-3-fast'},
-    {key: 'web_search_openai', label: 'Search (OpenAI)', def: 'gpt-4.1-mini'},
-    {key: 'web_search_gemini', label: 'Search (Gemini)', def: 'gemini-2.5-flash'},
-    {key: 'grok_openrouter', label: 'Grok via OpenRouter', def: 'x-ai/grok-4-fast'},
-    {key: 'tts_openai', label: 'TTS (OpenAI)', def: 'tts-1'},
-    {key: 'tts_elevenlabs', label: 'TTS (ElevenLabs)', def: 'eleven_multilingual_v2'},
-    {key: 'embedding_openrouter', label: 'Embedding (OpenRouter)', def: 'openai/text-embedding-3-small'},
-    {key: 'embedding_gemini', label: 'Embedding (Gemini)', def: 'text-embedding-004'},
-    {key: 'embedding_ollama', label: 'Embedding (Ollama)', def: 'nomic-embed-text'},
-    {key: 'vision_deepseek', label: 'Vision (DeepSeek)', def: 'deepseek-chat'},
+    {key: 'image_gen_openrouter', label: t('config.toolModelImageGenOR'), def: 'google/gemini-3-pro-image-preview'},
+    {key: 'image_gen_gemini', label: t('config.toolModelImageGenGemini'), def: 'gemini-3-pro-image-preview'},
+    {key: 'image_gen_openai', label: t('config.toolModelImageGenOpenAI'), def: 'gpt-image-1'},
+    {key: 'vision_openai', label: t('config.toolModelVisionOpenAI'), def: 'gpt-4o'},
+    {key: 'vision_openrouter', label: t('config.toolModelVisionOR'), def: 'openai/gpt-4o'},
+    {key: 'vision_gemini', label: t('config.toolModelVisionGemini'), def: 'gemini-2.5-flash'},
+    {key: 'vision_anthropic', label: t('config.toolModelVisionAnthropic'), def: 'claude-sonnet-4-20250514'},
+    {key: 'vision_ollama', label: t('config.toolModelVisionOllama'), def: 'llava'},
+    {key: 'web_search_perplexity', label: t('config.toolModelSearchPerplexityOR'), def: 'perplexity/sonar-pro'},
+    {key: 'web_search_perplexity_direct', label: t('config.toolModelSearchPerplexityDirect'), def: 'sonar-pro'},
+    {key: 'web_search_grok', label: t('config.toolModelSearchGrok'), def: 'grok-3-fast'},
+    {key: 'web_search_openai', label: t('config.toolModelSearchOpenAI'), def: 'gpt-4.1-mini'},
+    {key: 'web_search_gemini', label: t('config.toolModelSearchGemini'), def: 'gemini-2.5-flash'},
+    {key: 'grok_openrouter', label: t('config.toolModelGrokOR'), def: 'x-ai/grok-4-fast'},
+    {key: 'tts_openai', label: t('config.toolModelTtsOpenAI'), def: 'tts-1'},
+    {key: 'tts_elevenlabs', label: t('config.toolModelTtsElevenLabs'), def: 'eleven_multilingual_v2'},
+    {key: 'embedding_openrouter', label: t('config.toolModelEmbeddingOR'), def: 'openai/text-embedding-3-small'},
+    {key: 'embedding_gemini', label: t('config.toolModelEmbeddingGemini'), def: 'text-embedding-004'},
+    {key: 'embedding_ollama', label: t('config.toolModelEmbeddingOllama'), def: 'nomic-embed-text'},
+    {key: 'vision_deepseek', label: t('config.toolModelVisionDeepSeek'), def: 'deepseek-chat'},
   ];
   const tmContainer = container.querySelector('#tool-models-container');
   if (tmContainer) {
@@ -479,17 +481,16 @@ export async function render(container) {
     if (!aliasContainer) return;
     const entries = Object.entries(currentAliases);
     if (entries.length === 0) {
-      aliasContainer.innerHTML = '<div class="text-[11px] text-zinc-600 col-span-full">No custom aliases defined. Add one below.</div>';
+      aliasContainer.innerHTML = '<div class="text-[11px] text-zinc-600 col-span-full">' + t('config.noAliases') + '</div>';
       return;
     }
     aliasContainer.innerHTML = entries.map(([name, model]) => {
       return '<div class="flex items-center gap-2 bg-surface-700/50 rounded px-2 py-1.5">' +
         '<span class="text-xs text-ghost-400 font-medium">' + u.escapeHtml(name) + '</span>' +
         '<span class="text-[10px] text-zinc-500 flex-1 truncate font-mono">' + u.escapeHtml(model) + '</span>' +
-        '<button class="btn btn-ghost btn-sm text-zinc-500 hover:text-red-400 remove-alias" data-alias="' + u.escapeHtml(name) + '" title="Remove">×</button>' +
+        '<button class="btn btn-ghost btn-sm text-zinc-500 hover:text-red-400 remove-alias" data-alias="' + u.escapeHtml(name) + '" title="' + t('common.remove') + '">×</button>' +
         '</div>';
     }).join('');
-    // Attach remove handlers
     aliasContainer.querySelectorAll('.remove-alias').forEach(btn => {
       btn.addEventListener('click', () => {
         const aliasName = btn.dataset.alias;
@@ -506,11 +507,11 @@ export async function render(container) {
       const name = aliasNameInput?.value.trim();
       const model = aliasModelInput?.value.trim();
       if (!name || !model) {
-        u.toast('Both alias name and model ID are required', 'error');
+        u.toast(t('config.aliasRequiredFields'), 'error');
         return;
       }
       if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
-        u.toast('Alias name must be alphanumeric with hyphens/underscores only', 'error');
+        u.toast(t('config.aliasNameFormat'), 'error');
         return;
       }
       currentAliases[name] = model;
@@ -523,8 +524,8 @@ export async function render(container) {
   // ── Provider Fallback Chains (drag-to-reorder) ───────────────
   const CHAIN_DEFS = {
     web_search: {
-      label: 'Web Search',
-      desc: 'Search engine fallback order',
+      label: t('config.chainWebSearch'),
+      desc: t('config.chainWebSearchDesc'),
       providers: {
         perplexity_openrouter: 'Perplexity (OpenRouter)',
         perplexity_direct: 'Perplexity (direct)',
@@ -535,8 +536,8 @@ export async function render(container) {
       },
     },
     image_gen: {
-      label: 'Image Generation',
-      desc: 'Image gen provider fallback',
+      label: t('config.chainImageGen'),
+      desc: t('config.chainImageGenDesc'),
       providers: {
         openrouter: 'OpenRouter',
         google: 'Google Gemini',
@@ -544,8 +545,8 @@ export async function render(container) {
       },
     },
     vision: {
-      label: 'Vision / Image Analysis',
-      desc: 'Image analysis fallback',
+      label: t('config.chainVision'),
+      desc: t('config.chainVisionDesc'),
       providers: {
         openai: 'OpenAI (GPT-4o)',
         openrouter: 'OpenRouter',
@@ -555,8 +556,8 @@ export async function render(container) {
       },
     },
     tts: {
-      label: 'Text-to-Speech',
-      desc: 'TTS provider fallback',
+      label: t('config.chainTts'),
+      desc: t('config.chainTtsDesc'),
       providers: {
         edge: 'Edge TTS (free)',
         openai: 'OpenAI TTS',
@@ -564,8 +565,8 @@ export async function render(container) {
       },
     },
     embeddings: {
-      label: 'Embeddings',
-      desc: 'Embedding model fallback',
+      label: t('config.chainEmbeddings'),
+      desc: t('config.chainEmbeddingsDesc'),
       providers: {
         openrouter: 'OpenRouter',
         gemini: 'Google Gemini',
@@ -573,8 +574,8 @@ export async function render(container) {
       },
     },
     voice_stt: {
-      label: 'Voice STT',
-      desc: 'Speech-to-text fallback',
+      label: t('config.chainStt'),
+      desc: t('config.chainSttDesc'),
       providers: {
         moonshine: 'Moonshine (on-device)',
         openrouter: 'OpenRouter (Whisper)',
@@ -600,8 +601,8 @@ export async function render(container) {
     const state = currentChains[chainKey];
     const all = [...state.enabled, ...state.disabled];
     let html = '<div class="chain-card-header">' +
-      '<h4>' + u.escapeHtml(def.label) + '<span style="font-weight:400;color:rgba(255,255,255,0.3);margin-left:6px;font-size:10px">' + u.escapeHtml(def.desc) + '</span></h4>' +
-      '<button class="chain-reset" data-chain-reset="' + chainKey + '">Reset</button>' +
+      '<h4>' + u.escapeHtml(def.label) + '<span style="font-weight:400;color:rgba(255,255,255,0.3);margin-inline-start:6px;font-size:10px">' + u.escapeHtml(def.desc) + '</span></h4>' +
+      '<button class="chain-reset" data-chain-reset="' + chainKey + '">' + t('common.reset') + '</button>' +
       '</div><div class="chain-list" data-chain="' + chainKey + '">';
     let pos = 1;
     for (const id of all) {
@@ -671,9 +672,9 @@ export async function render(container) {
           refreshChainCard(chainKey);
         });
 
-        const toggle = item.querySelector('.chain-toggle');
-        if (toggle) {
-          toggle.addEventListener('click', e => {
+        const toggleEl = item.querySelector('.chain-toggle');
+        if (toggleEl) {
+          toggleEl.addEventListener('click', e => {
             e.stopPropagation();
             const id = item.dataset.provider;
             const state = currentChains[chainKey];
@@ -710,7 +711,6 @@ export async function render(container) {
   container.querySelectorAll('.toggle').forEach(el => {
     el.addEventListener('click', () => {
       el.classList.toggle('on');
-      // Handle dangerous interpreters toggle to enable/disable policy container
       if (el.dataset.toggle === 'enable_dangerous_interpreters') {
         const containerEl = document.getElementById('dangerous-policy-container');
         if (containerEl) {
@@ -736,12 +736,12 @@ export async function render(container) {
     try {
       const vs = await api.get('/api/voice/status');
       const active = vs.ok && vs.state !== 'idle' && vs.state !== 'unavailable';
-      const labels = { wake_listening:'Wake active', talk_listening:'Talk active', capturing:'Capturing…', processing:'Processing…', speaking:'Speaking…' };
-      voiceStateEl.textContent = active ? (labels[vs.state] || vs.state) : (vs.ok ? 'Idle' : 'Unavailable');
+      const labels = { wake_listening: t('config.wakeActive'), talk_listening: t('config.talkActive'), capturing: t('config.capturing'), processing: t('config.processingAudio'), speaking: t('config.speakingAudio') };
+      voiceStateEl.textContent = active ? (labels[vs.state] || vs.state) : (vs.ok ? t('status.idle') : t('config.unavailable'));
       voiceStateEl.className = active ? 'text-xs text-emerald-400' : 'text-xs text-zinc-500';
       if (active) { wakeBtn.classList.add('hidden'); talkBtn.classList.add('hidden'); stopBtn2.classList.remove('hidden'); }
       else { wakeBtn.classList.remove('hidden'); talkBtn.classList.remove('hidden'); stopBtn2.classList.add('hidden'); }
-    } catch { voiceStateEl.textContent = 'Unavailable'; }
+    } catch { voiceStateEl.textContent = t('config.unavailable'); }
   }
   refreshVoiceState();
 
@@ -764,15 +764,14 @@ export async function render(container) {
     const roots = document.getElementById('allowed-roots').value;
     updates.allowed_roots = roots.split('\n').map(s => s.trim()).filter(Boolean);
 
-    // Dangerous interpreter policy
     const enableDangerous = container.querySelector('[data-toggle="enable_dangerous_interpreters"]')?.classList.contains('on') || false;
     updates.enable_dangerous_interpreters = enableDangerous;
     if (enableDangerous && !cfg.enable_dangerous_interpreters) {
-      const token = prompt('WARNING: Enabling dangerous interpreters allows Python/pip execution.\n\nType "I_UNDERSTAND_THE_RISK" to confirm:');
+      const token = prompt(t('config.dangerousConfirmPrompt'));
       if (token === 'I_UNDERSTAND_THE_RISK') {
         updates.dangerous_interpreters_confirmation = token;
       } else {
-        u.toast('Confirmation required to enable dangerous interpreters', 'error');
+        u.toast(t('config.dangerousConfirmRequired'), 'error');
         return;
       }
     }
@@ -809,10 +808,8 @@ export async function render(container) {
     });
     updates.tool_models = toolModels;
 
-    // Include skill model aliases
     updates.skill_model_aliases = currentAliases;
 
-    // Include provider chains (only enabled providers, in order)
     const chains = {};
     for (const [chainKey, state] of Object.entries(currentChains)) {
       chains[chainKey] = state.enabled;
@@ -845,13 +842,13 @@ export async function render(container) {
       } catch {}
     }
 
-    u.toast('Configuration saved');
+    u.toast(t('config.configSaved'));
   });
 
   document.getElementById('btn-reset-config')?.addEventListener('click', async () => {
-    if (!confirm('Reset all settings to defaults?')) return;
+    if (!confirm(t('config.resetConfirm'))) return;
     await api.put('/api/config', defs);
-    u.toast('Reset to defaults');
+    u.toast(t('config.resetDefaults'));
     render(container);
   });
 }

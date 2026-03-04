@@ -1,5 +1,7 @@
 /** Projects page — manage Ghost project workspaces */
 
+const t = (key, params) => window.GhostI18n?.t(key, params) ?? key;
+
 let allProjects = [];
 let allSkills = [];
 let editingProject = null;
@@ -24,18 +26,18 @@ export async function render(container) {
 
   container.innerHTML = `
     <div class="flex items-center justify-between mb-1">
-      <h1 class="page-header">Projects</h1>
-      <button id="btn-new-project" class="btn btn-primary">+ New Project</button>
+      <h1 class="page-header">${t('projects.title')}</h1>
+      <button id="btn-new-project" class="btn btn-primary">${t('projects.newProject')}</button>
     </div>
-    <p class="page-desc">${projectsData.count} project workspace${projectsData.count === 1 ? '' : 's'} configured</p>
+    <p class="page-desc">${t('projects.subtitle', { n: projectsData.count })}</p>
 
     <div class="flex gap-3 mb-6">
-      <input id="projects-search" type="text" class="form-input flex-1" placeholder="Search projects by name or path...">
+      <input id="projects-search" type="text" class="form-input flex-1" placeholder="${t('projects.searchPlaceholder')}">
       <select id="projects-filter" class="form-input" style="width:150px">
-        <option value="all">All Projects</option>
-        <option value="active">Active</option>
-        <option value="isolated">Isolated Memory</option>
-        <option value="shared">Shared Memory</option>
+        <option value="all">${t('projects.allProjects')}</option>
+        <option value="active">${t('projects.activeProjects')}</option>
+        <option value="isolated">${t('projects.isolatedMemory')}</option>
+        <option value="shared">${t('projects.sharedMemory')}</option>
       </select>
     </div>
 
@@ -44,19 +46,19 @@ export async function render(container) {
     <div id="project-modal" class="modal-overlay" style="display:none;">
       <div class="stat-card" style="width:100%;max-width:520px;border-color:rgba(139,92,246,0.3);max-height:85vh;overflow-y:auto;">
         <div class="flex items-center justify-between mb-4">
-          <h3 id="modal-title" class="text-sm font-semibold text-white">New Project</h3>
+          <h3 id="modal-title" class="text-sm font-semibold text-white">${t('projects.newProjectTitle')}</h3>
           <button id="modal-close" class="text-zinc-500 hover:text-zinc-300 text-xl leading-none">&times;</button>
         </div>
         <div class="space-y-4">
           <div>
-            <label class="form-label">Name</label>
-            <input id="inp-name" type="text" class="form-input w-full" placeholder="My Project">
+            <label class="form-label">${t('projects.nameLabel')}</label>
+            <input id="inp-name" type="text" class="form-input w-full" placeholder="${t('projects.namePlaceholder')}">
           </div>
           <div>
-            <label class="form-label">Folder</label>
+            <label class="form-label">${t('projects.folder')}</label>
             <div class="flex gap-2">
-              <input id="inp-path" type="text" class="form-input flex-1" placeholder="/path/to/project">
-              <button id="btn-browse" class="btn btn-secondary text-xs" style="white-space:nowrap">Browse...</button>
+              <input id="inp-path" type="text" class="form-input flex-1" placeholder="${t('projects.folderPlaceholder')}">
+              <button id="btn-browse" class="btn btn-secondary text-xs" style="white-space:nowrap">${t('projects.browse')}</button>
             </div>
             <div id="folder-browser" style="display:none" class="mt-2">
               <div id="folder-breadcrumb" class="text-[10px] text-zinc-500 mb-1 font-mono truncate"></div>
@@ -64,15 +66,15 @@ export async function render(container) {
             </div>
           </div>
           <div>
-            <label class="form-label">Description</label>
-            <textarea id="inp-desc" class="form-input w-full" rows="2" placeholder="Optional description"></textarea>
+            <label class="form-label">${t('common.description')}</label>
+            <textarea id="inp-desc" class="form-input w-full" rows="2" placeholder="${t('projects.descriptionPlaceholder')}"></textarea>
           </div>
           <div>
-            <label class="form-label">Memory Scope</label>
+            <label class="form-label">${t('projects.memoryScope')}</label>
             <select id="inp-memory" class="form-input w-full">
-              <option value="inherit">Inherit (default)</option>
-              <option value="isolated">Isolated</option>
-              <option value="shared">Shared</option>
+              <option value="inherit">${t('projects.inheritDefault')}</option>
+              <option value="isolated">${t('projects.isolated')}</option>
+              <option value="shared">${t('projects.shared')}</option>
             </select>
           </div>
           <div>
@@ -80,26 +82,26 @@ export async function render(container) {
               <svg id="advanced-arrow" class="w-3 h-3 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" style="transform:rotate(0deg)">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
               </svg>
-              Advanced: Skill Restrictions (optional)
+              ${t('projects.advancedSkillRestrictions')}
             </button>
             <div id="advanced-section" style="display:none" class="mt-3 space-y-4">
-              <p class="text-[10px] text-zinc-600">By default Ghost has access to all skills. Use these options only if you want to restrict what Ghost can do within this project.</p>
+              <p class="text-[10px] text-zinc-600">${t('projects.skillRestrictionsDesc')}</p>
               <div>
-                <label class="form-label">Restrict to these skills only</label>
-                <p class="text-[10px] text-zinc-500 mb-2">If any are selected, Ghost will ONLY use these skills in this project. Leave empty for full access.</p>
+                <label class="form-label">${t('projects.restrictToSkills')}</label>
+                <p class="text-[10px] text-zinc-500 mb-2">${t('projects.restrictToSkillsDesc')}</p>
                 <div id="skills-enabled-list" class="skill-picker"></div>
               </div>
               <div>
-                <label class="form-label">Block these skills</label>
-                <p class="text-[10px] text-zinc-500 mb-2">Ghost will never use these skills in this project, even if requested.</p>
+                <label class="form-label">${t('projects.blockSkills')}</label>
+                <p class="text-[10px] text-zinc-500 mb-2">${t('projects.blockSkillsDesc')}</p>
                 <div id="skills-disabled-list" class="skill-picker"></div>
               </div>
             </div>
           </div>
         </div>
         <div class="flex justify-end gap-2 mt-6">
-          <button id="btn-cancel" class="btn btn-secondary">Cancel</button>
-          <button id="btn-save" class="btn btn-primary">Save</button>
+          <button id="btn-cancel" class="btn btn-secondary">${t('common.cancel')}</button>
+          <button id="btn-save" class="btn btn-primary">${t('common.save')}</button>
         </div>
       </div>
     </div>
@@ -147,7 +149,7 @@ function renderSkillPicker(containerId, selectedSkills) {
   const selected = new Set(selectedSkills || []);
 
   if (allSkills.length === 0) {
-    el.innerHTML = '<span class="text-xs text-zinc-600">No skills found</span>';
+    el.innerHTML = `<span class="text-xs text-zinc-600">${t('projects.noSkillsFound')}</span>`;
     return;
   }
 
@@ -188,8 +190,8 @@ function renderProjects(projects, container, u) {
         <svg class="w-10 h-10 mx-auto mb-3 text-zinc-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
         </svg>
-        <div class="text-zinc-400 text-sm">No projects yet</div>
-        <div class="text-zinc-600 text-xs mt-1">Create a project to give Ghost workspace context</div>
+        <div class="text-zinc-400 text-sm">${t('projects.noProjects')}</div>
+        <div class="text-zinc-600 text-xs mt-1">${t('projects.noProjectsDesc')}</div>
       </div>
     `;
     return;
@@ -199,7 +201,7 @@ function renderProjects(projects, container, u) {
     const memoryScope = p.memory_scope || p.config?.memory_scope || 'inherit';
     const skills = p.skills || p.config?.skills || [];
     const disabled = p.disabled_skills || p.config?.disabled_skills || [];
-    const isActive = p.is_active ? '<span class="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-medium ml-2">active</span>' : '';
+    const isActive = p.is_active ? `<span class="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-medium ml-2">${t('common.active')}</span>` : '';
 
     return `
       <div class="stat-card project-card" data-project-id="${u.escapeHtml(p.id)}">
@@ -212,10 +214,10 @@ function renderProjects(projects, container, u) {
             ${isActive}
           </div>
           <div class="flex gap-1">
-            <button class="text-zinc-500 hover:text-white text-xs px-1" data-edit="${u.escapeHtml(p.id)}" title="Edit">
+            <button class="text-zinc-500 hover:text-white text-xs px-1" data-edit="${u.escapeHtml(p.id)}" title="${t('common.edit')}">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
             </button>
-            <button class="text-zinc-500 hover:text-red-400 text-xs px-1" data-delete="${u.escapeHtml(p.id)}" title="Delete">
+            <button class="text-zinc-500 hover:text-red-400 text-xs px-1" data-delete="${u.escapeHtml(p.id)}" title="${t('common.delete')}">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
             </button>
           </div>
@@ -225,7 +227,7 @@ function renderProjects(projects, container, u) {
         <div class="flex flex-wrap gap-1 mb-2">
           <span class="text-[9px] px-1.5 py-0.5 rounded-full font-medium ${memoryScope === 'isolated' ? 'bg-purple-500/20 text-purple-400' : memoryScope === 'shared' ? 'bg-blue-500/20 text-blue-400' : 'bg-zinc-600/30 text-zinc-400'}">memory: ${memoryScope}</span>
           ${skills.length ? `<span class="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-medium">${skills.length} skill${skills.length > 1 ? 's' : ''}</span>` : ''}
-          ${disabled.length ? `<span class="text-[9px] px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400 font-medium">${disabled.length} disabled</span>` : ''}
+          ${disabled.length ? `<span class="text-[9px] px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400 font-medium">${disabled.length} ${t('common.disabled').toLowerCase()}</span>` : ''}
         </div>
       </div>
     `;
@@ -244,10 +246,10 @@ function renderProjects(projects, container, u) {
       const id = btn.dataset.delete;
       const project = allProjects.find(p => p.id === id);
       if (!project) return;
-      if (!confirm(`Delete project "${project.name}"?\n\nThis removes it from the registry but does NOT delete any files.`)) return;
+      if (!confirm(t('projects.deleteConfirm', { name: project.name }))) return;
       const { GhostAPI: api, GhostUtils: u } = window;
       await api.del(`/api/projects/${id}`);
-      u.toast('Project deleted');
+      u.toast(t('projects.projectDeleted'));
       render(container);
     });
   });
@@ -274,7 +276,7 @@ function applyFilters(container, u) {
 
 function openModal(container, project) {
   editingProject = project;
-  document.getElementById('modal-title').textContent = project ? 'Edit Project' : 'New Project';
+  document.getElementById('modal-title').textContent = project ? t('projects.editProject') : t('projects.newProjectTitle');
   document.getElementById('inp-name').value = project?.name || '';
   document.getElementById('inp-path').value = project?.path || '';
   document.getElementById('inp-desc').value = project?.description || project?.config?.description || '';
@@ -311,7 +313,7 @@ async function saveProject(container, api, u) {
   const disabled = getSelectedSkills('skills-disabled-list');
 
   if (!name) {
-    u.toast('Name is required', 'error');
+    u.toast(t('projects.nameRequired'), 'error');
     return;
   }
 
@@ -324,22 +326,22 @@ async function saveProject(container, api, u) {
         skills,
         disabled_skills: disabled,
       });
-      u.toast('Project updated');
+      u.toast(t('projects.projectUpdated'));
     } else {
       if (!path) {
-        u.toast('Path is required', 'error');
+        u.toast(t('projects.pathRequired'), 'error');
         return;
       }
       const body = { path, name, description, memory_scope };
       if (skills.length) body.skills = skills;
       if (disabled.length) body.disabled_skills = disabled;
       await api.post('/api/projects', body);
-      u.toast('Project created');
+      u.toast(t('projects.projectCreated'));
     }
     closeModal();
     render(container);
   } catch (e) {
-    u.toast(e.message || 'Failed to save project', 'error');
+    u.toast(e.message || t('projects.failedSave'), 'error');
   }
 }
 
@@ -348,7 +350,7 @@ async function _loadDirectory(api, pathStr) {
   const breadcrumb = document.getElementById('folder-breadcrumb');
   if (!list) return;
 
-  list.innerHTML = '<div class="text-[10px] text-zinc-500 p-2">Loading...</div>';
+  list.innerHTML = `<div class="text-[10px] text-zinc-500 p-2">${t('common.loading')}</div>`;
 
   try {
     const params = pathStr ? `?path=${encodeURIComponent(pathStr)}` : '';
@@ -371,7 +373,7 @@ async function _loadDirectory(api, pathStr) {
       <svg class="w-3 h-3 text-emerald-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
       </svg>
-      <span class="text-emerald-400 font-medium">Select this folder</span>
+      <span class="text-emerald-400 font-medium">${t('projects.selectFolder')}</span>
     </div>`;
 
     for (const dir of data.directories) {
@@ -385,7 +387,7 @@ async function _loadDirectory(api, pathStr) {
     }
 
     if (data.directories.length === 0) {
-      html += '<div class="text-[10px] text-zinc-600 p-2">No subdirectories</div>';
+      html += `<div class="text-[10px] text-zinc-600 p-2">${t('projects.noSubdirectories')}</div>`;
     }
 
     list.innerHTML = html;
@@ -403,6 +405,6 @@ async function _loadDirectory(api, pathStr) {
       }
     });
   } catch (e) {
-    list.innerHTML = `<div class="text-[10px] text-red-400 p-2">${e.message || 'Failed to browse'}</div>`;
+    list.innerHTML = `<div class="text-[10px] text-red-400 p-2">${e.message || t('projects.failedBrowse')}</div>`;
   }
 }

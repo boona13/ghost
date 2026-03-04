@@ -1,14 +1,15 @@
 /** Integrations page — manage Google and Grok API connections */
 
+const t = (key, params) => window.GhostI18n?.t(key, params) ?? key;
+
 export async function render(container) {
   const { GhostAPI: api, GhostUtils: u } = window;
   
-  // Load current integrations status
   let status = {};
   try {
     status = await api.get('/api/integrations');
   } catch (e) {
-    container.innerHTML = `<div class="text-red-400 p-4">Error loading integrations: ${e.message}</div>`;
+    container.innerHTML = `<div class="text-red-400 p-4">${t('integrations.errorLoading')} ${e.message}</div>`;
     return;
   }
 
@@ -23,7 +24,7 @@ export async function render(container) {
     if (google.connected) {
       const user = google.user || {};
       return `
-        <div class="stat-card border-l-4 border-emerald-500">
+        <div class="stat-card border-emerald-500" style="border-inline-start: 4px solid rgb(16,185,129)">
           <div class="flex items-center justify-between mb-4">
             <div class="flex items-center gap-3">
               <div class="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
@@ -35,11 +36,11 @@ export async function render(container) {
                 </svg>
               </div>
               <div>
-                <h3 class="font-semibold text-white">Google</h3>
-                <p class="text-sm text-zinc-400">${user.email || user.name || 'Connected'}</p>
+                <h3 class="font-semibold text-white">${t('integrations.google')}</h3>
+                <p class="text-sm text-zinc-400">${user.email || user.name || t('status.connected')}</p>
               </div>
             </div>
-            <span class="px-2 py-1 text-xs bg-emerald-500/20 text-emerald-400 rounded">Connected</span>
+            <span class="px-2 py-1 text-xs bg-emerald-500/20 text-emerald-400 rounded">${t('status.connected')}</span>
           </div>
           
           <div class="grid grid-cols-2 md:grid-cols-5 gap-2 mb-4">
@@ -57,8 +58,8 @@ export async function render(container) {
           </div>
           
           <div class="flex gap-2">
-            <button id="btn-google-test" class="btn btn-secondary btn-sm">Test Connection</button>
-            <button id="btn-google-disconnect" class="btn btn-danger btn-sm">Disconnect</button>
+            <button id="btn-google-test" class="btn btn-secondary btn-sm">${t('integrations.testConnection')}</button>
+            <button id="btn-google-disconnect" class="btn btn-danger btn-sm">${t('common.disconnect')}</button>
           </div>
         </div>
       `;
@@ -75,26 +76,26 @@ export async function render(container) {
               </svg>
             </div>
             <div>
-              <h3 class="font-semibold text-white">Google</h3>
-              <p class="text-sm text-zinc-400">Connect your Google account to access Gmail, Calendar, Drive, Docs & Sheets</p>
+              <h3 class="font-semibold text-white">${t('integrations.google')}</h3>
+              <p class="text-sm text-zinc-400">${t('integrations.connectGoogle')}</p>
             </div>
           </div>
           
           ${!google.ghost_credentials_configured ? `
             <div class="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 mb-4">
-              <p class="text-sm text-amber-400 mb-2">⚠️ Google OAuth Not Configured</p>
-              <p class="text-xs text-zinc-400 mb-3">Ghost needs OAuth credentials to connect with Google. Set them up via:</p>
+              <p class="text-sm text-amber-400 mb-2">⚠️ ${t('integrations.oauthNotConfigured')}</p>
+              <p class="text-xs text-zinc-400 mb-3">${t('integrations.oauthNotConfiguredDesc')}</p>
               <ol class="text-xs text-zinc-400 list-decimal list-inside space-y-1 mb-3">
                 <li><a href="https://console.cloud.google.com/apis/credentials" target="_blank" class="text-ghost-400 hover:underline">Google Cloud Console</a></li>
-                <li>Create OAuth 2.0 credentials</li>
-                <li>Add <code class="bg-surface-700 px-1 rounded">http://localhost:5000/api/integrations/google/callback</code> as redirect URI</li>
+                <li>${t('integrations.oauthStep2')}</li>
+                <li>${t('integrations.oauthStep3')}: <code class="bg-surface-700 px-1 rounded">http://localhost:5000/api/integrations/google/callback</code></li>
               </ol>
               <details class="group">
-                <summary class="text-xs text-ghost-400 cursor-pointer hover:text-ghost-300">Advanced: Configure credentials manually</summary>
+                <summary class="text-xs text-ghost-400 cursor-pointer hover:text-ghost-300">${t('integrations.advancedConfigCreds')}</summary>
                 <div class="mt-3 space-y-2">
-                  <input type="text" id="google-client-id" placeholder="Client ID" class="form-input w-full text-sm">
-                  <input type="password" id="google-client-secret" placeholder="Client Secret" class="form-input w-full text-sm">
-                  <button id="btn-google-save-creds" class="btn btn-secondary btn-sm w-full">Save Credentials</button>
+                  <input type="text" id="google-client-id" placeholder="${t('integrations.clientId')}" class="form-input w-full text-sm">
+                  <input type="password" id="google-client-secret" placeholder="${t('integrations.clientSecret')}" class="form-input w-full text-sm">
+                  <button id="btn-google-save-creds" class="btn btn-secondary btn-sm w-full">${t('integrations.saveCredentials')}</button>
                 </div>
               </details>
             </div>
@@ -108,12 +109,12 @@ export async function render(container) {
                     <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
                     <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
                   </svg>
-                  <span>Sign in with Google</span>
+                  <span>${t('integrations.signInGoogle')}</span>
                 </button>
               </div>
               
               <div class="text-center">
-                <p class="text-xs text-zinc-500">Select which services to grant access to:</p>
+                <p class="text-xs text-zinc-500">${t('integrations.selectServices')}</p>
               </div>
               
               <div class="grid grid-cols-2 md:grid-cols-5 gap-2">
@@ -134,7 +135,7 @@ export async function render(container) {
   const renderGrokSection = () => {
     if (grok.connected) {
       return `
-        <div class="stat-card border-l-4 border-emerald-500">
+        <div class="stat-card border-emerald-500" style="border-inline-start: 4px solid rgb(16,185,129)">
           <div class="flex items-center justify-between mb-4">
             <div class="flex items-center gap-3">
               <div class="w-10 h-10 rounded-lg bg-zinc-800 flex items-center justify-center">
@@ -144,14 +145,14 @@ export async function render(container) {
               </div>
               <div>
                 <h3 class="font-semibold text-white">Grok / X AI</h3>
-                <p class="text-sm text-zinc-400">Full access (direct xAI key)</p>
+                <p class="text-sm text-zinc-400">${t('integrations.fullAccess')}</p>
               </div>
             </div>
-            <span class="px-2 py-1 text-xs bg-emerald-500/20 text-emerald-400 rounded">Connected</span>
+            <span class="px-2 py-1 text-xs bg-emerald-500/20 text-emerald-400 rounded">${t('status.connected')}</span>
           </div>
 
           <div class="grid grid-cols-2 md:grid-cols-3 gap-2 mb-4">
-            ${['Text Gen', 'Content Creation', 'Web Search', 'X Search', 'Image Gen', 'Image Edit', 'Vision'].map(s =>
+            ${[t('integrations.capTextGen'), t('integrations.capContentCreation'), t('integrations.capWebSearch'), t('integrations.capXSearch'), t('integrations.capImageGen'), t('integrations.capImageEdit'), t('integrations.capVision')].map(s =>
               `<div class="flex items-center gap-2 p-2 rounded bg-surface-700/50 text-emerald-400">
                 <span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:#10b981;flex-shrink:0"><svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
                 <span class="text-xs">${s}</span>
@@ -160,23 +161,23 @@ export async function render(container) {
           </div>
           
           <div class="flex gap-2">
-            <button id="btn-grok-test" class="btn btn-secondary btn-sm">Test API</button>
-            <button id="btn-grok-disconnect" class="btn btn-danger btn-sm">Remove Key</button>
+            <button id="btn-grok-test" class="btn btn-secondary btn-sm">${t('integrations.testApi')}</button>
+            <button id="btn-grok-disconnect" class="btn btn-danger btn-sm">${t('integrations.removeKey')}</button>
           </div>
         </div>
       `;
     } else if (grok.openrouter_fallback) {
       const caps = [
-        {name: 'Text Gen',         on: true},
-        {name: 'Content Creation', on: true},
-        {name: 'Vision',           on: true},
-        {name: 'Web Search',       on: false},
-        {name: 'X Search',         on: false},
-        {name: 'Image Gen',        on: false},
-        {name: 'Image Edit',       on: false},
+        {name: t('integrations.capTextGen'),         on: true},
+        {name: t('integrations.capContentCreation'), on: true},
+        {name: t('integrations.capVision'),           on: true},
+        {name: t('integrations.capWebSearch'),       on: false},
+        {name: t('integrations.capXSearch'),         on: false},
+        {name: t('integrations.capImageGen'),        on: false},
+        {name: t('integrations.capImageEdit'),       on: false},
       ];
       return `
-        <div class="stat-card border-l-4 border-amber-500">
+        <div class="stat-card border-amber-500" style="border-inline-start: 4px solid rgb(245,158,11)">
           <div class="flex items-center justify-between mb-4">
             <div class="flex items-center gap-3">
               <div class="w-10 h-10 rounded-lg bg-zinc-800 flex items-center justify-center">
@@ -186,10 +187,10 @@ export async function render(container) {
               </div>
               <div>
                 <h3 class="font-semibold text-white">Grok / X AI</h3>
-                <p class="text-sm text-zinc-400">Partial access via OpenRouter</p>
+                <p class="text-sm text-zinc-400">${t('integrations.partialAccess')}</p>
               </div>
             </div>
-            <span class="px-2 py-1 text-xs bg-amber-500/20 text-amber-400 rounded">Fallback</span>
+            <span class="px-2 py-1 text-xs bg-amber-500/20 text-amber-400 rounded">${t('integrations.fallback')}</span>
           </div>
 
           <div class="grid grid-cols-2 md:grid-cols-3 gap-2 mb-4">
@@ -205,15 +206,14 @@ export async function render(container) {
           </div>
           
           <p class="text-xs text-zinc-500 mb-3">
-            Model: configurable in <a href="#config" class="text-ghost-400 hover:underline">Config &rarr; Models</a>.
-            Add an xAI key to unlock search, image gen/edit.
+            ${t('integrations.grokFallbackNote')}
           </p>
 
           <div class="space-y-3">
-            <input type="password" id="grok-api-key" placeholder="xAI API Key (starts with xai-)" class="form-input w-full text-sm">
-            <button id="btn-grok-connect" class="btn btn-primary w-full">Add xAI Key for Full Access</button>
+            <input type="password" id="grok-api-key" placeholder="${t('integrations.xaiKeyPlaceholder')}" class="form-input w-full text-sm">
+            <button id="btn-grok-connect" class="btn btn-primary w-full">${t('integrations.addXaiKey')}</button>
             <p class="text-xs text-zinc-500">
-              Get your key from <a href="https://console.x.ai" target="_blank" class="text-ghost-400 hover:underline">xAI Console</a>
+              ${t('integrations.getKeyFrom')} — <a href="https://console.x.ai" target="_blank" class="text-ghost-400 hover:underline">xAI Console</a>
             </p>
           </div>
         </div>
@@ -229,16 +229,15 @@ export async function render(container) {
             </div>
             <div>
               <h3 class="font-semibold text-white">Grok / X AI</h3>
-              <p class="text-sm text-zinc-400">Access Grok AI and X/Twitter search</p>
+              <p class="text-sm text-zinc-400">${t('integrations.accessGrok')}</p>
             </div>
           </div>
           
           <div class="space-y-3">
-            <input type="password" id="grok-api-key" placeholder="xAI API Key (starts with xai-)" class="form-input w-full text-sm">
-            <button id="btn-grok-connect" class="btn btn-primary w-full">Save API Key</button>
+            <input type="password" id="grok-api-key" placeholder="${t('integrations.xaiKeyPlaceholder')}" class="form-input w-full text-sm">
+            <button id="btn-grok-connect" class="btn btn-primary w-full">${t('integrations.saveApiKey')}</button>
             <p class="text-xs text-zinc-500">
-              Get your API key from <a href="https://console.x.ai" target="_blank" class="text-ghost-400 hover:underline">xAI Console</a>.
-              Or set up OpenRouter on the <a href="#models" class="text-ghost-400 hover:underline">Models page</a> to use Grok via OpenRouter.
+              ${t('integrations.grokGetKeyNote')}
             </p>
           </div>
         </div>
@@ -264,7 +263,7 @@ export async function render(container) {
     }).join('');
 
     return `
-      <div class="stat-card ${hasActive ? 'border-l-4 border-emerald-500' : ''}">
+      <div class="stat-card" ${hasActive ? 'style="border-inline-start: 4px solid rgb(16,185,129)"' : ''}>
         <div class="flex items-center justify-between mb-4">
           <div class="flex items-center gap-3">
             <div class="w-10 h-10 rounded-lg bg-violet-500/20 flex items-center justify-center">
@@ -273,13 +272,13 @@ export async function render(container) {
               </svg>
             </div>
             <div>
-              <h3 class="font-semibold text-white">Web Search</h3>
-              <p class="text-sm text-zinc-400">${activeCount} provider${activeCount !== 1 ? 's' : ''} active with auto-fallback</p>
+              <h3 class="font-semibold text-white">${t('integrations.webSearch')}</h3>
+              <p class="text-sm text-zinc-400">${activeCount} ${t('integrations.providersActive')}</p>
             </div>
           </div>
           ${hasActive
-            ? '<span class="px-2 py-1 text-xs bg-emerald-500/20 text-emerald-400 rounded">Active</span>'
-            : '<span class="px-2 py-1 text-xs bg-zinc-700 text-zinc-400 rounded">No providers</span>'}
+            ? `<span class="px-2 py-1 text-xs bg-emerald-500/20 text-emerald-400 rounded">${t('common.active')}</span>`
+            : `<span class="px-2 py-1 text-xs bg-zinc-700 text-zinc-400 rounded">${t('integrations.noProviders')}</span>`}
         </div>
 
         <div class="grid grid-cols-2 md:grid-cols-3 gap-2 mb-4">
@@ -287,9 +286,7 @@ export async function render(container) {
         </div>
 
         <p class="text-xs text-zinc-500">
-          Perplexity uses your OpenRouter key. Grok uses your xAI key. For Brave or Gemini, set
-          <code class="bg-surface-700 px-1 rounded">BRAVE_API_KEY</code> or
-          <code class="bg-surface-700 px-1 rounded">GEMINI_API_KEY</code> in your environment.
+          ${t('integrations.webSearchNote')}
         </p>
       </div>
     `;
@@ -312,7 +309,7 @@ export async function render(container) {
   const renderFeatureCard = (title, subtitle, icon, featureData, extraHtml) => {
     const hasActive = featureData.active_count > 0;
     return `
-      <div class="stat-card ${hasActive ? 'border-l-4 border-emerald-500' : ''}">
+      <div class="stat-card" ${hasActive ? 'style="border-inline-start: 4px solid rgb(16,185,129)"' : ''}>
         <div class="flex items-center justify-between mb-4">
           <div class="flex items-center gap-3">
             <div class="w-10 h-10 rounded-lg bg-ghost-500/20 flex items-center justify-center">
@@ -324,8 +321,8 @@ export async function render(container) {
             </div>
           </div>
           ${hasActive
-            ? `<span class="px-2 py-1 text-xs bg-emerald-500/20 text-emerald-400 rounded">${featureData.active_count} active</span>`
-            : '<span class="px-2 py-1 text-xs bg-zinc-700 text-zinc-400 rounded">No providers</span>'}
+            ? `<span class="px-2 py-1 text-xs bg-emerald-500/20 text-emerald-400 rounded">${featureData.active_count} ${t('common.active').toLowerCase()}</span>`
+            : `<span class="px-2 py-1 text-xs bg-zinc-700 text-zinc-400 rounded">${t('integrations.noProviders')}</span>`}
         </div>
         <div class="grid grid-cols-2 md:grid-cols-3 gap-2 mb-3">
           ${renderProviderBadges(featureData.providers)}
@@ -335,8 +332,8 @@ export async function render(container) {
   };
 
   container.innerHTML = `
-    <h1 class="page-header">Integrations</h1>
-    <p class="page-desc">Connect Ghost to external services and APIs</p>
+    <h1 class="page-header">${t('integrations.title')}</h1>
+    <p class="page-desc">${t('integrations.subtitle')}</p>
     
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
       ${renderGoogleSection()}
@@ -346,86 +343,86 @@ export async function render(container) {
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
       ${renderWebSearchSection()}
       ${renderFeatureCard(
-        'Image Generation', 
-        `${imageGen.active_count} provider${imageGen.active_count !== 1 ? 's' : ''} with auto-fallback`,
+        t('integrations.imageGen'), 
+        `${imageGen.active_count} ${t('integrations.providersActive')}`,
         '🎨', imageGen,
-        '<p class="text-xs text-zinc-500">Uses API keys from your configured LLM providers (Models page). Generates images via Gemini, DALL-E, or GPT-Image.</p>'
+        '<p class="text-xs text-zinc-500">' + t('integrations.imageGenNote') + '</p>'
       )}
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
       ${renderFeatureCard(
-        'Vision / Image Analysis',
-        `${vision.active_count} provider${vision.active_count !== 1 ? 's' : ''} with auto-fallback`,
+        t('integrations.visionAnalysis'),
+        `${vision.active_count} ${t('integrations.providersActive')}`,
         '👁️', vision,
-        '<p class="text-xs text-zinc-500">Uses existing provider keys. Ghost can analyze images, screenshots, and visual content via GPT-4o, Gemini, Claude, or Ollama (local).</p>'
+        '<p class="text-xs text-zinc-500">' + t('integrations.visionNote') + '</p>'
       )}
       ${renderFeatureCard(
-        'Text-to-Speech',
-        `${tts.active_count} provider${tts.active_count !== 1 ? 's' : ''} available`,
+        t('integrations.textToSpeech'),
+        `${tts.active_count} ${t('integrations.providersAvailable')}`,
         '🔊', tts,
         `<div class="mt-2 pt-2 border-t border-surface-600/30">
           <div class="flex gap-2">
-            <input type="password" id="elevenlabs-api-key" placeholder="ElevenLabs API Key (optional)" class="form-input flex-1 text-xs">
-            <button id="btn-elevenlabs-save" class="btn btn-secondary btn-sm">Save</button>
+            <input type="password" id="elevenlabs-api-key" placeholder="${t('integrations.elevenLabsKey')}" class="form-input flex-1 text-xs">
+            <button id="btn-elevenlabs-save" class="btn btn-secondary btn-sm">${t('common.save')}</button>
           </div>
-          <p class="text-[10px] text-zinc-600 mt-1">Edge TTS is free (no key). OpenAI TTS uses your existing key. <a href="https://elevenlabs.io" target="_blank" class="text-ghost-400 hover:underline">ElevenLabs</a> requires a separate key.</p>
+          <p class="text-[10px] text-zinc-600 mt-1">${t('integrations.ttsNote')}</p>
         </div>`
       )}
     </div>
 
     <div class="stat-card mt-6">
-      <h3 class="text-sm font-semibold text-white mb-3">Available Tools</h3>
-      <p class="text-sm text-zinc-400 mb-4">Once connected, Ghost can use these tools:</p>
+      <h3 class="text-sm font-semibold text-white mb-3">${t('integrations.availableTools')}</h3>
+      <p class="text-sm text-zinc-400 mb-4">${t('integrations.toolsDesc')}</p>
       
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
         <div class="p-3 rounded bg-surface-700/50">
           <div class="font-medium text-white text-sm">google_gmail</div>
-          <div class="text-xs text-zinc-500 mt-1">Read, send, search emails</div>
+          <div class="text-xs text-zinc-500 mt-1">${t('integrations.toolGmailDesc')}</div>
         </div>
         <div class="p-3 rounded bg-surface-700/50">
           <div class="font-medium text-white text-sm">google_calendar</div>
-          <div class="text-xs text-zinc-500 mt-1">List events, create meetings</div>
+          <div class="text-xs text-zinc-500 mt-1">${t('integrations.toolCalendarDesc')}</div>
         </div>
         <div class="p-3 rounded bg-surface-700/50">
           <div class="font-medium text-white text-sm">google_drive</div>
-          <div class="text-xs text-zinc-500 mt-1">List files, create folders</div>
+          <div class="text-xs text-zinc-500 mt-1">${t('integrations.toolDriveDesc')}</div>
         </div>
         <div class="p-3 rounded bg-surface-700/50">
           <div class="font-medium text-white text-sm">google_docs</div>
-          <div class="text-xs text-zinc-500 mt-1">Create and edit documents</div>
+          <div class="text-xs text-zinc-500 mt-1">${t('integrations.toolDocsDesc')}</div>
         </div>
         <div class="p-3 rounded bg-surface-700/50">
           <div class="font-medium text-white text-sm">google_sheets</div>
-          <div class="text-xs text-zinc-500 mt-1">Read/write spreadsheet data</div>
+          <div class="text-xs text-zinc-500 mt-1">${t('integrations.toolSheetsDesc')}</div>
         </div>
         <div class="p-3 rounded bg-surface-700/50">
           <div class="font-medium text-white text-sm">grok_api</div>
-          <div class="text-xs text-zinc-500 mt-1">Text, content creation, X/web search, image gen/edit</div>
+          <div class="text-xs text-zinc-500 mt-1">${t('integrations.toolGrokDesc')}</div>
         </div>
         <div class="p-3 rounded bg-surface-700/50">
           <div class="font-medium text-white text-sm">web_search</div>
-          <div class="text-xs text-zinc-500 mt-1">Search the web with auto-fallback</div>
+          <div class="text-xs text-zinc-500 mt-1">${t('integrations.toolPerplexityDesc')}</div>
         </div>
         <div class="p-3 rounded bg-surface-700/50">
           <div class="font-medium text-white text-sm">generate_image</div>
-          <div class="text-xs text-zinc-500 mt-1">AI image generation</div>
+          <div class="text-xs text-zinc-500 mt-1">${t('integrations.toolImageGenDesc')}</div>
         </div>
         <div class="p-3 rounded bg-surface-700/50">
           <div class="font-medium text-white text-sm">image_analyze</div>
-          <div class="text-xs text-zinc-500 mt-1">Analyze images and screenshots</div>
+          <div class="text-xs text-zinc-500 mt-1">${t('integrations.toolVisionDesc')}</div>
         </div>
         <div class="p-3 rounded bg-surface-700/50">
           <div class="font-medium text-white text-sm">text_to_speech</div>
-          <div class="text-xs text-zinc-500 mt-1">Convert text to audio</div>
+          <div class="text-xs text-zinc-500 mt-1">${t('integrations.toolTtsDesc')}</div>
         </div>
         <div class="p-3 rounded bg-surface-700/50">
           <div class="font-medium text-white text-sm">web_fetch</div>
-          <div class="text-xs text-zinc-500 mt-1">Fetch & extract web page content</div>
+          <div class="text-xs text-zinc-500 mt-1">${t('integrations.toolWebFetchDesc')}</div>
         </div>
         <div class="p-3 rounded bg-surface-700/50">
           <div class="font-medium text-white text-sm">security_audit</div>
-          <div class="text-xs text-zinc-500 mt-1">Security scanning & auto-fix</div>
+          <div class="text-xs text-zinc-500 mt-1">${t('integrations.toolSecurityAuditDesc')}</div>
         </div>
       </div>
     </div>
@@ -433,184 +430,166 @@ export async function render(container) {
   
   // Event handlers
   
-  // Google credential save (advanced/manual setup)
   document.getElementById('btn-google-save-creds')?.addEventListener('click', async () => {
     const clientId = document.getElementById('google-client-id').value.trim();
     const clientSecret = document.getElementById('google-client-secret').value.trim();
     
     if (!clientId) {
-      u.toast('Client ID is required', 'error');
+      u.toast(t('integrations.clientIdRequired'), 'error');
       return;
     }
     
     try {
       await api.put('/api/integrations/google/config', { client_id: clientId, client_secret: clientSecret });
-      u.toast('Google credentials saved');
-      render(container); // Re-render
+      u.toast(t('integrations.googleCredsSaved'));
+      render(container);
     } catch (e) {
-      u.toast('Failed to save credentials: ' + e.message, 'error');
+      u.toast(t('integrations.failedSaveCreds', {error: e.message}), 'error');
     }
   });
   
-  // Google Sign In button (new OAuth flow)
   document.getElementById('btn-google-signin')?.addEventListener('click', async () => {
     const checkboxes = document.querySelectorAll('.google-service-check:checked');
     const services = Array.from(checkboxes).map(cb => cb.value);
     
-    // If no services selected, default to all
     const selectedServices = services.length > 0 ? services : ['gmail', 'calendar', 'drive', 'docs', 'sheets'];
     
     try {
       const result = await api.get('/api/integrations/google/auth?' + selectedServices.map(s => `services=${s}`).join('&'));
       
-      // Open OAuth popup
       const popup = window.open(result.auth_url, 'google-oauth', 'width=500,height=600,scrollbars=yes');
       
-      // Listen for message from popup
       const handleMessage = (event) => {
         if (event.data?.type === 'google-auth-success') {
           window.removeEventListener('message', handleMessage);
-          u.toast('Google connected successfully');
-          render(container); // Re-render
+          u.toast(t('integrations.googleConnected'));
+          render(container);
         }
       };
       window.addEventListener('message', handleMessage);
       
-      // Check if popup closed without success
       const checkClosed = setInterval(() => {
         if (popup.closed) {
           clearInterval(checkClosed);
           window.removeEventListener('message', handleMessage);
-          // Refresh status
           render(container);
         }
       }, 1000);
       
     } catch (e) {
-      u.toast('Failed to start OAuth: ' + e.message, 'error');
+      u.toast(t('integrations.oauthStartFailed', {error: e.message}), 'error');
     }
   });
   
-  // Google connect (legacy, keep for compatibility)
   document.getElementById('btn-google-connect')?.addEventListener('click', async () => {
     const checkboxes = document.querySelectorAll('.google-service-check:checked');
     const services = Array.from(checkboxes).map(cb => cb.value);
     
     if (services.length === 0) {
-      u.toast('Select at least one service', 'error');
+      u.toast(t('integrations.selectOneService'), 'error');
       return;
     }
     
     try {
       const result = await api.get('/api/integrations/google/auth?' + services.map(s => `services=${s}`).join('&'));
       
-      // Open OAuth popup
       const popup = window.open(result.auth_url, 'google-oauth', 'width=500,height=600,scrollbars=yes');
       
-      // Listen for message from popup
       const handleMessage = (event) => {
         if (event.data?.type === 'google-auth-success') {
           window.removeEventListener('message', handleMessage);
-          u.toast('Google connected successfully');
-          render(container); // Re-render
+          u.toast(t('integrations.googleConnected'));
+          render(container);
         }
       };
       window.addEventListener('message', handleMessage);
       
-      // Check if popup closed without success
       const checkClosed = setInterval(() => {
         if (popup.closed) {
           clearInterval(checkClosed);
           window.removeEventListener('message', handleMessage);
-          // Refresh status
           render(container);
         }
       }, 1000);
       
     } catch (e) {
-      u.toast('Failed to start OAuth: ' + e.message, 'error');
+      u.toast(t('integrations.oauthStartFailed', {error: e.message}), 'error');
     }
   });
   
-  // Google disconnect
   document.getElementById('btn-google-disconnect')?.addEventListener('click', async () => {
-    if (!confirm('Disconnect Google account?')) return;
+    if (!confirm(t('integrations.disconnectGoogleConfirm'))) return;
     
     try {
       await api.post('/api/integrations/google/disconnect');
-      u.toast('Google disconnected');
+      u.toast(t('integrations.googleDisconnected'));
       render(container);
     } catch (e) {
-      u.toast('Failed to disconnect: ' + e.message, 'error');
+      u.toast(t('integrations.disconnectFailed', {error: e.message}), 'error');
     }
   });
   
-  // Google test
   document.getElementById('btn-google-test')?.addEventListener('click', async () => {
-    const service = prompt('Which service to test? (gmail, calendar, drive, docs, sheets)', 'gmail');
+    const service = prompt(t('integrations.testServicePrompt'), 'gmail');
     if (!service) return;
     
     try {
       const result = await api.get(`/api/integrations/google/test/${service}`);
-      u.toast(`Test successful: ${JSON.stringify(result.data || result.message || result)}`);
+      u.toast(t('integrations.testSuccessful', {result: JSON.stringify(result.data || result.message || result)}));
     } catch (e) {
-      u.toast('Test failed: ' + e.message, 'error');
+      u.toast(t('integrations.testFailed', {error: e.message}), 'error');
     }
   });
   
-  // Grok connect
   document.getElementById('btn-grok-connect')?.addEventListener('click', async () => {
     const apiKey = document.getElementById('grok-api-key').value.trim();
     
     if (!apiKey) {
-      u.toast('API key is required', 'error');
+      u.toast(t('integrations.apiKeyRequired'), 'error');
       return;
     }
     
     try {
       await api.put('/api/integrations/grok', { api_key: apiKey });
-      u.toast('Grok API key saved');
+      u.toast(t('integrations.grokKeySaved'));
       render(container);
     } catch (e) {
-      u.toast('Failed to save API key: ' + e.message, 'error');
+      u.toast(t('integrations.failedSaveKey', {error: e.message}), 'error');
     }
   });
   
-  // Grok disconnect
   document.getElementById('btn-grok-disconnect')?.addEventListener('click', async () => {
-    if (!confirm('Remove Grok API key?')) return;
+    if (!confirm(t('integrations.removeGrokConfirm'))) return;
     
     try {
       await api.delete('/api/integrations/grok');
-      u.toast('Grok disconnected');
+      u.toast(t('integrations.grokDisconnected'));
       render(container);
     } catch (e) {
-      u.toast('Failed to disconnect: ' + e.message, 'error');
+      u.toast(t('integrations.disconnectFailed', {error: e.message}), 'error');
     }
   });
   
-  // Grok test
   document.getElementById('btn-grok-test')?.addEventListener('click', async () => {
     try {
-      u.toast('Grok API is configured');
+      u.toast(t('integrations.grokConfigured'));
     } catch (e) {
-      u.toast('Test failed: ' + e.message, 'error');
+      u.toast(t('integrations.testFailed', {error: e.message}), 'error');
     }
   });
 
-  // ElevenLabs save
   document.getElementById('btn-elevenlabs-save')?.addEventListener('click', async () => {
     const apiKey = document.getElementById('elevenlabs-api-key').value.trim();
     if (!apiKey) {
-      u.toast('API key is required', 'error');
+      u.toast(t('integrations.apiKeyRequired'), 'error');
       return;
     }
     try {
       await api.put('/api/integrations/elevenlabs', { api_key: apiKey });
-      u.toast('ElevenLabs API key saved');
+      u.toast(t('integrations.elevenLabsSaved'));
       render(container);
     } catch (e) {
-      u.toast('Failed to save: ' + e.message, 'error');
+      u.toast(t('integrations.failedSave', {error: e.message}), 'error');
     }
   });
 }

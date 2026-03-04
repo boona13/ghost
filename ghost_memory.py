@@ -111,9 +111,18 @@ class MemoryDB:
     def _sanitize_fts_query(query):
         """Turn a natural-language query into a safe FTS5 expression.
 
-        Strips punctuation, removes stopwords, joins with OR so any
-        matching term produces results.
+        Uses ghost_query_expansion for multi-language keyword extraction
+        with stemming variants. Falls back to basic stopword removal if
+        the expansion module is unavailable.
         """
+        try:
+            from ghost_query_expansion import expand_query_for_fts
+            result = expand_query_for_fts(query)
+            if result["expanded"]:
+                return result["expanded"]
+        except ImportError:
+            pass
+
         import re
         stopwords = {
             "a", "an", "the", "is", "are", "was", "were", "be", "been",

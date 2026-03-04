@@ -1,5 +1,7 @@
 /** Chat page — unified conversation UI replacing native panel */
 
+const t = (key, params) => window.GhostI18n?.t(key, params) ?? key;
+
 let eventSource = null;
 let voicePollTimer = null;
 let _lastMessageFromVoice = false;
@@ -47,11 +49,11 @@ export async function render(container) {
   const voiceAvailable = voiceStatus && voiceStatus.ok;
 
   const voiceStateLabels = {
-    wake_listening: 'Voice Wake active',
-    talk_listening: 'Talk Mode active',
-    capturing: 'Hearing you…',
-    processing: 'Processing voice…',
-    speaking: 'Speaking…',
+    wake_listening: t('chat.voiceWake'),
+    talk_listening: t('chat.talkMode'),
+    capturing: t('chat.hearing'),
+    processing: t('chat.processingVoice'),
+    speaking: t('chat.speaking'),
   };
   const voiceStateLabel = voiceActive ? (voiceStateLabels[voiceStatus.state] || voiceStatus.state) : '';
 
@@ -67,8 +69,8 @@ export async function render(container) {
             </svg>
           </div>
           <div>
-            <div class="text-sm font-semibold text-white">Ghost Chat</div>
-            <div id="chat-status" class="text-xs text-zinc-500">Ready</div>
+            <div class="text-sm font-semibold text-white">${t('chat.title')}</div>
+            <div id="chat-status" class="text-xs text-zinc-500">${t('chat.ready')}</div>
           </div>
         </div>
         <div class="flex items-center gap-3">
@@ -78,13 +80,13 @@ export async function render(container) {
               <span id="voice-indicator-label" class="text-[10px] text-emerald-400">${voiceStateLabel}</span>
             </div>
           </div>
-          <button id="canvas-toggle" class="btn btn-sm btn-ghost text-xs hidden" title="Toggle Canvas">
+          <button id="canvas-toggle" class="btn btn-sm btn-ghost text-xs hidden" title="${t('chat.toggleCanvas')}">
             <svg class="w-3.5 h-3.5 inline -mt-0.5 mr-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"/>
             </svg>
-            Canvas
+            ${t('chat.canvas')}
           </button>
-          <button id="chat-clear" class="btn btn-sm btn-ghost text-xs">Clear</button>
+          <button id="chat-clear" class="btn btn-sm btn-ghost text-xs">${t('common.clear')}</button>
         </div>
       </div>
 
@@ -93,7 +95,7 @@ export async function render(container) {
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
         </svg>
         <select id="project-select" class="chat-project-select">
-          <option value="">No Project (global)</option>
+          <option value="">${t('chat.noProject')}</option>
         </select>
       </div>
 
@@ -101,8 +103,8 @@ export async function render(container) {
         ${history.length === 0 ? `
           <div id="chat-empty" class="chat-empty">
             <div class="text-3xl mb-3 opacity-40">&#x1F47B;</div>
-            <div class="text-sm font-medium text-zinc-400">No messages yet</div>
-            <div class="text-xs text-zinc-600 mt-1">Type below or use voice to talk to Ghost</div>
+            <div class="text-sm font-medium text-zinc-400">${t('chat.noMessages')}</div>
+            <div class="text-xs text-zinc-600 mt-1">${t('chat.typeBelow')}</div>
           </div>
         ` : ''}
       </div>
@@ -110,7 +112,7 @@ export async function render(container) {
       <div class="chat-input-area chat-drop-zone" id="chat-drop-zone">
         <div id="chat-attachments" class="chat-attachments" style="display:none"></div>
         <div class="chat-input-wrapper">
-          <button id="chat-attach" class="chat-attach-btn" title="Attach file">
+          <button id="chat-attach" class="chat-attach-btn" title="${t('chat.attachFile')}">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
@@ -119,35 +121,34 @@ export async function render(container) {
           <input type="file" id="chat-file-input" class="chat-file-input" multiple
             accept=".wav,.mp3,.m4a,.flac,.ogg,.webm,.aac,.jpg,.jpeg,.png,.gif,.webp,.bmp">
           <textarea id="chat-input" class="chat-input"
-            placeholder="Message Ghost..."
+            placeholder="${t('chat.messagePlaceholder')}"
             rows="1"></textarea>
-          <button id="chat-voice-toggle" class="chat-voice-btn ${voiceAvailable ? '' : 'hidden'}" title="Push to talk">
+          <button id="chat-voice-toggle" class="chat-voice-btn ${voiceAvailable ? '' : 'hidden'}" title="${t('chat.pushToTalk')}">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/>
             </svg>
           </button>
-          <button id="chat-reasoning-toggle" class="chat-reasoning-btn" title="Toggle reasoning mode (/think)">
+          <button id="chat-reasoning-toggle" class="chat-reasoning-btn" title="${t('chat.toggleReasoning')}">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
             </svg>
           </button>
-          <button id="chat-send" class="chat-send-btn" title="Send (Enter)">
+          <button id="chat-send" class="chat-send-btn" title="${t('chat.sendEnter')}">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M12 19V5m0 0l-7 7m7-7l7 7"/>
             </svg>
           </button>
-          <button id="chat-stop" class="chat-stop-btn" title="Stop" style="display:none">
+          <button id="chat-stop" class="chat-stop-btn" title="${t('common.stop')}" style="display:none">
             <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
               <rect x="6" y="6" width="12" height="12" rx="2"/>
             </svg>
           </button>
         </div>
         <div class="text-[10px] text-zinc-600 mt-1 text-center">
-          Press <kbd class="px-1 py-0.5 bg-surface-700 rounded text-zinc-500">Enter</kbd> to send,
-          <kbd class="px-1 py-0.5 bg-surface-700 rounded text-zinc-500">Shift+Enter</kbd> for new line
+          ${t('chat.enterToSend')}
         </div>
       </div>
     </div>
@@ -158,20 +159,20 @@ export async function render(container) {
           <svg class="w-3.5 h-3.5 text-ghost-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"/>
           </svg>
-          <span class="text-xs font-medium text-white">Canvas</span>
+          <span class="text-xs font-medium text-white">${t('chat.canvas')}</span>
         </div>
         <div class="flex items-center gap-1">
-          <button id="canvas-open-tab" class="canvas-header-btn" title="Open in new tab">
+          <button id="canvas-open-tab" class="canvas-header-btn" title="${t('chat.openNewTab')}">
             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
             </svg>
           </button>
-          <button id="canvas-refresh" class="canvas-header-btn" title="Refresh">
+          <button id="canvas-refresh" class="canvas-header-btn" title="${t('common.refresh')}">
             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
             </svg>
           </button>
-          <button id="canvas-close" class="canvas-header-btn" title="Close Canvas">
+          <button id="canvas-close" class="canvas-header-btn" title="${t('chat.closeCanvas')}">
             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
             </svg>
@@ -251,7 +252,7 @@ export async function render(container) {
   stopBtn.addEventListener('click', async () => {
     if (!activeMessageId) return;
     stopBtn.disabled = true;
-    statusEl.textContent = 'Stopping...';
+    statusEl.textContent = t('chat.stopping');
     try {
       await api.post(`/api/chat/stop/${activeMessageId}`);
     } catch (err) {
@@ -269,8 +270,8 @@ export async function render(container) {
     messagesEl.innerHTML = `
       <div id="chat-empty" class="chat-empty">
         <div class="text-3xl mb-3 opacity-40">&#x1F47B;</div>
-        <div class="text-sm font-medium text-zinc-400">New session started</div>
-        <div class="text-xs text-zinc-600 mt-1">Previous context cleared — Ghost still has its memory tools</div>
+        <div class="text-sm font-medium text-zinc-400">${t('chat.newSession')}</div>
+        <div class="text-xs text-zinc-600 mt-1">${t('chat.prevContextCleared')}</div>
       </div>
     `;
   });
@@ -285,19 +286,19 @@ export async function render(container) {
     if (!voiceToggleBtn) return;
     if (state === 'listening') {
       voiceToggleBtn.classList.add('voice-active');
-      voiceToggleBtn.title = 'Listening… speak now';
-      inputEl.placeholder = 'Listening… speak now';
+      voiceToggleBtn.title = t('chat.listening');
+      inputEl.placeholder = t('chat.listening');
       if (voiceIndicator) voiceIndicator.classList.remove('hidden');
-      if (voiceIndicatorLabel) voiceIndicatorLabel.textContent = 'Listening…';
+      if (voiceIndicatorLabel) voiceIndicatorLabel.textContent = t('chat.listening');
     } else if (state === 'transcribing') {
       voiceToggleBtn.classList.add('voice-active');
-      voiceToggleBtn.title = 'Transcribing…';
-      inputEl.placeholder = 'Transcribing…';
-      if (voiceIndicatorLabel) voiceIndicatorLabel.textContent = 'Transcribing…';
+      voiceToggleBtn.title = t('chat.transcribing');
+      inputEl.placeholder = t('chat.transcribing');
+      if (voiceIndicatorLabel) voiceIndicatorLabel.textContent = t('chat.transcribing');
     } else {
       voiceToggleBtn.classList.remove('voice-active');
-      voiceToggleBtn.title = 'Push to talk';
-      inputEl.placeholder = 'Message Ghost...';
+      voiceToggleBtn.title = t('chat.pushToTalk');
+      inputEl.placeholder = t('chat.messagePlaceholder');
       if (voiceIndicator) voiceIndicator.classList.add('hidden');
     }
   }
@@ -325,7 +326,7 @@ export async function render(container) {
           return;
         } else if (ps.state === 'error') {
           setPttState('idle');
-          if (u?.toast) u.toast(`Voice error: ${ps.error}`, 'error');
+          if (u?.toast) u.toast(`${t('chat.voiceError')} ${ps.error}`, 'error');
           return;
         } else {
           setPttState('idle');
@@ -347,28 +348,26 @@ export async function render(container) {
           setPttState('listening');
           pollPttResult();
         } else {
-          if (u?.toast) u.toast(`Voice: ${result.error}`, 'error');
+          if (u?.toast) u.toast(t('chat.voicePrefix', {error: result.error}), 'error');
         }
       } catch (e) {
-        if (u?.toast) u.toast(`Voice: ${e.message}`, 'error');
+        if (u?.toast) u.toast(t('chat.voicePrefix', {error: e.message}), 'error');
       }
     });
   }
 
   // ── Voice Wake/Talk → Chat bridge ──────────────────────────
-  // When Voice Wake or Talk Mode is running (started from the Voice page),
-  // detect messages they send and render them in chat live.
   let voiceStreamingMsgId = null;
 
   function updateVoiceIndicator(vs) {
     if (pttPolling) return;
     const active = vs.ok && vs.state !== 'idle' && vs.state !== 'unavailable';
     const labels = {
-      wake_listening: 'Voice Wake active',
-      talk_listening: 'Talk Mode active',
-      capturing: 'Hearing you…',
-      processing: 'Processing voice…',
-      speaking: 'Speaking…',
+      wake_listening: t('chat.voiceWake'),
+      talk_listening: t('chat.talkMode'),
+      capturing: t('chat.hearing'),
+      processing: t('chat.processingVoice'),
+      speaking: t('chat.speaking'),
     };
     if (voiceIndicator) {
       if (active) {
@@ -401,7 +400,7 @@ export async function render(container) {
       sendBtn.style.display = 'none';
       stopBtn.style.display = '';
       stopBtn.disabled = false;
-      statusEl.textContent = 'Processing (voice)...';
+      statusEl.textContent = t('chat.processingVoiceMsg');
       statusEl.className = 'text-xs text-amber-400 animate-pulse';
 
       streamResponse(msgId, thinkingEl, messagesEl, statusEl);
@@ -429,11 +428,11 @@ export async function render(container) {
     if (_reasoningMode) {
       reasoningBtn.classList.add('active');
       reasoningBtn.style.color = '#a78bfa';
-      reasoningBtn.title = 'Reasoning mode ON (click to toggle)';
+      reasoningBtn.title = t('chat.reasoningOn');
     } else {
       reasoningBtn.classList.remove('active');
       reasoningBtn.style.color = '';
-      reasoningBtn.title = 'Toggle reasoning mode (/think)';
+      reasoningBtn.title = t('chat.toggleReasoning');
     }
   }
   
@@ -443,14 +442,13 @@ export async function render(container) {
       if (res.ok) {
         _reasoningMode = res.enabled;
         updateReasoningButton();
-        showToast(_reasoningMode ? 'Reasoning mode ON' : 'Reasoning mode OFF');
+        showToast(_reasoningMode ? t('chat.reasoningOn') : t('chat.reasoningOff'));
       }
     } catch (e) {
       console.error('Failed to toggle reasoning mode:', e);
     }
   }
   
-  // Load reasoning mode status on init
   async function loadReasoningStatus() {
     try {
       const res = await api.get(`/api/chat/reasoning/${_currentSessionId}`);
@@ -459,7 +457,6 @@ export async function render(container) {
         updateReasoningButton();
       }
     } catch (e) {
-      // Reasoning module may not be available
       console.log('Reasoning mode not available');
     }
   }
@@ -513,7 +510,7 @@ export async function render(container) {
 
       if (!data.ok) {
         att.uploading = false;
-        att.error = data.error || 'Upload failed';
+        att.error = data.error || t('chat.uploadFailed');
       } else {
         att.uploading = false;
         att.type = data.type;
@@ -523,7 +520,7 @@ export async function render(container) {
       }
     } catch (err) {
       att.uploading = false;
-      att.error = err.message || 'Upload failed';
+      att.error = err.message || t('chat.uploadFailed');
     }
     renderAttachments();
   }
@@ -539,16 +536,16 @@ export async function render(container) {
       const icon = att.type === 'audio' ? '\u{1F3B5}' : att.type === 'image' ? '\u{1F5BC}' : '\u{1F4CE}';
       let stateClass = 'ready';
       let statusText = '';
-      if (att.uploading) { stateClass = 'uploading'; statusText = 'uploading...'; }
+      if (att.uploading) { stateClass = 'uploading'; statusText = t('chat.uploading'); }
       else if (att.error) { stateClass = 'error'; statusText = att.error; }
-      else if (att.transcript) { statusText = 'transcribed'; }
-      else if (att.transcriptError) { statusText = 'no STT'; }
+      else if (att.transcript) { statusText = t('chat.transcribed'); }
+      else if (att.transcriptError) { statusText = t('chat.noSTT'); }
       return `
         <div class="chat-att-pill ${stateClass}" data-att-id="${att.id}">
           <span class="chat-att-icon">${icon}</span>
           <span class="chat-att-name" title="${att.filename}">${att.filename}</span>
           ${statusText ? `<span class="chat-att-status">${statusText}</span>` : ''}
-          <button class="chat-att-remove" data-att-id="${att.id}" title="Remove">&times;</button>
+          <button class="chat-att-remove" data-att-id="${att.id}" title="${t('common.remove')}">&times;</button>
         </div>`;
     }).join('');
 
@@ -570,7 +567,7 @@ export async function render(container) {
           _clearActiveMessage();
           if (data.result) {
             const alreadyShown = history.some(
-              m => (m.message_id === active.messageId) && m.assistant_message && m.assistant_message !== '(Ghost was interrupted before completing this request)'
+              m => (m.message_id === active.messageId) && m.assistant_message && m.assistant_message !== t('chat.interruptedMessage')
             );
             if (!alreadyShown) {
               appendMessage(messagesEl, 'assistant', data.result);
@@ -583,7 +580,7 @@ export async function render(container) {
           sendBtn.style.display = 'none';
           stopBtn.style.display = '';
           stopBtn.disabled = false;
-          statusEl.textContent = 'Processing (reconnected)...';
+          statusEl.textContent = t('chat.processingReconnected');
           statusEl.className = 'text-xs text-amber-400 animate-pulse';
 
           const thinkingEl = appendThinking(messagesEl);
@@ -632,14 +629,14 @@ export async function render(container) {
     let displayText = text;
     if (attsToSend.length > 0) {
       const names = attsToSend.map(a => a.filename).join(', ');
-      displayText = text ? `${text}\n[Attached: ${names}]` : `[Attached: ${names}]`;
+      displayText = text ? `${text}\n[${t('chat.attached')} ${names}]` : `[${t('chat.attached')} ${names}]`;
     }
 
     appendMessage(messagesEl, 'user', displayText);
     const thinkingEl = appendThinking(messagesEl);
     scrollToBottom(messagesEl);
 
-    statusEl.textContent = 'Processing...';
+    statusEl.textContent = t('chat.processing');
     statusEl.className = 'text-xs text-amber-400 animate-pulse';
 
     try {
@@ -658,7 +655,7 @@ export async function render(container) {
       const resp = await api.post('/api/chat/send', payload);
       if (!resp.ok) {
         thinkingEl.remove();
-        appendMessage(messagesEl, 'error', resp.error || 'Failed to send');
+        appendMessage(messagesEl, 'error', resp.error || t('chat.failedToSend'));
         resetInput();
         return;
       }
@@ -681,7 +678,7 @@ export async function render(container) {
     stopBtn.style.display = 'none';
     stopBtn.disabled = false;
     sendBtn.style.display = '';
-    statusEl.textContent = 'Ready';
+    statusEl.textContent = t('chat.ready');
     statusEl.className = 'text-xs text-zinc-500';
     inputEl.focus();
   }
@@ -701,13 +698,13 @@ export async function render(container) {
 
       if (data.type === 'step') {
         stepCount++;
-        statusEl.textContent = `Step ${stepCount}: ${data.step.tool}...`;
+        statusEl.textContent = t('chat.stepProgress', {n: stepCount, tool: data.step.tool});
         appendStep(stepsContainer, data.step);
         scrollToBottom(messagesEl);
       }
 
       if (data.type === 'approval_needed') {
-        statusEl.textContent = 'Waiting for approval...';
+        statusEl.textContent = t('chat.waitingApproval');
         statusEl.className = 'text-xs text-amber-400';
         appendApprovalCard(stepsContainer, data.approval, messagesEl);
         scrollToBottom(messagesEl);
@@ -724,12 +721,12 @@ export async function render(container) {
           stepsContainer.remove();
         }
 
-        appendMessage(messagesEl, 'assistant', data.result || '(No response)');
+        appendMessage(messagesEl, 'assistant', data.result || t('chat.noResponse'));
 
         if (data.elapsed) {
           const meta = document.createElement('div');
           meta.className = 'chat-meta';
-          meta.textContent = `${data.tools_used?.length || 0} tools, ${data.elapsed}s`;
+          meta.textContent = t('chat.metaInfo', {tools: data.tools_used?.length || 0, elapsed: data.elapsed});
           messagesEl.appendChild(meta);
         }
 
@@ -771,7 +768,7 @@ export async function render(container) {
 
       stopBtn.style.display = 'none';
       sendBtn.style.display = 'none';
-      statusEl.textContent = 'Connection lost — checking server...';
+      statusEl.textContent = t('chat.connectionLost');
       statusEl.className = 'text-xs text-amber-400 ghost-restart-pulse';
 
       _showRestartBanner(messagesEl);
@@ -791,9 +788,9 @@ export async function render(container) {
           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
           <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
         </svg>
-        <span class="text-amber-300 text-sm font-medium">Ghost is restarting with new code...</span>
+        <span class="text-amber-300 text-sm font-medium">${t('chat.ghostRestartingCode')}</span>
       </div>
-      <span class="text-zinc-500 text-xs">This page will update automatically</span>
+      <span class="text-zinc-500 text-xs">${t('chat.pageUpdateAuto')}</span>
     `;
     messagesEl.appendChild(banner);
     scrollToBottom(messagesEl);
@@ -813,11 +810,11 @@ export async function render(container) {
         const data = await api.get(`/api/chat/status/${messageId}`);
         consecutiveFailures = 0;
         _removeRestartBanner();
-        statusEl.textContent = `Processing... ${data.steps?.length || 0} steps`;
+        statusEl.textContent = t('chat.processingSteps', {n: data.steps?.length || 0});
         statusEl.className = 'text-xs text-amber-400 animate-pulse';
 
         if (data.status === 'complete') {
-          appendMessage(messagesEl, 'assistant', data.result || '(No response)');
+          appendMessage(messagesEl, 'assistant', data.result || t('chat.noResponse'));
           scrollToBottom(messagesEl);
           resetInput();
           return;
@@ -830,7 +827,7 @@ export async function render(container) {
         }
       } catch {
         consecutiveFailures++;
-        statusEl.textContent = 'System restarting...';
+        statusEl.textContent = t('chat.systemRestarting');
         statusEl.className = 'text-xs text-amber-400 ghost-restart-pulse';
 
         if (consecutiveFailures >= 2) {
@@ -841,7 +838,7 @@ export async function render(container) {
     }
 
     _removeRestartBanner();
-    appendMessage(messagesEl, 'error', 'Timed out waiting for response');
+    appendMessage(messagesEl, 'error', t('chat.timedOut'));
     resetInput();
   }
 
@@ -871,14 +868,13 @@ export async function render(container) {
             }
           } catch { /* session from old process, expected */ }
 
-          appendMessage(messagesEl, 'assistant',
-            'Ghost deployed your changes and restarted successfully. The system is now running with the updated code.');
+          appendMessage(messagesEl, 'assistant', t('chat.deploySuccess'));
           scrollToBottom(messagesEl);
           resetInput();
           return true;
         }
       } catch {
-        statusEl.textContent = `System restarting... (${i + 1}s)`;
+        statusEl.textContent = `${t('chat.systemRestarting')} (${i + 1}s)`;
       }
     }
     return false;
@@ -892,8 +888,7 @@ export async function render(container) {
       if (rec.recovery && rec.recovery.result_hint) {
         appendMessage(messagesEl, 'assistant', rec.recovery.result_hint);
       } else {
-        appendMessage(messagesEl, 'assistant',
-          'Ghost deployed your changes and restarted successfully. The system is now running with the updated code.');
+        appendMessage(messagesEl, 'assistant', t('chat.deploySuccess'));
       }
       scrollToBottom(messagesEl);
       resetInput();
@@ -905,7 +900,6 @@ export async function render(container) {
     if (window.GhostUtils?.toast) {
       window.GhostUtils.toast(msg, type);
     } else {
-      // Fallback toast
       const toast = document.createElement('div');
       toast.className = `toast toast-${type}`;
       toast.textContent = msg;
@@ -1033,7 +1027,7 @@ function appendMessage(container, role, content) {
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
             </svg>
-            Thinking
+            ${t('chat.thinking')}
           </summary>
           <div class="chat-thinking-content prose-ghost">${formatMarkdown(thinking)}</div>
         </details>
@@ -1057,7 +1051,7 @@ function appendMessage(container, role, content) {
     div.className = 'chat-msg chat-msg-error';
     div.innerHTML = `
       <div class="chat-bubble chat-bubble-error">
-        <span class="text-red-400 text-xs font-medium">Error:</span>
+        <span class="text-red-400 text-xs font-medium">${t('common.error')}:</span>
         <span class="text-red-300 text-xs">${esc(content)}</span>
       </div>
     `;
@@ -1135,19 +1129,19 @@ function appendStep(container, step) {
           <svg class="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/>
           </svg>
-          <span class="text-amber-400 font-semibold text-xs">Evolution Approval Required</span>
+          <span class="text-amber-400 font-semibold text-xs">${t('chat.evoApprovalRequired')}</span>
           <span class="badge badge-yellow ml-auto">Level ${level}</span>
         </div>
         <div class="text-xs text-zinc-400 mt-1 mb-3">
-          Ghost wants to modify its own code. Review and approve to continue.
+          ${t('chat.evoApprovalMsg')}
           ${evoId ? `<span class="text-zinc-600 ml-1">(${evoId})</span>` : ''}
         </div>
         <div class="flex gap-2" id="approval-btns-${evoId}">
           <button class="btn btn-sm btn-primary chat-approve-btn" data-evo-id="${evoId}">
-            Approve
+            ${t('common.approve')}
           </button>
           <button class="btn btn-sm btn-danger chat-reject-btn" data-evo-id="${evoId}">
-            Reject
+            ${t('common.reject')}
           </button>
         </div>
       </div>
@@ -1159,15 +1153,15 @@ function appendStep(container, step) {
       const btn = e.target;
       const id = btn.dataset.evoId;
       btn.disabled = true;
-      btn.textContent = 'Approving...';
+      btn.textContent = t('chat.approving');
       try {
         await window.GhostAPI.post(`/api/evolve/approve/${id}`);
         const btnContainer = document.getElementById(`approval-btns-${id}`);
         if (btnContainer) {
-          btnContainer.innerHTML = '<span class="text-emerald-400 text-xs font-medium">Approved — Ghost is continuing...</span>';
+          btnContainer.innerHTML = '<span class="text-emerald-400 text-xs font-medium">' + t('chat.approvedContinuing') + '</span>';
         }
       } catch (err) {
-        btn.textContent = 'Error';
+        btn.textContent = t('common.error');
       }
     });
 
@@ -1175,15 +1169,15 @@ function appendStep(container, step) {
       const btn = e.target;
       const id = btn.dataset.evoId;
       btn.disabled = true;
-      btn.textContent = 'Rejecting...';
+      btn.textContent = t('chat.rejecting');
       try {
         await window.GhostAPI.post(`/api/evolve/reject/${id}`);
         const btnContainer = document.getElementById(`approval-btns-${id}`);
         if (btnContainer) {
-          btnContainer.innerHTML = '<span class="text-red-400 text-xs font-medium">Rejected — Ghost will stop this evolution.</span>';
+          btnContainer.innerHTML = '<span class="text-red-400 text-xs font-medium">' + t('chat.rejectedStop') + '</span>';
         }
       } catch (err) {
-        btn.textContent = 'Error';
+        btn.textContent = t('common.error');
       }
     });
 
@@ -1197,7 +1191,7 @@ function appendStep(container, step) {
 
   div.innerHTML = `
     <div class="chat-step-header">
-      <span class="chat-step-num">Step ${step.step}</span>
+      <span class="chat-step-num">${t('chat.stepN', {n: step.step})}</span>
       <span class="chat-step-tool">${step.tool}</span>
       <span class="chat-step-time">${new Date(step.time).toLocaleTimeString()}</span>
     </div>
@@ -1217,16 +1211,16 @@ function appendApprovalCard(container, approval, messagesEl) {
         <svg class="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/>
         </svg>
-        <span class="text-amber-400 font-semibold text-xs">Evolution Approval Required</span>
+        <span class="text-amber-400 font-semibold text-xs">${t('chat.evoApprovalRequired')}</span>
         <span class="badge badge-yellow ml-auto">Level ${level}</span>
       </div>
       <div class="text-xs text-zinc-400 mt-1 mb-3">
-        Ghost wants to modify its own code. Approve to continue, or reject to cancel.
+        ${t('chat.evoApprovalMsg')}
         <span class="text-zinc-600 ml-1">(${evoId})</span>
       </div>
       <div class="flex gap-2" id="approval-btns-${evoId}">
-        <button class="btn btn-sm btn-primary chat-approve-btn" data-evo-id="${evoId}">Approve</button>
-        <button class="btn btn-sm btn-danger chat-reject-btn" data-evo-id="${evoId}">Reject</button>
+        <button class="btn btn-sm btn-primary chat-approve-btn" data-evo-id="${evoId}">${t('common.approve')}</button>
+        <button class="btn btn-sm btn-danger chat-reject-btn" data-evo-id="${evoId}">${t('common.reject')}</button>
       </div>
     </div>
   `;
@@ -1235,23 +1229,23 @@ function appendApprovalCard(container, approval, messagesEl) {
   div.querySelector('.chat-approve-btn')?.addEventListener('click', async (e) => {
     const btn = e.target;
     btn.disabled = true;
-    btn.textContent = 'Approving...';
+    btn.textContent = t('chat.approving');
     try {
       await window.GhostAPI.post(`/api/evolve/approve/${evoId}`);
       const bc = document.getElementById(`approval-btns-${evoId}`);
-      if (bc) bc.innerHTML = '<span class="text-emerald-400 text-xs font-medium">Approved — Ghost is continuing...</span>';
-    } catch { btn.textContent = 'Error'; }
+      if (bc) bc.innerHTML = '<span class="text-emerald-400 text-xs font-medium">' + t('chat.approvedContinuing') + '</span>';
+    } catch { btn.textContent = t('common.error'); }
   });
 
   div.querySelector('.chat-reject-btn')?.addEventListener('click', async (e) => {
     const btn = e.target;
     btn.disabled = true;
-    btn.textContent = 'Rejecting...';
+    btn.textContent = t('chat.rejecting');
     try {
       await window.GhostAPI.post(`/api/evolve/reject/${evoId}`);
       const bc = document.getElementById(`approval-btns-${evoId}`);
-      if (bc) bc.innerHTML = '<span class="text-red-400 text-xs font-medium">Rejected — evolution cancelled.</span>';
-    } catch { btn.textContent = 'Error'; }
+      if (bc) bc.innerHTML = '<span class="text-red-400 text-xs font-medium">' + t('chat.rejectedCancelled') + '</span>';
+    } catch { btn.textContent = t('common.error'); }
   });
 
   scrollToBottom(messagesEl);
@@ -1266,7 +1260,7 @@ function collapseSteps(container, count) {
       <svg class="w-3 h-3 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
       </svg>
-      <span>${count} tool steps</span>
+      <span>${count} ${t('chat.toolSteps')}</span>
     </button>
   `;
   container.insertBefore(summary, container.firstChild);
