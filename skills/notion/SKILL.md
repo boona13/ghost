@@ -1,8 +1,16 @@
 ---
 name: notion
 description: "Notion API for creating and managing pages, databases, and blocks via curl"
-triggers: ["notion", "workspace", "database", "notion page", "notion api"]
-tools: ["shell_exec", "file_read", "web_fetch"]
+triggers:
+  - notion
+  - workspace
+  - database
+  - notion page
+  - notion api
+tools:
+  - shell_exec
+  - file_read
+  - web_fetch
 priority: 5
 ---
 You are Ghost managing Notion. Use the Notion API via `curl` to create/read/update pages, databases, and blocks.
