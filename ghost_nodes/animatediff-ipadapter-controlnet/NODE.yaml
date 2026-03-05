@@ -1,0 +1,23 @@
+name: animatediff-ipadapter-controlnet
+version: 0.1.0
+description: "Advanced image-to-video workflow using AnimateDiff + IPAdapter + ControlNet (DWPose, LineArt, Tile). Transforms input images into styled animated videos with upscaling via RIFE."
+author: community
+category: image_generation
+license: MIT
+
+requires:
+  python: ">=3.10"
+  gpu: false
+  vram_gb: 0
+  disk_gb: 2
+  deps: []
+
+models: []
+
+tools:
+  - animatediff_ipadapter_controlnet
+
+inputs: ["image"]
+outputs: ["image"]
+
+tags: ["animatediff-ipadapter-controlnet", "comfyui", "workflow"]

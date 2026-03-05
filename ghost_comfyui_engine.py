@@ -1,14 +1,19 @@
 """
 ComfyUI Workflow Engine for Ghost — run community workflows natively.
 
-Three-tier node resolution:
-  1. Native (diffusers-based, ~13 core nodes, zero comfyui dependency)
-  2. ComfyUI built-in (from installed 'comfy' package or local ComfyUI)
-  3. Custom (auto-installed from ComfyUI-Manager registry on demand)
+Node resolution (no ComfyUI install required):
+  1. Native (diffusers-based, 38+ node types, zero comfyui dependency)
+  2. Comfy compat layer (ghost_comfy_compat) injected into sys.modules,
+     allowing custom node repos to import 'comfy.*' without real ComfyUI
+  3. Custom node packages (already cloned or auto-installed via
+     ghost_comfy_manager — CNR zip or git clone with pip blacklist)
 
-If ALL nodes in a workflow are covered by native implementations, the engine
-runs without any ComfyUI dependency.  If even one node requires ComfyUI,
-the engine switches entirely to ComfyUI mode for type compatibility.
+Package management is handled by ghost_comfy_manager, which provides:
+  - Preemption-aware node resolution (extension-node-map + custom-node-list)
+  - CNR (api.comfy.org) versioned package installs with git clone fallback
+  - Pip blacklist to protect torch/torchvision from accidental overwrites
+  - install.py execution for packages that need setup scripts
+  - Model registry via model-list.json
 
 Usage:
     engine = ComfyUIEngine(models_dir=Path("~/.ghost/models"))
@@ -37,17 +42,6 @@ GHOST_HOME = Path.home() / ".ghost"
 MODELS_DIR = GHOST_HOME / "models"
 COMFYUI_CACHE = GHOST_HOME / "comfyui"
 CUSTOM_NODES_DIR = COMFYUI_CACHE / "custom_nodes"
-NODE_MAP_PATH = COMFYUI_CACHE / "extension-node-map.json"
-NODE_MAP_URL = (
-    "https://raw.githubusercontent.com/ltdrdata/ComfyUI-Manager"
-    "/main/extension-node-map.json"
-)
-MODEL_LIST_URL = (
-    "https://raw.githubusercontent.com/ltdrdata/ComfyUI-Manager"
-    "/main/model-list.json"
-)
-MODEL_LIST_CACHE = COMFYUI_CACHE / "model-list.json"
-_MODEL_LIST_MAX_AGE = 86400 * 7  # refresh weekly
 
 MODEL_SUBDIRS = {
     "checkpoints": "checkpoints",
@@ -258,9 +252,12 @@ def resolve_model_path(filename: str, subdir: str = "checkpoints",
 
     fallback_dir = MODELS_DIR / MODEL_SUBDIRS.get(subdir, subdir)
     raise FileNotFoundError(
-        f"Model not found and no download source: {filename}\n"
-        f"Searched locally + ComfyUI-Manager registry + HuggingFace.\n"
-        f"Place the file manually in: {fallback_dir}/"
+        f"MISSING MODEL: {filename} (type: {subdir})\n"
+        f"Auto-download failed — not found in ComfyUI-Manager registry, HuggingFace, or CivitAI.\n"
+        f"ACTION REQUIRED: Use web_search to find this model "
+        f"(try: '{Path(filename).stem} {subdir} download huggingface'), "
+        f"then use comfyui_model_download(url=..., filename='{Path(filename).name}', "
+        f"subdir='{subdir}') to download it, then retry the workflow."
     )
 
 
@@ -296,34 +293,18 @@ _model_list_data: list[dict] | None = None
 
 
 def _get_model_list() -> list[dict]:
-    """Fetch and cache ComfyUI-Manager's model-list.json."""
+    """Fetch and cache ComfyUI-Manager's model-list.json (via ghost_comfy_manager)."""
     global _model_list_data
     if _model_list_data is not None:
         return _model_list_data
 
-    if (MODEL_LIST_CACHE.exists()
-            and time.time() - MODEL_LIST_CACHE.stat().st_mtime < _MODEL_LIST_MAX_AGE):
-        try:
-            data = json.loads(MODEL_LIST_CACHE.read_text())
-            _model_list_data = data.get("models", data) if isinstance(data, dict) else data
-            return _model_list_data
-        except Exception:
-            pass
-
-    import urllib.request
-    log.info("Fetching ComfyUI model registry from %s", MODEL_LIST_URL)
     try:
-        req = urllib.request.Request(MODEL_LIST_URL, headers={"User-Agent": "Ghost/1.0"})
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            raw = resp.read()
-        MODEL_LIST_CACHE.parent.mkdir(parents=True, exist_ok=True)
-        MODEL_LIST_CACHE.write_bytes(raw)
-        data = json.loads(raw)
-        _model_list_data = data.get("models", data) if isinstance(data, dict) else data
+        from ghost_comfy_manager.registry import NodeRegistry
+        _model_list_data = NodeRegistry.get().get_model_list()
         log.info("Model registry loaded: %d entries", len(_model_list_data))
         return _model_list_data
     except Exception as e:
-        log.warning("Failed to fetch model list: %s", e)
+        log.warning("Failed to load model list via registry: %s", e)
         _model_list_data = []
         return _model_list_data
 
@@ -732,6 +713,9 @@ _model_cache: dict[str, Any] = {}
 
 
 class NativeCheckpointLoaderSimple:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"ckpt_name": ("STRING",)}}
     RETURN_TYPES = ("MODEL", "CLIP", "VAE")
     FUNCTION = "load_checkpoint"
 
@@ -786,6 +770,9 @@ NATIVE_NODES["CheckpointLoaderSimple"] = NativeCheckpointLoaderSimple
 
 
 class NativeCLIPTextEncode:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"clip": ("CLIP",), "text": ("STRING", {"multiline": True})}}
     RETURN_TYPES = ("CONDITIONING",)
     FUNCTION = "encode"
 
@@ -840,6 +827,15 @@ NATIVE_NODES["CLIPTextEncode"] = NativeCLIPTextEncode
 
 
 class NativeKSampler:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "model": ("MODEL",), "seed": ("INT",), "steps": ("INT",),
+            "cfg": ("FLOAT",), "sampler_name": ("STRING",),
+            "scheduler": ("STRING",), "positive": ("CONDITIONING",),
+            "negative": ("CONDITIONING",), "latent_image": ("LATENT",),
+            "denoise": ("FLOAT", {"default": 1.0}),
+        }}
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "sample"
 
@@ -874,6 +870,17 @@ class NativeKSampler:
         pos_emb = positive[0][0].to(device=device, dtype=dtype)
         neg_emb = negative[0][0].to(device=device, dtype=dtype)
 
+        cn_entries = positive[0][1].get("controlnets", [])
+
+        cn_images = []
+        for cn_e in cn_entries:
+            cimg = cn_e["control_image"]
+            if isinstance(cimg, torch.Tensor):
+                if cimg.ndim == 4 and cimg.shape[-1] in (1, 3, 4):
+                    cimg = cimg.permute(0, 3, 1, 2)
+                cn_images.append((cn_e["control_net"], cimg.to(device=device, dtype=dtype),
+                                  cn_e["strength"]))
+
         added_cond = None
         if is_sdxl:
             pp = positive[0][1].get("pooled_output")
@@ -907,6 +914,40 @@ class NativeKSampler:
             }
             if added_cond:
                 unet_kw["added_cond_kwargs"] = added_cond
+
+            if cn_images:
+                down_res, mid_res = [], None
+                for cnet_model, cnet_img, cnet_str in cn_images:
+                    try:
+                        cn_kw: dict[str, Any] = {
+                            "controlnet_cond": cnet_img,
+                            "conditioning_scale": cnet_str,
+                            "return_dict": False,
+                        }
+                        if added_cond and is_sdxl:
+                            cn_kw["added_cond_kwargs"] = added_cond
+                        cn_out = cnet_model(
+                            lat_in, t,
+                            encoder_hidden_states=torch.cat([neg_emb, pos_emb]),
+                            **cn_kw,
+                        )
+                        if len(cn_out) == 2:
+                            d_samples, m_sample = cn_out
+                            if not down_res:
+                                down_res = list(d_samples)
+                            else:
+                                for j in range(len(d_samples)):
+                                    down_res[j] = down_res[j] + d_samples[j]
+                            mid_res = m_sample if mid_res is None else mid_res + m_sample
+                    except Exception as e:
+                        log.warning("ControlNet forward pass failed (step %d): %s",
+                                    i + 1, e, exc_info=True)
+                        cn_images = []
+                        break
+                if down_res:
+                    unet_kw["down_block_additional_residuals"] = down_res
+                if mid_res is not None:
+                    unet_kw["mid_block_additional_residual"] = mid_res
 
             with torch.no_grad():
                 pred = unet(**unet_kw).sample
@@ -979,6 +1020,13 @@ NATIVE_NODES["VAEEncode"] = NativeVAEEncode
 
 
 class NativeEmptyLatentImage:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "width": ("INT", {"default": 512}),
+            "height": ("INT", {"default": 512}),
+            "batch_size": ("INT", {"default": 1}),
+        }}
     RETURN_TYPES = ("LATENT",)
     FUNCTION = "generate"
 
@@ -992,6 +1040,9 @@ NATIVE_NODES["EmptyLatentImage"] = NativeEmptyLatentImage
 
 
 class NativeLoadImage:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"image": ("STRING",)}}
     RETURN_TYPES = ("IMAGE", "MASK")
     FUNCTION = "load_image"
 
@@ -1060,6 +1111,14 @@ NATIVE_NODES["PreviewImage"] = NativeSaveImage
 
 
 class NativeLoraLoader:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "model": ("MODEL",), "clip": ("CLIP",),
+            "lora_name": ("STRING",),
+            "strength_model": ("FLOAT", {"default": 1.0}),
+            "strength_clip": ("FLOAT", {"default": 1.0}),
+        }}
     RETURN_TYPES = ("MODEL", "CLIP")
     FUNCTION = "load_lora"
 
@@ -1179,6 +1238,9 @@ NATIVE_NODES["ImageInvert"] = NativeImageInvert
 
 
 class NativeCLIPSetLastLayer:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"clip": ("CLIP",), "stop_at_clip_layer": ("INT", {"default": -1})}}
     RETURN_TYPES = ("CLIP",)
     FUNCTION = "set_last_layer"
 
@@ -1226,8 +1288,541 @@ class NativeVAEEncodeForInpaint:
 NATIVE_NODES["VAEEncodeForInpaint"] = NativeVAEEncodeForInpaint
 
 
+# ── Additional built-in nodes (loaders, utility) ─────────────────────
+
+class NativeUNETLoader:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"unet_name": ("STRING",), "weight_dtype": ("STRING",)}}
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "load_unet"
+
+    def load_unet(self, unet_name, weight_dtype="default", **kw):
+        path = resolve_model_path(unet_name, "unet")
+        dtype = torch.float16 if weight_dtype in ("fp16", "float16") else None
+        from diffusers import UNet2DConditionModel
+        try:
+            unet = UNet2DConditionModel.from_pretrained(
+                str(path.parent), subfolder=path.name if path.is_dir() else None,
+                torch_dtype=dtype, token=os.environ.get("HF_TOKEN"),
+            )
+        except Exception:
+            unet = UNet2DConditionModel.from_single_file(
+                str(path), torch_dtype=dtype,
+            )
+        device = _normalize_torch_device("auto")
+        unet = unet.to(device)
+        return (unet,)
+
+NATIVE_NODES["UNETLoader"] = NativeUNETLoader
+
+
+class NativeCLIPLoader:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"clip_name": ("STRING",), "type": ("STRING",)}}
+    RETURN_TYPES = ("CLIP",)
+    FUNCTION = "load_clip"
+
+    def load_clip(self, clip_name, type="stable_diffusion", **kw):
+        from transformers import CLIPTokenizer, CLIPTextModel
+        path = resolve_model_path(clip_name, "clip")
+        tok = CLIPTokenizer.from_pretrained(str(path) if path.is_dir() else "openai/clip-vit-large-patch14")
+        model = CLIPTextModel.from_pretrained(str(path) if path.is_dir() else "openai/clip-vit-large-patch14")
+        device = _normalize_torch_device("auto")
+        model = model.to(device)
+        return ({"tokenizer": tok, "model": model, "path": str(path)},)
+
+NATIVE_NODES["CLIPLoader"] = NativeCLIPLoader
+
+
+class NativeCLIPVisionLoader:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"clip_name": ("STRING",)}}
+    RETURN_TYPES = ("CLIP_VISION",)
+    FUNCTION = "load_clip_vision"
+
+    def load_clip_vision(self, clip_name, **kw):
+        from transformers import CLIPVisionModelWithProjection, CLIPImageProcessor
+        path = resolve_model_path(clip_name, "clip_vision")
+        try:
+            processor = CLIPImageProcessor.from_pretrained(str(path) if path.is_dir() else "openai/clip-vit-large-patch14")
+            model = CLIPVisionModelWithProjection.from_pretrained(str(path) if path.is_dir() else "openai/clip-vit-large-patch14")
+        except Exception:
+            processor = CLIPImageProcessor.from_pretrained("openai/clip-vit-large-patch14")
+            model = CLIPVisionModelWithProjection.from_pretrained("openai/clip-vit-large-patch14")
+        device = _normalize_torch_device("auto")
+        model = model.to(device)
+        return ({"processor": processor, "model": model},)
+
+NATIVE_NODES["CLIPVisionLoader"] = NativeCLIPVisionLoader
+
+
+class NativeCLIPVisionEncode:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"clip_vision": ("CLIP_VISION",), "image": ("IMAGE",)}}
+    RETURN_TYPES = ("CLIP_VISION_OUTPUT",)
+    FUNCTION = "encode"
+
+    def encode(self, clip_vision, image, **kw):
+        import numpy as np
+        processor = clip_vision["processor"]
+        model = clip_vision["model"]
+        if isinstance(image, torch.Tensor):
+            img_np = (image.squeeze(0).cpu().numpy() * 255).astype(np.uint8)
+            from PIL import Image as PILImage
+            pil_img = PILImage.fromarray(img_np)
+        else:
+            pil_img = image
+        inputs = processor(images=pil_img, return_tensors="pt").to(model.device)
+        with torch.no_grad():
+            outputs = model(**inputs)
+        return ({"last_hidden_state": outputs.last_hidden_state, "image_embeds": outputs.image_embeds},)
+
+NATIVE_NODES["CLIPVisionEncode"] = NativeCLIPVisionEncode
+
+
+class NativeVAELoader:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"vae_name": ("STRING",)}}
+    RETURN_TYPES = ("VAE",)
+    FUNCTION = "load_vae"
+
+    def load_vae(self, vae_name, **kw):
+        from diffusers import AutoencoderKL
+        path = resolve_model_path(vae_name, "vae")
+        try:
+            vae = AutoencoderKL.from_single_file(str(path), torch_dtype=torch.float16)
+        except Exception:
+            vae = AutoencoderKL.from_pretrained(str(path), torch_dtype=torch.float16)
+        device = _normalize_torch_device("auto")
+        vae = vae.to(device)
+        return (vae,)
+
+NATIVE_NODES["VAELoader"] = NativeVAELoader
+
+
+class NativeControlNetLoader:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"control_net_name": ("STRING",)}}
+    RETURN_TYPES = ("CONTROL_NET",)
+    FUNCTION = "load_controlnet"
+
+    @staticmethod
+    def _merge_control_lora(raw_sd: dict) -> dict:
+        """Reconstruct full weights from LoRA-decomposed ControlNet state dict.
+
+        Control-LoRA format: 'key.up' (out, rank, 1, 1) + 'key.down' (rank, in, kH, kW)
+        Merged into: 'key.weight' = base + up.flat @ down.flat -> (out, in, kH, kW)
+        """
+        import torch
+        merged = {}
+        up_keys = {k[:-3] for k in raw_sd if k.endswith(".up")}
+        for prefix in up_keys:
+            up = raw_sd[f"{prefix}.up"].float()
+            down = raw_sd[f"{prefix}.down"].float()
+            base_key = f"{prefix}.weight"
+            base = raw_sd.get(base_key)
+
+            if up.ndim == 2 and down.ndim == 2:
+                merged_w = up @ down
+            elif up.ndim >= 2 and down.ndim >= 2:
+                out_shape = (up.shape[0],) + down.shape[1:]
+                rank = up.shape[1]
+                merged_w = (up.reshape(up.shape[0], rank)
+                            @ down.reshape(rank, -1)).reshape(out_shape)
+            else:
+                merged_w = up @ down
+
+            if base is not None:
+                merged[base_key] = base.float() + merged_w
+            else:
+                merged[base_key] = merged_w
+
+        for k, v in raw_sd.items():
+            if k.endswith(".up") or k.endswith(".down") or k == "lora_controlnet":
+                continue
+            if k not in merged:
+                merged[k] = v
+        return merged
+
+    def load_controlnet(self, control_net_name, **kw):
+        import torch
+        from diffusers import ControlNetModel
+        path = resolve_model_path(control_net_name, "controlnet")
+        device = _normalize_torch_device("auto")
+        dtype = torch.float16 if device != "cpu" else torch.float32
+
+        from safetensors.torch import load_file
+        raw_sd = load_file(str(path))
+
+        is_control_lora = any(k == "lora_controlnet" for k in raw_sd)
+        if is_control_lora:
+            log.info("Detected Control-LoRA format, merging %d LoRA pairs...",
+                     sum(1 for k in raw_sd if k.endswith(".up")))
+            raw_sd = self._merge_control_lora(raw_sd)
+            from safetensors.torch import save_file
+            merged_path = path.with_suffix(".merged.safetensors")
+            save_file(raw_sd, str(merged_path))
+            path = merged_path
+            log.info("Saved merged ControlNet to %s", merged_path.name)
+
+        is_sdxl = "xl" in str(path).lower() or "sdxl" in control_net_name.lower()
+        configs = []
+        name_l = control_net_name.lower()
+        if is_sdxl:
+            if "depth" in name_l:
+                configs.append("diffusers/controlnet-depth-sdxl-1.0")
+            if "canny" in name_l:
+                configs.append("diffusers/controlnet-canny-sdxl-1.0")
+            if not configs:
+                configs.append("diffusers/controlnet-canny-sdxl-1.0")
+        else:
+            if "depth" in name_l:
+                configs.append("lllyasviel/control_v11f1p_sd15_depth")
+            if "canny" in name_l:
+                configs.append("lllyasviel/sd-controlnet-canny")
+
+        for cfg in configs:
+            try:
+                log.info("Loading ControlNet with config: %s", cfg)
+                cnet = ControlNetModel.from_single_file(
+                    str(path), config=cfg, torch_dtype=dtype,
+                    low_cpu_mem_usage=False)
+                cnet = cnet.to(device)
+                return (cnet,)
+            except Exception as e:
+                log.debug("Config %s failed: %s", cfg, e)
+
+        try:
+            log.info("Loading ControlNet from_single_file (auto-config)...")
+            cnet = ControlNetModel.from_single_file(
+                str(path), torch_dtype=dtype, low_cpu_mem_usage=False)
+            cnet = cnet.to(device)
+            return (cnet,)
+        except Exception as e1:
+            log.debug("from_single_file auto-config failed: %s", e1)
+
+        try:
+            log.info("Loading ControlNet from_pretrained...")
+            cnet = ControlNetModel.from_pretrained(str(path), torch_dtype=dtype)
+            cnet = cnet.to(device)
+            return (cnet,)
+        except Exception as e2:
+            log.debug("from_pretrained failed: %s", e2)
+
+        log.warning("All ControlNet loading methods failed for %s — "
+                     "returning raw state dict", control_net_name)
+        return ({"state_dict": raw_sd, "path": str(path),
+                 "filename": control_net_name},)
+
+NATIVE_NODES["ControlNetLoader"] = NativeControlNetLoader
+
+
+class NativeControlNetApplyAdvanced:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "positive": ("CONDITIONING",),
+                "negative": ("CONDITIONING",),
+                "control_net": ("CONTROL_NET",),
+                "image": ("IMAGE",),
+                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0}),
+                "start_percent": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0}),
+                "end_percent": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0}),
+            },
+            "optional": {"vae": ("VAE",)},
+        }
+    RETURN_TYPES = ("CONDITIONING", "CONDITIONING")
+    RETURN_NAMES = ("positive", "negative")
+    FUNCTION = "apply_controlnet"
+
+    def apply_controlnet(self, positive, negative, control_net, image,
+                         strength=1.0, start_percent=0.0, end_percent=1.0,
+                         vae=None, **kw):
+        import torch
+
+        cn_entry = {
+            "control_net": control_net,
+            "control_image": image,
+            "strength": float(strength),
+            "start_percent": float(start_percent),
+            "end_percent": float(end_percent),
+        }
+
+        def _attach(cond):
+            out = []
+            for emb, meta in cond:
+                new_meta = dict(meta)
+                existing = new_meta.get("controlnets", [])
+                new_meta["controlnets"] = existing + [cn_entry]
+                out.append((emb, new_meta))
+            return out
+
+        return (_attach(positive), _attach(negative))
+
+NATIVE_NODES["ControlNetApplyAdvanced"] = NativeControlNetApplyAdvanced
+
+
+class NativeLoraLoaderModelOnly:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "model": ("MODEL",), "lora_name": ("STRING",),
+            "strength_model": ("FLOAT", {"default": 1.0}),
+        }}
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "load_lora"
+
+    def load_lora(self, model, lora_name, strength_model=1.0, **kw):
+        loader = NativeLoraLoader()
+        model_out, _ = loader.load_lora(model, None, lora_name, strength_model, 0.0)
+        return (model_out,)
+
+NATIVE_NODES["LoraLoaderModelOnly"] = NativeLoraLoaderModelOnly
+
+
+class NativeModelSamplingSD3:
+    """Passthrough — adjusts model sampling config for SD3/FLUX."""
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"model": ("MODEL",), "shift": ("FLOAT", {"default": 3.0})}}
+    RETURN_TYPES = ("MODEL",)
+    FUNCTION = "patch"
+
+    def patch(self, model, shift=3.0, **kw):
+        return (model,)
+
+NATIVE_NODES["ModelSamplingSD3"] = NativeModelSamplingSD3
+
+
+class NativeNote:
+    """Passthrough utility node — just a comment/note, produces no output."""
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"text": ("STRING", {"multiline": True})}}
+    RETURN_TYPES = ()
+    FUNCTION = "noop"
+
+    def noop(self, **kw):
+        return ()
+
+NATIVE_NODES["Note"] = NativeNote
+
+
+class NativeTextBox:
+    """Simple text passthrough node."""
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"text": ("STRING", {"multiline": True, "default": ""})}}
+    RETURN_TYPES = ("STRING",)
+    FUNCTION = "run"
+
+    def run(self, text="", **kw):
+        return (text,)
+
+NATIVE_NODES["TextBox"] = NativeTextBox
+
+
+class NativePrimitiveBoolean:
+    """Boolean value node."""
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"value": ("BOOLEAN", {"default": True})}}
+    RETURN_TYPES = ("BOOLEAN",)
+    FUNCTION = "run"
+
+    def run(self, value=True, **kw):
+        return (value,)
+
+NATIVE_NODES["PrimitiveBoolean"] = NativePrimitiveBoolean
+
+
+class NativeDFInteger:
+    """DF_Integer — converts float to int (from Derfuu_ComfyUI_ModdedNodes)."""
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"Value": ("FLOAT", {"default": 0})}}
+    RETURN_TYPES = ("INT",)
+    FUNCTION = "run"
+
+    def run(self, Value=0, **kw):
+        return (int(Value),)
+
+NATIVE_NODES["DF_Integer"] = NativeDFInteger
+
+
+class NativeSimpleMath:
+    """SimpleMath+ — basic arithmetic expression evaluator."""
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "a": ("FLOAT", {"default": 0}),
+            "b": ("FLOAT", {"default": 0}),
+            "op": ("STRING", {"default": "a+b"}),
+        }}
+    RETURN_TYPES = ("FLOAT", "INT")
+    FUNCTION = "run"
+
+    def run(self, a=0, b=0, op="a+b", **kw):
+        try:
+            result = float(eval(op, {"__builtins__": {}}, {"a": a, "b": b, "min": min, "max": max, "abs": abs, "round": round}))
+        except Exception:
+            result = a + b
+        return (result, int(result))
+
+NATIVE_NODES["SimpleMath+"] = NativeSimpleMath
+
+
+class NativeEasyInt:
+    """easy int — simple integer value node."""
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"value": ("INT", {"default": 0})}}
+    RETURN_TYPES = ("INT",)
+    FUNCTION = "run"
+
+    def run(self, value=0, **kw):
+        return (int(value),)
+
+NATIVE_NODES["easy int"] = NativeEasyInt
+
+
+class NativeEasyShowAnything:
+    """easy showAnything — passthrough debug/display node."""
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {}, "optional": {"anything": ("*",)}}
+    RETURN_TYPES = ()
+    OUTPUT_NODE = True
+    FUNCTION = "run"
+
+    def run(self, anything=None, **kw):
+        return ()
+
+NATIVE_NODES["easy showAnything"] = NativeEasyShowAnything
+
+
+class NativeEasyCleanGpu:
+    """easy cleanGpuUsed — triggers GPU memory cleanup."""
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {}, "optional": {"anything": ("*",)}}
+    RETURN_TYPES = ()
+    OUTPUT_NODE = True
+    FUNCTION = "run"
+
+    def run(self, **kw):
+        try:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            elif hasattr(torch, "mps") and hasattr(torch.mps, "empty_cache"):
+                torch.mps.empty_cache()
+        except Exception:
+            pass
+        return ()
+
+NATIVE_NODES["easy cleanGpuUsed"] = NativeEasyCleanGpu
+
+
+class NativeEasyIfElse:
+    """easy ifElse — conditional passthrough."""
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "condition": ("BOOLEAN", {"default": True}),
+        }, "optional": {
+            "if_true": ("*",),
+            "if_false": ("*",),
+        }}
+    RETURN_TYPES = ("*",)
+    FUNCTION = "run"
+
+    def run(self, condition=True, if_true=None, if_false=None, **kw):
+        return (if_true if condition else if_false,)
+
+NATIVE_NODES["easy ifElse"] = NativeEasyIfElse
+
+
+class NativePassthroughAny:
+    """Generic passthrough for utility nodes that just forward data."""
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {}, "optional": {"input": ("*",)}}
+    RETURN_TYPES = ("*",)
+    FUNCTION = "run"
+
+    def run(self, input=None, **kw):
+        return (input,)
+
+NATIVE_NODES["LayerUtility: PurgeVRAM V2"] = NativeEasyCleanGpu
+
+
+class NativeCRTextReplace:
+    """CR Text Replace — string find/replace."""
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "text": ("STRING", {"default": ""}),
+            "find": ("STRING", {"default": ""}),
+            "replace": ("STRING", {"default": ""}),
+        }}
+    RETURN_TYPES = ("STRING",)
+    FUNCTION = "run"
+
+    def run(self, text="", find="", replace="", **kw):
+        return (text.replace(find, replace) if find else text,)
+
+NATIVE_NODES["CR Text Replace"] = NativeCRTextReplace
+
+
+class NativeRHCaptioner:
+    """RH_Captioner — image captioning using transformers BLIP/Florence."""
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "image": ("IMAGE",),
+        }, "optional": {
+            "model": ("STRING", {"default": "blip"}),
+            "prompt": ("STRING", {"default": ""}),
+        }}
+    RETURN_TYPES = ("STRING",)
+    FUNCTION = "caption"
+
+    def caption(self, image, model="blip", prompt="", **kw):
+        import numpy as np
+        from PIL import Image as PILImage
+        if isinstance(image, torch.Tensor):
+            img_np = (image.squeeze(0).cpu().numpy() * 255).astype(np.uint8)
+            pil_img = PILImage.fromarray(img_np)
+        else:
+            pil_img = image
+
+        try:
+            from transformers import BlipProcessor, BlipForConditionalGeneration
+            proc = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
+            mdl = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
+            device = _normalize_torch_device("auto")
+            mdl = mdl.to(device)
+            inputs = proc(pil_img, return_tensors="pt").to(device)
+            with torch.no_grad():
+                out = mdl.generate(**inputs, max_new_tokens=100)
+            caption_text = proc.decode(out[0], skip_special_tokens=True)
+        except Exception as e:
+            log.warning("RH_Captioner fallback: %s", e)
+            caption_text = prompt or "an image"
+        return (caption_text,)
+
+NATIVE_NODES["RH_Captioner"] = NativeRHCaptioner
+
+
 # ═══════════════════════════════════════════════════════════════════════
-#  NODE RESOLVER — three-tier: native → comfyui → auto-install
+#  NODE RESOLVER — three-tier: native → custom_nodes → auto-install
 # ═══════════════════════════════════════════════════════════════════════
 
 _comfyui_nodes: dict[str, type] | None = None
@@ -1310,104 +1905,49 @@ def _load_comfyui_nodes() -> dict[str, type]:
 
 
 def _fetch_extension_node_map() -> dict:
-    """Download/cache the ComfyUI-Manager extension-node-map."""
-    if NODE_MAP_PATH.exists():
-        age_hours = (time.time() - NODE_MAP_PATH.stat().st_mtime) / 3600
-        if age_hours < 24:
-            try:
-                return json.loads(NODE_MAP_PATH.read_text())
-            except Exception:
-                pass
-
-    log.info("Fetching ComfyUI extension-node-map...")
-    try:
-        import requests
-        resp = requests.get(NODE_MAP_URL, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-        NODE_MAP_PATH.write_text(json.dumps(data, indent=2))
-        return data
-    except Exception as e:
-        log.warning("Failed to fetch extension-node-map: %s", e)
-        if NODE_MAP_PATH.exists():
-            return json.loads(NODE_MAP_PATH.read_text())
-        return {}
+    """Download/cache the ComfyUI-Manager extension-node-map (via ghost_comfy_manager)."""
+    from ghost_comfy_manager.registry import NodeRegistry
+    return NodeRegistry.get().get_extension_node_map()
 
 
 def _find_package_for_node(class_type: str) -> str | None:
     """Look up which git repo provides a given node class_type.
 
-    extension-node-map.json format:
-      {repo_url: [["NodeA", "NodeB"], {"title_aux": "..."}]}
-    The value is a 2-element list: [node_names, metadata].
+    Delegates to ghost_comfy_manager's resolver with preemption-aware
+    lookup, direct extension-node-map, and regex nodename_pattern matching.
     """
-    ext_map = _fetch_extension_node_map()
-    for repo_url, entry in ext_map.items():
-        if isinstance(entry, list) and len(entry) >= 1:
-            node_names = entry[0] if isinstance(entry[0], list) else entry
-            if class_type in node_names:
-                return repo_url
-        elif isinstance(entry, dict):
-            nodes = entry.get("nodenames", entry.get("nodes", []))
-            if class_type in nodes:
-                return repo_url
-    return None
+    from ghost_comfy_manager.resolver import find_package_for_node
+    return find_package_for_node(class_type)
 
 
 def _install_comfyui_package(repo_url: str) -> bool:
-    """Clone a ComfyUI custom node repo and install its dependencies.
+    """Install a ComfyUI custom node package (CNR preferred, git fallback).
 
-    ComfyUI custom nodes are plain directories with __init__.py and
-    NODE_CLASS_MAPPINGS — not pip packages. This mirrors how
-    ComfyUI-Manager installs: git clone, then pip install -r requirements.txt.
+    Delegates to ghost_comfy_manager's installer which:
+      1. Checks if a CNR package ID exists (from custom-node-list.json)
+      2. If yes, downloads versioned zip from api.comfy.org
+      3. If not, falls back to git clone --depth 1 --recursive
+      4. Runs requirements.txt with pip blacklist + install.py
     """
-    log.info("Auto-installing custom node package: %s", repo_url)
-    CUSTOM_NODES_DIR.mkdir(parents=True, exist_ok=True)
-
-    repo_name = repo_url.rstrip("/").split("/")[-1]
-    if repo_name.endswith(".git"):
-        repo_name = repo_name[:-4]
-    dest = CUSTOM_NODES_DIR / repo_name
-
-    try:
-        if dest.exists():
-            log.info("Custom node dir already exists: %s — pulling latest", dest)
-            result = subprocess.run(
-                ["git", "-C", str(dest), "pull", "--ff-only"],
-                capture_output=True, text=True, timeout=120,
-            )
-            if result.returncode != 0:
-                log.warning("git pull failed for %s: %s", dest, result.stderr[:300])
-        else:
-            log.info("Cloning %s → %s", repo_url, dest)
-            result = subprocess.run(
-                ["git", "clone", "--depth", "1", repo_url, str(dest)],
-                capture_output=True, text=True, timeout=300,
-            )
-            if result.returncode != 0:
-                log.error("git clone failed for %s: %s", repo_url, result.stderr[:500])
-                return False
-
-        req_file = dest / "requirements.txt"
-        if req_file.exists():
-            log.info("Installing dependencies from %s", req_file)
-            subprocess.run(
-                [sys.executable, "-m", "pip", "install", "-r", str(req_file),
-                 "--quiet", "--no-warn-script-location"],
-                capture_output=True, text=True, timeout=300,
-            )
-
+    from ghost_comfy_manager.installer import install_package
+    result = install_package(repo_url)
+    if result.success:
         global _comfyui_nodes
         _comfyui_nodes = None
-        return True
-    except Exception as e:
-        log.error("Install error for %s: %s", repo_url, e)
-        return False
+    return result.success
 
 
 def resolve_all_nodes(required_types: set[str], auto_install: bool = True
                       ) -> tuple[str, dict[str, type]]:
     """Resolve all required node class_types to Python classes.
+
+    Resolution order (no full ComfyUI install needed):
+      1. Native diffusers implementations (NATIVE_NODES)
+      2. Inject comfy compat layer (ghost_comfy_compat) so custom node
+         repos can import 'comfy.*' without real ComfyUI
+      3. Scan already-installed custom node packages
+      4. Auto-install from ComfyUI-Manager extension-node-map registry
+      5. Non-critical nodes (display/debug/cleanup) auto-skipped
 
     Returns (mode, {class_type: class}):
       mode = "native" if all resolved natively, else "comfyui"
@@ -1415,62 +1955,158 @@ def resolve_all_nodes(required_types: set[str], auto_install: bool = True
     if all(t in NATIVE_NODES for t in required_types):
         return "native", {t: NATIVE_NODES[t] for t in required_types}
 
-    if not _check_comfyui_available():
-        native_have = {t for t in required_types if t in NATIVE_NODES}
-        missing = required_types - native_have
-        log.info(
-            "Workflow needs non-native nodes: %s — "
-            "install ComfyUI for full support (pip install comfyui)",
-            missing,
-        )
-        if not auto_install:
-            raise RuntimeError(
-                f"Unsupported node types (ComfyUI not installed): {missing}\n"
-                f"Install: pip install comfyui"
-            )
-        log.info("Attempting to install ComfyUI...")
-        subprocess.run(
-            [sys.executable, "-m", "pip", "install", "comfyui", "--quiet"],
-            capture_output=True, timeout=600,
-        )
-        global _comfyui_available
-        _comfyui_available = None
-        if not _check_comfyui_available():
-            raise RuntimeError(
-                f"Could not install ComfyUI. Missing nodes: {missing}\n"
-                f"Manual install: pip install comfyui"
-            )
-
-    comfy_nodes = _load_comfyui_nodes()
     resolved: dict[str, type] = {}
     still_missing: set[str] = set()
 
     for t in required_types:
-        if t in comfy_nodes:
-            resolved[t] = comfy_nodes[t]
-        elif t in NATIVE_NODES:
+        if t in NATIVE_NODES:
             resolved[t] = NATIVE_NODES[t]
         else:
             still_missing.add(t)
 
+    if not still_missing:
+        return "native", resolved
+
+    # --- Inject comfy compat layer before loading any custom nodes ---
+    _compat_injected = False
+    try:
+        from ghost_comfy_compat import ensure_comfy_compat
+        _compat_injected = ensure_comfy_compat()
+        if _compat_injected:
+            log.info("Comfy compat layer active — custom node imports enabled")
+    except ImportError:
+        log.debug("ghost_comfy_compat not available, proceeding without compat layer")
+
+    # --- Scan already-installed custom nodes (now works with compat layer) ---
+    if still_missing:
+        comfy_nodes = _load_comfyui_nodes()
+        for t in list(still_missing):
+            if t in comfy_nodes:
+                resolved[t] = comfy_nodes[t]
+                still_missing.discard(t)
+
+    # --- Check compat layer's built-in nodes + legacy aliases ---
+    if still_missing and _compat_injected:
+        try:
+            import ghost_comfy_compat.nodes_module as nm
+            if hasattr(nm, "_register_legacy_aliases"):
+                nm._register_legacy_aliases()
+            all_known = dict(nm.NODE_CLASS_MAPPINGS)
+            if comfy_nodes:
+                all_known.update(comfy_nodes)
+            _LEGACY_ALIASES = {
+                "IPAdapterApply": "IPAdapter",
+            }
+            for old_name, new_name in _LEGACY_ALIASES.items():
+                if old_name not in all_known and new_name in all_known:
+                    all_known[old_name] = all_known[new_name]
+            for t in list(still_missing):
+                if t in all_known:
+                    resolved[t] = all_known[t]
+                    still_missing.discard(t)
+        except Exception:
+            pass
+
+    # --- Auto-install from registry (skips comfyanonymous/ComfyUI) ---
     if still_missing and auto_install:
+        installed_repos: set[str] = set()
+        no_repo_found: set[str] = set()
         for t in list(still_missing):
             repo = _find_package_for_node(t)
-            if repo:
+            if repo and repo not in installed_repos:
+                log.info("Auto-installing custom node package for '%s' from %s", t, repo)
                 if _install_comfyui_package(repo):
-                    comfy_nodes = _load_comfyui_nodes()
-                    if t in comfy_nodes:
-                        resolved[t] = comfy_nodes[t]
-                        still_missing.discard(t)
+                    installed_repos.add(repo)
+            elif not repo:
+                no_repo_found.add(t)
 
+        if installed_repos:
+            global _comfyui_nodes
+            _comfyui_nodes = None
+            comfy_nodes = _load_comfyui_nodes()
+            for t in list(still_missing):
+                if t in comfy_nodes:
+                    resolved[t] = comfy_nodes[t]
+                    still_missing.discard(t)
+
+    # --- Handle unresolved nodes ---
     if still_missing:
-        raise RuntimeError(
-            f"Could not resolve node types: {still_missing}\n"
-            "These may require custom ComfyUI nodes not yet in the registry."
-        )
+        skippable = set()
+        critical = set()
+        for t in still_missing:
+            if _is_non_critical_node(t):
+                skippable.add(t)
+            else:
+                critical.add(t)
 
-    mode = "native" if all(t in NATIVE_NODES for t in required_types) else "comfyui"
+        for t in skippable:
+            log.info("Auto-skipping non-critical node '%s' (using passthrough shim)", t)
+            resolved[t] = _make_passthrough_shim(t)
+            still_missing.discard(t)
+
+        if critical:
+            details = []
+            for t in sorted(critical):
+                repo = _find_package_for_node(t)
+                if repo:
+                    details.append(f"  - {t}: found in registry ({repo}) but import failed")
+                else:
+                    details.append(f"  - {t}: not found in any registry")
+            detail_str = "\n".join(details)
+            log.warning(
+                "Could not resolve %d critical node type(s):\n%s",
+                len(critical), detail_str,
+            )
+            raise RuntimeError(
+                f"Could not resolve {len(critical)} node type(s):\n{detail_str}\n\n"
+                "Possible fixes:\n"
+                "  1. Install the custom node package manually into ~/.ghost/comfyui/custom_nodes/\n"
+                "  2. Check https://github.com/ltdrdata/ComfyUI-Manager for available packages\n"
+                "  3. The node may require a full ComfyUI installation for deep runtime dependencies"
+            )
+
+    mode = "native" if all(t in NATIVE_NODES for t in resolved) else "comfyui"
     return mode, resolved
+
+
+_NON_CRITICAL_PATTERNS = {
+    "note", "reroute", "preview", "show", "display", "print", "debug",
+    "purge", "clean", "mute", "bypass", "comment", "group", "frame",
+    "bookmark", "todo", "info", "log", "monitor", "watch",
+}
+
+
+def _is_non_critical_node(class_type: str) -> bool:
+    """Check if a node type is non-critical (display/debug/cleanup only)."""
+    lower = class_type.lower()
+    for pattern in _NON_CRITICAL_PATTERNS:
+        if pattern in lower:
+            return True
+    return False
+
+
+def _make_passthrough_shim(class_type: str) -> type:
+    """Create a dynamic passthrough shim class for non-critical nodes."""
+
+    class _DynamicPassthrough:
+        RETURN_TYPES = ("*",)
+        FUNCTION = "run"
+        CATEGORY = "ghost_compat/passthrough"
+
+        @classmethod
+        def INPUT_TYPES(cls):
+            return {"required": {}, "optional": {}}
+
+        def run(self, **kwargs):
+            first_val = next(iter(kwargs.values()), None) if kwargs else None
+            _kw = {k: v for k, v in kwargs.items() if not k.startswith("_")}
+            if _kw:
+                first_val = next(iter(_kw.values()))
+            return (first_val,) if first_val is not None else ()
+
+    _DynamicPassthrough.__name__ = f"GhostShim_{class_type.replace(' ', '_')}"
+    _DynamicPassthrough.__qualname__ = _DynamicPassthrough.__name__
+    return _DynamicPassthrough
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -1549,10 +2185,29 @@ class ComfyUIEngine:
             try:
                 result = func(**resolved_inputs)
             except TypeError as e:
-                clean = {k: v for k, v in resolved_inputs.items()
-                         if not k.startswith("_")}
-                log.error("Node %s (%s) call failed: %s\nInputs: %s",
-                          nid, class_type, e, list(clean.keys()))
+                if "_engine" in str(e) or "unexpected keyword" in str(e):
+                    clean = {k: v for k, v in resolved_inputs.items()
+                             if not k.startswith("_")}
+                    log.debug("Retrying node %s without _engine args", class_type)
+                    try:
+                        result = func(**clean)
+                    except Exception as e2:
+                        log.error("Node %s (%s) call failed: %s\nInputs: %s",
+                                  nid, class_type, e2, list(clean.keys()))
+                        raise RuntimeError(
+                            f"Node '{nid}' ({class_type}) execution error: {e2}"
+                        ) from e2
+                else:
+                    clean = {k: v for k, v in resolved_inputs.items()
+                             if not k.startswith("_")}
+                    log.error("Node %s (%s) call failed: %s\nInputs: %s",
+                              nid, class_type, e, list(clean.keys()))
+                    raise RuntimeError(
+                        f"Node '{nid}' ({class_type}) execution error: {e}"
+                    ) from e
+            except Exception as e:
+                log.error("Node %s (%s) execution error: %s",
+                          nid, class_type, e, exc_info=True)
                 raise RuntimeError(
                     f"Node '{nid}' ({class_type}) execution error: {e}"
                 ) from e
@@ -1572,8 +2227,32 @@ class ComfyUIEngine:
 
     @staticmethod
     def _resolve_inputs(raw: dict, outputs: dict, cls: type) -> dict:
-        """Resolve node references [node_id, slot] to actual values."""
+        """Resolve node references [node_id, slot] to actual values.
+
+        Also maps _widget_values from UI-format workflows to named inputs
+        using the node's INPUT_TYPES definition.
+        """
         resolved: dict[str, Any] = {}
+
+        widget_values = raw.get("_widget_values")
+        if widget_values and hasattr(cls, "INPUT_TYPES"):
+            try:
+                input_spec = cls.INPUT_TYPES()
+                widget_names: list[str] = []
+                connected_inputs = {
+                    k for k, v in raw.items()
+                    if not k.startswith("_") and isinstance(v, list)
+                    and len(v) == 2 and isinstance(v[0], str)
+                }
+                for section in ("required", "optional"):
+                    for name in input_spec.get(section, {}):
+                        if name not in connected_inputs:
+                            widget_names.append(name)
+                for i, wname in enumerate(widget_names):
+                    if i < len(widget_values) and wname not in raw:
+                        resolved[wname] = widget_values[i]
+            except Exception:
+                pass
 
         for key, val in raw.items():
             if key.startswith("_"):
@@ -1846,7 +2525,7 @@ def generate_ghost_node(
         f'',
         f'{I2}api.register_tool({{',
         f'{I3}"name": "{tool_name}",',
-        f'{I3}"description": "{desc_esc} Models: {models_str}.",',
+        f'{I3}"description": "{desc_esc} Models: {models_str}. If execution fails with a MISSING MODEL error, use web_search to find the download URL, then comfyui_model_download to fetch it, then retry.",',
         f'{I3}"parameters": {{',
         f'{I3}    "type": "object",',
         f'{I3}    "properties": {json.dumps(props)},',

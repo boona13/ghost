@@ -1,10 +1,11 @@
 """
-ComfyUI Workflow Node — run, analyze, and import ComfyUI community workflows.
+ComfyUI Workflow Node — run, analyze, import, and manage ComfyUI community workflows.
 
-Three tools:
-  comfyui_run     — execute a workflow JSON file directly
-  comfyui_analyze — inspect a workflow (models, inputs, node types)
-  comfyui_import  — convert a workflow into a standalone Ghost node
+Four tools:
+  comfyui_run            — execute a workflow JSON file directly
+  comfyui_analyze        — inspect a workflow (models, inputs, node types)
+  comfyui_import         — convert a workflow into a standalone Ghost node
+  comfyui_model_download — download a missing model file by URL
 """
 
 import json
@@ -90,7 +91,12 @@ def register(api):
             "Execute a ComfyUI workflow JSON file natively. "
             "Supports any community workflow — custom nodes are auto-installed. "
             "For simple workflows (txt2img, img2img, inpaint) runs via diffusers; "
-            "complex workflows fall back to ComfyUI node packages."
+            "complex workflows fall back to ComfyUI node packages. "
+            "If execution fails with a 'MISSING MODEL' error: "
+            "1) use web_search to find the download URL (HuggingFace, CivitAI), "
+            "2) call comfyui_model_download with the URL and correct subdir, "
+            "3) retry this tool. Never report a missing model to the user "
+            "without first trying to find and download it yourself."
         ),
         "parameters": {
             "type": "object",
@@ -225,4 +231,99 @@ def register(api):
             "required": ["workflow_path", "node_name"],
         },
         "execute": execute_import,
+    })
+
+    # ── Tool 4: Download a missing model ──────────────────────────────
+
+    VALID_SUBDIRS = {
+        "checkpoints", "loras", "controlnet", "vae",
+        "clip_vision", "embeddings", "upscale_models",
+    }
+
+    def execute_model_download(url="", filename="", subdir="checkpoints",
+                               **_kw):
+        if not url:
+            return json.dumps({"status": "error",
+                               "error": "url is required"})
+        if not filename:
+            filename = url.rsplit("/", 1)[-1].split("?")[0]
+        if not filename:
+            return json.dumps({"status": "error",
+                               "error": "Could not determine filename from URL. "
+                                        "Please provide the filename parameter."})
+
+        if subdir not in VALID_SUBDIRS:
+            return json.dumps({"status": "error",
+                               "error": f"Invalid subdir '{subdir}'. "
+                                        f"Must be one of: {sorted(VALID_SUBDIRS)}"})
+
+        models_dir = Path.home() / ".ghost" / "models"
+        dest_dir = models_dir / subdir
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / filename
+
+        if dest.exists():
+            size_mb = dest.stat().st_size / (1024 * 1024)
+            return json.dumps({
+                "status": "ok",
+                "message": f"Model already exists: {dest} ({size_mb:.1f} MB)",
+                "path": str(dest),
+            })
+
+        try:
+            from ghost_comfyui_engine import _download_file
+            api.log(f"Downloading model: {filename} → {dest_dir}/")
+            _download_file(url, dest)
+            size_mb = dest.stat().st_size / (1024 * 1024)
+            return json.dumps({
+                "status": "ok",
+                "message": f"Downloaded {filename} ({size_mb:.1f} MB)",
+                "path": str(dest),
+            })
+        except Exception as e:
+            log.error("Model download error: %s", e, exc_info=True)
+            return json.dumps({"status": "error", "error": str(e)[:500]})
+
+    api.register_tool({
+        "name": "comfyui_model_download",
+        "description": (
+            "Download a model file needed by a ComfyUI workflow. "
+            "Use this when a workflow fails with 'MISSING MODEL' or "
+            "'model not found' errors. First use web_search to find the "
+            "download URL (search HuggingFace, CivitAI, GitHub), then call "
+            "this tool with the URL and correct subdir. After downloading, "
+            "retry the workflow. "
+            "Subdirs: checkpoints (SD/SDXL/FLUX .safetensors), "
+            "loras (LoRA adapters), controlnet (ControlNet models), "
+            "vae (VAE models), clip_vision (CLIP vision encoders for IPAdapter), "
+            "upscale_models (super-resolution), embeddings (textual inversions)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": (
+                        "Direct download URL for the model file. "
+                        "For HuggingFace use the /resolve/main/ URL format."
+                    ),
+                },
+                "filename": {
+                    "type": "string",
+                    "description": (
+                        "Target filename. If omitted, extracted from URL. "
+                        "Use the exact filename the workflow expects."
+                    ),
+                },
+                "subdir": {
+                    "type": "string",
+                    "description": (
+                        "Model subdirectory: checkpoints, loras, controlnet, "
+                        "vae, clip_vision, upscale_models, or embeddings."
+                    ),
+                },
+            },
+            "required": ["url"],
+        },
+        "execute": execute_model_download,
     })

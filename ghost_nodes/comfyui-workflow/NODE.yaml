@@ -18,6 +18,7 @@ tools:
   - comfyui_run
   - comfyui_import
   - comfyui_analyze
+  - comfyui_model_download
 
 inputs: ["text"]
 outputs: ["image", "json"]
