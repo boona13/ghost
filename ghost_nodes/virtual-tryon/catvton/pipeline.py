@@ -256,6 +256,9 @@ class CatVTONPipeline:
                 ):
                     pbar.update()
 
+                if self.device == "mps" and i % 5 == 4:
+                    torch.mps.empty_cache()
+
         latents = latents.split(latents.shape[concat_dim] // 2, dim=concat_dim)[0]
         latents = 1 / self.vae.config.scaling_factor * latents
         decoded = self.vae.decode(latents.to(self.device, dtype=self.weight_dtype)).sample

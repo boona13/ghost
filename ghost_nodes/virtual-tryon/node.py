@@ -45,10 +45,41 @@ def _get_dtype(device):
 
 
 def _get_tryon_resolution(device):
-    """CatVTON concatenates images spatially, doubling memory. Adapt resolution."""
+    """CatVTON concatenates images spatially, doubling memory. Adapt resolution.
+    
+    MPS (Apple Silicon) has limited memory - use lower resolution to prevent OOM.
+    The attention mechanism can request 36+ GB for larger resolutions.
+    """
     if device == "cuda":
         return 768, 1024
-    return 384, 512
+    if device == "mps":
+        return 256, 384  # Reduced to prevent 36GB buffer allocation
+    return 384, 512  # CPU can handle slightly larger
+
+
+def _validate_image_size(image_path, max_pixels=1200000):
+    """Validate image isn't too large to cause OOM during processing.
+    
+    Args:
+        image_path: Path to image file
+        max_pixels: Maximum allowed pixels (width * height)
+    
+    Returns:
+        (is_valid, error_message) tuple
+    """
+    try:
+        with Image.open(image_path) as img:
+            w, h = img.size
+            pixels = w * h
+            if pixels > max_pixels:
+                return False, (
+                    f"Image too large: {w}x{h} ({pixels:,} pixels). "
+                    f"Maximum allowed: {max_pixels:,} pixels. "
+                    f"Please resize to ~{int((max_pixels / (w/h))**0.5)}x{int((max_pixels * (w/h))**0.5)} or smaller."
+                )
+            return True, None
+    except Exception as e:
+        return False, f"Error validating image: {e}"
 
 
 def _generate_clothing_mask(person_image: Image.Image,
@@ -89,9 +120,13 @@ def _generate_clothing_mask(person_image: Image.Image,
 def _load_pipeline(device, dtype):
     """Load the CatVTON pipeline."""
     global _pipeline
+    import os
 
     if _pipeline is not None:
         return _pipeline
+
+    if device == "mps":
+        os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = "0.0"
 
     node_dir = Path(__file__).parent
     if str(node_dir) not in sys.path:
@@ -125,8 +160,16 @@ def register(api):
         if not garment_image_path:
             return json.dumps({"status": "error", "error": "garment_image_path is required"})
 
+        # Validate image sizes before processing to prevent OOM
+        device = _get_device(api)
+        max_pixels = 800000 if device == "mps" else 1200000
+        
+        for img_path, img_name in [(person_image_path, "person"), (garment_image_path, "garment")]:
+            is_valid, error_msg = _validate_image_size(img_path, max_pixels)
+            if not is_valid:
+                return json.dumps({"status": "error", "error": f"{img_name} image: {error_msg}"})
+
         try:
-            device = _get_device(api)
             dtype = _get_dtype(device)
             api.log(f"Virtual Try-On starting on {device}...")
 
@@ -158,17 +201,36 @@ def register(api):
             vt_width, vt_height = _get_tryon_resolution(device)
             api.log(f"Resolution: {vt_width}x{vt_height}")
 
-            results = pipe(
-                image=person_image,
-                condition_image=garment_image,
-                mask=mask_image,
-                num_inference_steps=steps,
-                guidance_scale=guidance_scale,
-                height=vt_height,
-                width=vt_width,
-                generator=generator,
-            )
-            result_image = results[0]
+            if device == "mps":
+                guidance_scale = min(guidance_scale, 1.0)
+                steps = min(steps, 20)
+                api.log(f"MPS mode: cfg={guidance_scale}, steps={steps} (reduced for memory)")
+                torch.mps.empty_cache()
+
+            try:
+                results = pipe(
+                    image=person_image,
+                    condition_image=garment_image,
+                    mask=mask_image,
+                    num_inference_steps=steps,
+                    guidance_scale=guidance_scale,
+                    height=vt_height,
+                    width=vt_width,
+                    generator=generator,
+                )
+                result_image = results[0]
+            except RuntimeError as re:
+                if "Invalid buffer size" in str(re) or "out of memory" in str(re).lower():
+                    error_msg = (
+                        f"Out of memory error on {device}: {re}. "
+                        f"Try: 1) Using smaller images (max {max_pixels:,} pixels), "
+                        f"2) Reducing steps (current: {steps}), "
+                        f"3) Reducing guidance_scale (current: {guidance_scale}), "
+                        f"4) Using a CUDA device if available."
+                    )
+                    log.error(error_msg)
+                    return json.dumps({"status": "error", "error": error_msg})
+                raise
             elapsed_gen = time.time() - t2
             api.log(f"Try-on complete ({elapsed_gen:.1f}s)")
 
