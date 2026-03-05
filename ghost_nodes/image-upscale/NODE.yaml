@@ -1,0 +1,26 @@
+name: image-upscale
+version: 1.0.0
+description: "Upscale images 2x-4x using Real-ESRGAN. Enhances resolution and sharpens details."
+author: ghost-ai
+category: image_generation
+license: MIT
+
+requires:
+  python: ">=3.10"
+  gpu: false
+  vram_gb: 1
+  disk_gb: 0.3
+  deps: ["torch", "Pillow", "numpy"]
+
+models:
+  - id: "real-esrgan-x4"
+    size_gb: 0.07
+    default: true
+
+tools:
+  - upscale_image
+
+inputs: ["image"]
+outputs: ["image"]
+
+tags: ["upscale", "super-resolution", "real-esrgan", "enhance", "4x"]

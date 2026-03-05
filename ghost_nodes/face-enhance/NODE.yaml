@@ -1,0 +1,14 @@
+name: face-enhance
+version: "1.0.0"
+description: "AI super-resolution and face enhancement. Upscale low-resolution images with Swin2SR neural network for crystal-clear results."
+author: ghost
+category: image
+tags: [face, enhance, restore, upscale, super-resolution, portrait]
+estimated_vram_gb: 0.5
+dependencies:
+  - torch
+  - transformers
+  - Pillow
+models:
+  - id: caidas/swin2SR-classical-sr-x2-64
+    size_gb: 0.2

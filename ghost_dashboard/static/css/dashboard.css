@@ -747,6 +747,33 @@ select.form-input option {
 
 .chat-step:last-child { border-bottom: none; }
 
+/* Node progress indicator (model download / processing) */
+.chat-progress {
+  padding: 0.375rem 0;
+}
+.chat-progress-inner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 12px;
+  color: #a78bfa;
+}
+.chat-progress-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(167, 139, 250, 0.3);
+  border-top-color: #a78bfa;
+  border-radius: 50%;
+  animation: chat-spin 0.8s linear infinite;
+}
+.chat-progress-text {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+}
+@keyframes chat-spin {
+  to { transform: rotate(360deg); }
+}
+
 .chat-step-header {
   display: flex;
   align-items: center;

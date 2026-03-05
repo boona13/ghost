@@ -1,0 +1,28 @@
+name: bark-tts
+version: 1.0.0
+description: "Expressive multilingual text-to-speech using Suno Bark. Supports laughter, music, and sound effects."
+author: ghost-ai
+category: audio
+license: MIT
+
+requires:
+  python: ">=3.10"
+  gpu: true
+  vram_gb: 4
+  disk_gb: 5
+  deps: ["torch", "transformers", "scipy", "numpy"]
+
+models:
+  - id: "suno/bark"
+    size_gb: 5.0
+    default: true
+  - id: "suno/bark-small"
+    size_gb: 2.0
+
+tools:
+  - bark_speak
+
+inputs: ["text"]
+outputs: ["audio"]
+
+tags: ["bark", "tts", "text-to-speech", "voice", "multilingual", "expressive"]

@@ -35,3 +35,83 @@ neonize>=0.3.14           # WhatsApp Web (QR code linking via whatsmeow)
 # discord.py>=2.3         # Discord gateway (bidirectional)
 # matrix-nio>=0.24        # Matrix E2EE support
 # websocket-client>=1.7   # Mattermost/Nostr inbound
+
+# ── GhostNodes — local AI node dependencies ──────────────────────────
+# Core ML frameworks
+torch>=2.4                # PyTorch — required by most AI nodes
+diffusers>=0.33           # Hugging Face Diffusers — image/video generation pipelines (>=0.33 for Wan2.1)
+ftfy>=6.1                 # Unicode text fixing — required by Wan2.1 text encoder
+transformers>=4.56,<5     # Hugging Face Transformers — 4.56+ for surya, <5 for MusicGen compat
+accelerate>=1.0           # Hugging Face Accelerate — device placement & mixed precision
+safetensors>=0.4          # Fast model weight loading
+sentencepiece>=0.2        # Tokenizer support for multilingual models
+protobuf>=4.25            # Protocol Buffers for model configs
+Pillow>=12.0              # Image processing (used by most vision nodes)
+
+# Image generation (stable-diffusion node)
+# Models auto-download from HuggingFace on first use (SDXL-Turbo ~6GB, FLUX ~12-20GB)
+
+# Background removal (background-remove node)
+rembg>=2.0                # U2-Net background removal
+
+# Text-to-speech (bark-tts node)
+suno-bark>=0.1            # Suno Bark — expressive multilingual TTS
+
+# Speech-to-text (whisper-stt node)
+openai-whisper>=20240930  # OpenAI Whisper — 99-language transcription
+
+# Document OCR (surya-ocr node)
+surya-ocr>=0.17           # Surya — 90+ language document OCR (Predictor API)
+
+# Music generation (music-gen node) — uses transformers MusicgenForConditionalGeneration
+scipy>=1.12               # Audio processing / wav file writing
+
+# Image upscale (image-upscale node) — uses Lanczos fallback if Real-ESRGAN unavailable
+# Optional: realesrgan    # Real-ESRGAN (requires basicsr — may need manual build)
+
+# Image-to-3D (image-to-3d node) — requires manual install:
+# git clone https://github.com/VAST-AI-Research/TripoSR && cd TripoSR && pip install -e .
+
+# Depth estimation (depth-estimation node) — uses transformers DepthAnythingV2
+# Models: Depth-Anything-V2-{Small,Base,Large}-hf (auto-download, 100MB-1.3GB)
+
+# Style transfer (style-transfer node) — uses torchvision VGG19
+torchvision>=0.19            # VGG19 pre-trained features for neural style transfer
+
+# Image inpainting (image-inpaint node) — uses diffusers StableDiffusionInpaintPipeline
+# Models: runwayml/stable-diffusion-inpainting (~4GB auto-download)
+
+# Face enhancement (face-enhance node) — Swin2SR super-resolution
+# Uses transformers Swin2SRForImageSuperResolution (auto-download ~200MB)
+
+# Sound effects (sound-effects node) — AudioLDM2 text-to-audio
+# Models: cvssp/audioldm2 (~3GB auto-download)
+# Uses diffusers AudioLDM2Pipeline + scipy for wav output
+
+# Voice effects (voice-fx node) — pure DSP, no model downloads needed
+# Uses numpy + scipy + soundfile (already listed above)
+
+# Product studio (product-studio node) — professional product photography
+# Uses rembg (already listed) + SD inpainting (already listed)
+
+# Virtual try-on (virtual-tryon node) — clothing transfer onto person
+# Uses rembg (already listed) + SD inpainting (already listed)
+
+# Video generation (video-gen node) — Wan2.1 (primary), LTX-Video/CogVideoX (fallback)
+# Models: Wan-AI/Wan2.1-T2V-1.3B-Diffusers (~3GB), Wan-AI/Wan2.1-I2V-14B-480P-Diffusers (~28GB)
+imageio>=2.30                # Video frame encoding/decoding
+imageio-ffmpeg>=0.4          # FFmpeg backend for imageio
+
+# MLX-native video generation (macOS Apple Silicon only — optional)
+# Provides LTX-2 text-to-video and image-to-video with synchronized audio
+# mlx-video-with-audio>=0.1.5; sys_platform == "darwin"
+
+# Cloud video providers (kling-video node) — JWT authentication for Kling AI API
+PyJWT>=2.8,<3.0              # JWT token generation (Kling access_key + secret_key → Bearer token)
+
+# Video composition (video-composer node) — clip concat, audio merge, transitions
+moviepy>=2.0                 # Programmatic video editing (wraps ffmpeg internally)
+
+# Voice cloning (voice-clone node) — OpenVoice V2 (optional, manual install):
+# pip install git+https://github.com/myshell-ai/OpenVoice.git
+# pip install git+https://github.com/myshell-ai/MeloTTS.git

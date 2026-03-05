@@ -1,0 +1,32 @@
+name: minimax-video
+version: 1.0.0
+description: >
+  Video generation via Minimax (Hailuo) cloud API. Excels at longer videos
+  with natural motion and consistent characters. Text-to-video and
+  image-to-video supported. Requires a Minimax API key.
+author: ghost-ai
+category: video
+license: MIT
+
+requires:
+  gpu: false
+  cloud_provider: minimax
+  api_key_env: MINIMAX_API_KEY
+  deps: []
+
+tools:
+  - minimax_text_to_video
+  - minimax_image_to_video
+
+inputs: ["text", "image"]
+outputs: ["video"]
+
+tags:
+  - video
+  - cloud
+  - minimax
+  - hailuo
+  - text2video
+  - image2video
+  - long-form
+  - paid

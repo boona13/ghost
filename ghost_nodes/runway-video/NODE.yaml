@@ -1,0 +1,34 @@
+name: runway-video
+version: 1.0.0
+description: >
+  High-quality video generation via Runway Gen-4 cloud API.
+  Text-to-video and image-to-video with scene-level understanding,
+  multi-character coherence, and cinematic camera control.
+  Requires a Runway API key.
+author: ghost-ai
+category: video
+license: MIT
+
+requires:
+  gpu: false
+  cloud_provider: runway
+  api_key_env: RUNWAY_API_KEY
+  deps: []
+
+tools:
+  - runway_text_to_video
+  - runway_image_to_video
+
+inputs: ["text", "image"]
+outputs: ["video"]
+
+tags:
+  - video
+  - cloud
+  - runway
+  - gen4
+  - text2video
+  - image2video
+  - cinematic
+  - high-quality
+  - paid

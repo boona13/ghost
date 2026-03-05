@@ -95,6 +95,7 @@ def get_status():
                 "tts": cfg.get("enable_tts", True),
                 "security_audit": cfg.get("enable_security_audit", True),
                 "session_memory": cfg.get("enable_session_memory", True),
+                "nodes": cfg.get("enable_nodes", True),
             },
             "live": {
                 "tools": tool_count,
@@ -147,6 +148,7 @@ def get_status():
             "tts": cfg.get("enable_tts", True),
             "security_audit": cfg.get("enable_security_audit", True),
             "session_memory": cfg.get("enable_session_memory", True),
+            "nodes": cfg.get("enable_nodes", True),
         },
         "soul_exists": SOUL_FILE.exists(),
         "user_exists": USER_FILE.exists(),

@@ -1,0 +1,28 @@
+name: florence-vision
+version: 1.0.0
+description: "Image understanding using Microsoft Florence-2: captioning, OCR, object detection, segmentation"
+author: ghost-ai
+category: vision
+license: MIT
+
+requires:
+  python: ">=3.10"
+  gpu: true
+  vram_gb: 4
+  disk_gb: 3
+  deps: ["torch", "transformers", "Pillow"]
+
+models:
+  - id: "microsoft/Florence-2-large"
+    size_gb: 2.5
+    default: true
+  - id: "microsoft/Florence-2-base"
+    size_gb: 0.5
+
+tools:
+  - florence_analyze
+
+inputs: ["image"]
+outputs: ["text", "json"]
+
+tags: ["florence", "vision", "captioning", "ocr", "object-detection", "segmentation"]

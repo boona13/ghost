@@ -1,0 +1,17 @@
+name: sound-effects
+version: "1.0.0"
+description: "Generate any sound effect from text descriptions — explosions, rain, footsteps, sci-fi lasers, and more. Uses AudioLDM2 for text-to-audio generation."
+author: ghost
+category: audio
+tags: [sound, effects, sfx, audio, foley, ambient]
+estimated_vram_gb: 4.0
+dependencies:
+  - torch
+  - diffusers
+  - transformers
+  - scipy
+models:
+  - id: cvssp/audioldm2
+    size_gb: 3.0
+  - id: cvssp/audioldm2-music
+    size_gb: 3.0

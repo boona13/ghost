@@ -1,0 +1,59 @@
+name: video-gen
+version: 3.0.0
+description: >
+  Text-to-video and image-to-video generation using Wan2.1 (primary) with
+  LTX-Video/CogVideoX fallback. Wan2.1 delivers dramatically better quality,
+  coherent subjects, and consistent motion. The 1.3B T2V model runs on consumer
+  GPUs (8 GB+ VRAM). Full CUDA (Windows/Linux) and MPS (macOS) support.
+author: ghost-ai
+category: video
+license: MIT
+
+requires:
+  python: ">=3.10"
+  gpu: true
+  vram_gb: 8
+  disk_gb: 6
+  deps:
+    - torch
+    - diffusers
+    - transformers
+    - accelerate
+    - ftfy
+    - imageio
+    - imageio-ffmpeg
+    - Pillow
+
+models:
+  - id: "Wan-AI/Wan2.1-T2V-1.3B-Diffusers"
+    size_gb: 3.0
+    default: true
+    description: "Wan2.1 text-to-video 1.3B — high quality, 8 GB VRAM, consumer-friendly"
+  - id: "Wan-AI/Wan2.1-I2V-14B-480P-Diffusers"
+    size_gb: 28.0
+    description: "Wan2.1 image-to-video 14B 480P — best I2V quality, CPU-offloaded"
+  - id: "Lightricks/LTX-Video"
+    size_gb: 4.0
+    fallback: true
+  - id: "THUDM/CogVideoX-2b"
+    size_gb: 5.0
+    fallback: true
+
+tools:
+  - text_to_video
+  - image_to_video
+
+inputs: ["text", "image"]
+outputs: ["video"]
+
+tags:
+  - video
+  - text2video
+  - image2video
+  - wan2.1
+  - diffusers
+  - cuda
+  - mps
+  - apple-silicon
+  - cross-platform
+  - animation

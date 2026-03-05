@@ -1,0 +1,17 @@
+name: image-inpaint
+version: "1.0.0"
+description: "Magically remove or replace objects in images. Draw a mask or describe what to remove, and AI fills it in seamlessly."
+author: ghost
+category: image
+tags: [inpaint, edit, remove, replace, mask]
+estimated_vram_gb: 4.0
+dependencies:
+  - torch
+  - diffusers
+  - transformers
+  - Pillow
+models:
+  - id: stabilityai/stable-diffusion-2-inpainting
+    size_gb: 5.0
+  - id: runwayml/stable-diffusion-inpainting
+    size_gb: 4.0

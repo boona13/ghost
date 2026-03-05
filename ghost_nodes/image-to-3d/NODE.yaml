@@ -1,0 +1,26 @@
+name: image-to-3d
+version: 1.0.0
+description: "Generate 3D models from single images using TripoSR. Fast single-image 3D reconstruction."
+author: ghost-ai
+category: 3d
+license: MIT
+
+requires:
+  python: ">=3.10"
+  gpu: true
+  vram_gb: 4
+  disk_gb: 2
+  deps: ["torch", "transformers", "Pillow", "trimesh", "numpy"]
+
+models:
+  - id: "stabilityai/TripoSR"
+    size_gb: 1.5
+    default: true
+
+tools:
+  - image_to_3d_model
+
+inputs: ["image"]
+outputs: ["mesh_3d"]
+
+tags: ["3d", "triposr", "mesh", "reconstruction", "image-to-3d"]

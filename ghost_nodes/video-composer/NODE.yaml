@@ -1,0 +1,11 @@
+name: video-composer
+version: "1.0.0"
+description: "Stitch video clips together, overlay audio tracks (narration, music, sound effects), add transitions, and export a final composed video. The missing piece for complete video production."
+author: ghost
+category: video
+tags: [video, compose, edit, stitch, concat, merge, audio, transitions, production]
+estimated_vram_gb: 0.0
+dependencies:
+  - moviepy
+  - numpy
+  - Pillow

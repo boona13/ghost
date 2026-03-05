@@ -1,0 +1,32 @@
+name: whisper-stt
+version: 1.0.0
+description: "Speech-to-text transcription using OpenAI Whisper (local). Supports 99 languages."
+author: ghost-ai
+category: audio
+license: MIT
+
+requires:
+  python: ">=3.10"
+  gpu: false
+  vram_gb: 2
+  disk_gb: 3
+  deps: ["torch", "openai-whisper"]
+
+models:
+  - id: "openai/whisper-base"
+    size_gb: 0.15
+    default: true
+  - id: "openai/whisper-small"
+    size_gb: 0.5
+  - id: "openai/whisper-medium"
+    size_gb: 1.5
+  - id: "openai/whisper-large-v3"
+    size_gb: 3.0
+
+tools:
+  - transcribe_audio
+
+inputs: ["audio"]
+outputs: ["text"]
+
+tags: ["whisper", "stt", "speech-to-text", "transcription", "multilingual"]

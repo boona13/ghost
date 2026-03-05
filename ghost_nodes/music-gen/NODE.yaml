@@ -1,0 +1,30 @@
+name: music-gen
+version: 1.0.0
+description: "Generate music from text descriptions using Meta MusicGen. Create royalty-free music locally."
+author: ghost-ai
+category: audio
+license: MIT
+
+requires:
+  python: ">=3.10"
+  gpu: true
+  vram_gb: 4
+  disk_gb: 4
+  deps: ["torch", "transformers", "scipy", "numpy"]
+
+models:
+  - id: "facebook/musicgen-small"
+    size_gb: 1.5
+    default: true
+  - id: "facebook/musicgen-medium"
+    size_gb: 3.3
+  - id: "facebook/musicgen-large"
+    size_gb: 6.6
+
+tools:
+  - generate_music
+
+inputs: ["text"]
+outputs: ["audio"]
+
+tags: ["music", "musicgen", "audio", "composition", "soundtrack", "meta"]

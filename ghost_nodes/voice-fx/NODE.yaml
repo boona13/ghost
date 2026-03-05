@@ -1,0 +1,11 @@
+name: voice-fx
+version: "1.0.0"
+description: "Fun voice effects — robot, chipmunk, deep bass, echo, whisper, alien, and more. Transform any audio recording with real-time effects. Zero model downloads needed."
+author: ghost
+category: audio
+tags: [voice, effects, fun, robot, chipmunk, echo, reverb, pitch]
+estimated_vram_gb: 0.0
+dependencies:
+  - numpy
+  - scipy
+  - soundfile

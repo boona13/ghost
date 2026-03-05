@@ -27,8 +27,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from ghost_projects import ProjectRegistry, format_project_for_prompt
 
 # File upload configuration
-AUDIO_EXTENSIONS = {'.wav', '.mp3', '.m4a', '.flac', '.ogg', '.webm', '.aac'}
+AUDIO_EXTENSIONS = {'.wav', '.mp3', '.m4a', '.flac', '.ogg', '.aac'}
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
+VIDEO_EXTENSIONS = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv', '.wmv', '.m4v'}
 UPLOAD_DIR = Path.home() / ".ghost" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -192,6 +193,7 @@ class ChatSession:
         self.project_id = project_id
         self.status = "pending"
         self.steps = []
+        self.progress = []
         self.result = None
         self.error = None
         self.started_at = time.time()
@@ -363,25 +365,47 @@ def _process_message(session, daemon):
                     encoded = _encode_image_for_llm(att['path'])
                     if encoded:
                         image_attachments.append(encoded)
-                    else:
-                        if not attachment_context:
-                            attachment_context = "\n\n## ATTACHED FILES\n"
-                        attachment_context += f"\n**Image ({att['filename']}):** Failed to load image from `{att['path']}`\n"
+                    if not attachment_context:
+                        attachment_context = "\n\n## ATTACHED FILES\n"
+                    attachment_context += (
+                        f"\n**Image ({att['filename']}):** Saved at `{att['path']}`"
+                        f"{'' if encoded else ' (failed to load preview)'}\n"
+                        f"Use this exact path when tools need an image_path argument.\n"
+                    )
                 elif att.get('type') == 'audio':
                     if not attachment_context:
                         attachment_context = "\n\n## ATTACHED FILES\n"
+                    meta_parts = []
+                    if att.get('size_mb'):
+                        meta_parts.append(f"{att['size_mb']}MB")
+                    if att.get('duration_secs'):
+                        meta_parts.append(f"{att['duration_secs']}s")
+                    meta_str = f" ({', '.join(meta_parts)})" if meta_parts else ""
+                    attachment_context += (
+                        f"\n**Audio ({att['filename']}{meta_str}):** Saved at `{att.get('path', 'unknown')}`\n"
+                        f"Use this exact path when tools need an audio_path argument.\n"
+                    )
                     if att.get('transcript'):
-                        attachment_context += f"\n**Audio ({att['filename']}) — Transcript:**\n{att['transcript']}\n"
-                    else:
-                        attachment_context += (
-                            f"\n**Audio ({att['filename']}):** File saved at `{att.get('path', 'unknown')}`. "
-                            f"Transcription not available (Moonshine STT not installed). "
-                            f"You can try transcribing with shell_exec if another STT tool is available.\n"
-                        )
+                        attachment_context += f"Transcript: {att['transcript']}\n"
+                elif att.get('type') == 'video':
+                    if not attachment_context:
+                        attachment_context = "\n\n## ATTACHED FILES\n"
+                    meta_parts = []
+                    if att.get('size_mb'):
+                        meta_parts.append(f"{att['size_mb']}MB")
+                    if att.get('duration_secs'):
+                        meta_parts.append(f"{att['duration_secs']}s")
+                    meta_str = f" ({', '.join(meta_parts)})" if meta_parts else ""
+                    attachment_context += (
+                        f"\n**Video ({att['filename']}{meta_str}):** Saved at `{att.get('path', 'unknown')}`\n"
+                        f"Use this exact path when tools need a video path argument.\n"
+                    )
                 else:
                     if not attachment_context:
                         attachment_context = "\n\n## ATTACHED FILES\n"
-                    attachment_context += f"\n**File ({att['filename']}):** {att.get('description', 'Attached file')}\n"
+                    attachment_context += (
+                        f"\n**File ({att['filename']}):** Saved at `{att.get('path', 'unknown')}`\n"
+                    )
 
         system_prompt = (
             identity +
@@ -530,6 +554,20 @@ def _process_message(session, daemon):
 
         active_evolution_ids = []
 
+        def on_node_progress(node_id, message):
+            """Called by NodeAPI.log() during tool execution — pushes live progress to SSE."""
+            session.progress.append({
+                "node": node_id,
+                "message": message,
+                "time": datetime.now().isoformat(),
+            })
+
+        try:
+            from ghost_node_manager import set_node_progress_callback
+            set_node_progress_callback(on_node_progress)
+        except ImportError:
+            pass
+
         def on_step(step_num, tool_name, tool_result):
             import re
             result_str = str(tool_result)[:500]
@@ -644,6 +682,12 @@ def _process_message(session, daemon):
         _trigger_chat_repair(daemon, "tool_loop", e, tb)
         session.finished_at = time.time()
         return
+    finally:
+        try:
+            from ghost_node_manager import clear_node_progress_callback
+            clear_node_progress_callback()
+        except ImportError:
+            pass
 
     try:
         import importlib
@@ -724,7 +768,8 @@ def upload_file():
 
     # Validate file extension
     ext = Path(file.filename).suffix.lower()
-    if ext not in AUDIO_EXTENSIONS and ext not in IMAGE_EXTENSIONS:
+    all_allowed = AUDIO_EXTENSIONS | IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
+    if ext not in all_allowed:
         return jsonify({"ok": False, "error": f"Unsupported file type: {ext}"}), 400
 
     # Save file to upload directory
@@ -737,12 +782,35 @@ def upload_file():
     except Exception as e:
         return jsonify({"ok": False, "error": f"Failed to save file: {str(e)}"}), 500
 
+    if ext in AUDIO_EXTENSIONS:
+        file_type = "audio"
+    elif ext in VIDEO_EXTENSIONS:
+        file_type = "video"
+    else:
+        file_type = "image"
+
+    file_size_mb = round(file_path.stat().st_size / (1024 * 1024), 2)
     result = {
         "ok": True,
         "filename": file.filename,
         "path": str(file_path),
-        "type": "audio" if ext in AUDIO_EXTENSIONS else "image",
+        "type": file_type,
+        "size_mb": file_size_mb,
     }
+
+    # Get duration for audio/video files
+    if file_type in ("audio", "video"):
+        try:
+            import subprocess
+            probe = subprocess.run(
+                ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+                 "-of", "csv=p=0", str(file_path)],
+                capture_output=True, text=True, timeout=10,
+            )
+            if probe.returncode == 0 and probe.stdout.strip():
+                result["duration_secs"] = round(float(probe.stdout.strip()), 1)
+        except Exception:
+            pass
 
     # Auto-transcribe audio if Moonshine is available
     if ext in AUDIO_EXTENSIONS:
@@ -909,6 +977,7 @@ def stream_status(message_id):
     """SSE endpoint for real-time step updates."""
     def generate():
         last_step_count = 0
+        last_progress_count = 0
         approval_sent = False
         while True:
             with _chat_lock:
@@ -916,6 +985,12 @@ def stream_status(message_id):
             if not session:
                 yield f"data: {json.dumps({'done': True, 'error': 'not found'})}\n\n"
                 return
+
+            new_progress = session.progress[last_progress_count:]
+            if new_progress:
+                for p in new_progress:
+                    yield f"data: {json.dumps({'type': 'progress', 'progress': p})}\n\n"
+                last_progress_count = len(session.progress)
 
             new_steps = session.steps[last_step_count:]
             if new_steps:

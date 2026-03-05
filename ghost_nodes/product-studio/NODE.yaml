@@ -1,0 +1,36 @@
+name: product-studio
+version: 2.0.0
+description: "Professional product photography: removes background, generates AI studio backdrop with depth-aware lighting, composites product seamlessly. Based on ComfyUI Background-Replacement workflow (meap158)."
+author: ghost-ai
+category: image_editing
+license: MIT
+
+requires:
+  python: ">=3.10"
+  gpu: true
+  vram_gb: 6
+  disk_gb: 10
+  deps: ["torch", "diffusers", "transformers", "accelerate", "safetensors", "rembg", "Pillow"]
+
+models:
+  - id: "briaai/RMBG-2.0"
+    size_gb: 0.2
+    notes: "Background removal model"
+  - id: "Intel/dpt-hybrid-midas"
+    size_gb: 0.5
+    notes: "Depth estimation for depth-aware background generation"
+  - id: "diffusers/controlnet-depth-sdxl-1.0"
+    size_gb: 2.5
+    notes: "ControlNet depth for SDXL"
+  - id: "stabilityai/sdxl-turbo"
+    size_gb: 6.5
+    default: true
+    notes: "SDXL Turbo for fast background generation"
+
+tools:
+  - product_studio
+
+inputs: ["image"]
+outputs: ["image"]
+
+tags: ["product-photography", "background-replacement", "studio", "ecommerce", "depth", "controlnet"]

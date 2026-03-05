@@ -105,6 +105,8 @@ DEFAULT_ALLOWED_COMMANDS = [
     "pbcopy", "pbpaste", "say",
     # Docker (if available)
     "docker", "docker-compose",
+    # Media processing
+    "ffmpeg", "ffprobe",
 ]
 
 DEFAULT_ALLOWED_ROOTS = [

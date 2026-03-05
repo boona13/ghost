@@ -1,0 +1,26 @@
+name: surya-ocr
+version: 1.0.0
+description: "Multilingual document OCR using Surya. Extract text from images and PDFs in 90+ languages."
+author: ghost-ai
+category: vision
+license: MIT
+
+requires:
+  python: ">=3.10"
+  gpu: false
+  vram_gb: 2
+  disk_gb: 1
+  deps: ["surya-ocr", "Pillow"]
+
+models:
+  - id: "surya-ocr"
+    size_gb: 0.5
+    default: true
+
+tools:
+  - ocr_extract
+
+inputs: ["image"]
+outputs: ["text", "json"]
+
+tags: ["ocr", "surya", "document", "text-extraction", "multilingual", "pdf"]

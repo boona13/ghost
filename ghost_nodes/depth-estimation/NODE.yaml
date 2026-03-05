@@ -1,0 +1,18 @@
+name: depth-estimation
+version: "1.0.0"
+description: "Create stunning depth maps from any image using Depth Anything V2. Perfect for 3D effects, parallax videos, and spatial understanding."
+author: ghost
+category: vision
+tags: [depth, 3d, vision, estimation, map]
+estimated_vram_gb: 1.0
+dependencies:
+  - torch
+  - transformers
+  - Pillow
+models:
+  - id: depth-anything/Depth-Anything-V2-Small-hf
+    size_gb: 0.1
+  - id: depth-anything/Depth-Anything-V2-Base-hf
+    size_gb: 0.4
+  - id: depth-anything/Depth-Anything-V2-Large-hf
+    size_gb: 1.3

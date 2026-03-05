@@ -62,6 +62,18 @@ def get_config():
         resp["api_key"] = _mask_key(resp["api_key"])
     if "firecrawl_api_key" in resp and resp["firecrawl_api_key"]:
         resp["firecrawl_api_key"] = _mask_key(resp["firecrawl_api_key"])
+    if "hf_token" in resp and resp["hf_token"]:
+        resp["hf_token"] = _mask_key(resp["hf_token"])
+    if "cloud_providers" in resp and isinstance(resp["cloud_providers"], dict):
+        masked_cp = {}
+        for pname, pcfg in resp["cloud_providers"].items():
+            masked_cp[pname] = dict(pcfg) if isinstance(pcfg, dict) else pcfg
+            if isinstance(masked_cp[pname], dict):
+                if masked_cp[pname].get("api_key"):
+                    masked_cp[pname]["api_key"] = _mask_key(masked_cp[pname]["api_key"])
+                if masked_cp[pname].get("secret_key"):
+                    masked_cp[pname]["secret_key"] = _mask_key(masked_cp[pname]["secret_key"])
+        resp["cloud_providers"] = masked_cp
     if daemon and hasattr(daemon, 'engine') and hasattr(daemon.engine, 'fallback_chain'):
         fc = daemon.engine.fallback_chain
         resp["model"] = f"{fc.active_provider}:{fc.active_model}"
@@ -99,3 +111,104 @@ def update_config():
     save_config(cfg)
     _notify_daemon()
     return jsonify({"ok": True, "config": cfg})
+
+
+# ── Cloud Providers API ────────────────────────────────────────────
+
+
+@bp.route("/api/cloud-providers")
+def list_cloud_providers():
+    from ghost_dashboard import get_daemon
+    daemon = get_daemon()
+    if not daemon or not getattr(daemon, "cloud_providers", None):
+        try:
+            from ghost_cloud_providers import ProviderRegistry
+            registry = ProviderRegistry(load_config())
+            return jsonify({"providers": registry.list_providers(), "costs": registry.get_costs_summary()})
+        except Exception:
+            return jsonify({"providers": [], "costs": {}, "error": "Cloud providers not initialized"})
+
+    providers = daemon.cloud_providers.list_providers()
+    for p in providers:
+        if p.get("configured") or daemon.cloud_providers.get_api_key(p["name"]):
+            p["api_key_masked"] = _mask_key(daemon.cloud_providers.get_api_key(p["name"]) or "")
+        else:
+            p["api_key_masked"] = ""
+        if p.get("needs_secret_key"):
+            sk = daemon.cloud_providers.get_secret_key(p["name"])
+            p["secret_key_masked"] = _mask_key(sk) if sk else ""
+    costs = daemon.cloud_providers.get_costs_summary()
+    return jsonify({"providers": providers, "costs": costs})
+
+
+@bp.route("/api/cloud-providers/<name>", methods=["PUT"])
+@rate_limit(requests_per_minute=20)
+def update_cloud_provider(name):
+    from ghost_dashboard import get_daemon
+    data = request.get_json(silent=True) or {}
+    daemon = get_daemon()
+
+    cfg = load_config()
+    cloud_cfg = cfg.setdefault("cloud_providers", {})
+    prov_cfg = cloud_cfg.setdefault(name, {})
+
+    if "api_key" in data:
+        prov_cfg["api_key"] = data["api_key"]
+    if "secret_key" in data:
+        prov_cfg["secret_key"] = data["secret_key"]
+    if "enabled" in data:
+        prov_cfg["enabled"] = bool(data["enabled"])
+    if "monthly_budget_usd" in data:
+        prov_cfg["monthly_budget_usd"] = float(data["monthly_budget_usd"])
+    if "preferred_model" in data:
+        prov_cfg["preferred_model"] = data["preferred_model"]
+
+    save_config(cfg)
+
+    if daemon and getattr(daemon, "cloud_providers", None):
+        daemon.cloud_providers.update_provider(
+            name,
+            api_key=data.get("api_key"),
+            secret_key=data.get("secret_key"),
+            enabled=data.get("enabled"),
+            monthly_budget_usd=data.get("monthly_budget_usd"),
+            preferred_model=data.get("preferred_model"),
+        )
+        daemon.cfg["cloud_providers"] = cfg.get("cloud_providers", {})
+
+    return jsonify({"ok": True, "message": f"Updated {name}"})
+
+
+@bp.route("/api/cloud-providers/<name>/test", methods=["POST"])
+@rate_limit(requests_per_minute=10)
+def test_cloud_provider(name):
+    data = request.get_json(silent=True) or {}
+    api_key = data.get("api_key", "").strip()
+    secret_key = data.get("secret_key", "").strip()
+
+    if not api_key:
+        from ghost_dashboard import get_daemon
+        daemon = get_daemon()
+        if daemon and getattr(daemon, "cloud_providers", None):
+            api_key = daemon.cloud_providers.get_api_key(name) or ""
+            if not secret_key:
+                secret_key = daemon.cloud_providers.get_secret_key(name) or ""
+
+    if not api_key:
+        return jsonify({"ok": False, "error": "No API key provided or configured"})
+
+    try:
+        from ghost_cloud_providers import test_provider_key
+        result = test_provider_key(name, api_key, secret_key=secret_key)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)[:200]})
+
+
+@bp.route("/api/cloud-providers/costs")
+def cloud_provider_costs():
+    from ghost_dashboard import get_daemon
+    daemon = get_daemon()
+    if not daemon or not getattr(daemon, "cloud_providers", None):
+        return jsonify({"costs": {}, "error": "Cloud providers not initialized"})
+    return jsonify(daemon.cloud_providers.get_costs_summary())

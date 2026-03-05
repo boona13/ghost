@@ -498,6 +498,55 @@ def security_log():
         return jsonify({"events": []})
 
 
+@bp.route("/api/channels/security/allowlist")
+def get_allowlist():
+    """Return global channel security settings: dm_policy, allowed/blocked senders."""
+    from ghost import load_config
+    cfg = load_config()
+    return jsonify({
+        "channel_dm_policy": cfg.get("channel_dm_policy", "open"),
+        "channel_allowed_senders": cfg.get("channel_allowed_senders", []),
+        "channel_inbound_enabled": cfg.get("channel_inbound_enabled", True),
+    })
+
+
+@bp.route("/api/channels/security/allowlist", methods=["PUT"])
+def update_allowlist():
+    """Update global channel security allowlist and dm_policy."""
+    from ghost import load_config, save_config
+    data = request.get_json(silent=True) or {}
+    cfg = load_config()
+
+    if "channel_dm_policy" in data:
+        policy = data["channel_dm_policy"]
+        if policy not in ("open", "allowlist", "block", "blocklist"):
+            return jsonify({"ok": False, "error": "Invalid dm_policy"}), 400
+        cfg["channel_dm_policy"] = policy
+
+    if "channel_allowed_senders" in data:
+        senders = data["channel_allowed_senders"]
+        if not isinstance(senders, list):
+            return jsonify({"ok": False, "error": "channel_allowed_senders must be a list"}), 400
+        cfg["channel_allowed_senders"] = [str(s).strip() for s in senders if str(s).strip()]
+
+    if "channel_inbound_enabled" in data:
+        cfg["channel_inbound_enabled"] = bool(data["channel_inbound_enabled"])
+
+    save_config(cfg)
+
+    from ghost_dashboard import get_daemon
+    daemon = get_daemon()
+    if daemon:
+        daemon.cfg.update(cfg)
+
+    return jsonify({
+        "ok": True,
+        "channel_dm_policy": cfg["channel_dm_policy"],
+        "channel_allowed_senders": cfg.get("channel_allowed_senders", []),
+        "channel_inbound_enabled": cfg.get("channel_inbound_enabled", True),
+    })
+
+
 @bp.route("/api/channels/<channel_id>/onboard")
 def onboard_steps(channel_id):
     """Get onboarding wizard steps for a channel."""

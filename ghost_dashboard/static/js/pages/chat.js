@@ -119,7 +119,7 @@ export async function render(container) {
             </svg>
           </button>
           <input type="file" id="chat-file-input" class="chat-file-input" multiple
-            accept=".wav,.mp3,.m4a,.flac,.ogg,.webm,.aac,.jpg,.jpeg,.png,.gif,.webp,.bmp">
+            accept=".wav,.mp3,.m4a,.flac,.ogg,.webm,.aac,.jpg,.jpeg,.png,.gif,.webp,.bmp,.mp4,.mov,.avi,.mkv,.flv,.wmv,.m4v">
           <textarea id="chat-input" class="chat-input"
             placeholder="${t('chat.messagePlaceholder')}"
             rows="1"></textarea>
@@ -515,6 +515,8 @@ export async function render(container) {
         att.uploading = false;
         att.type = data.type;
         att.path = data.path;
+        att.size_mb = data.size_mb || null;
+        att.duration_secs = data.duration_secs || null;
         att.transcript = data.transcript || null;
         att.transcriptError = data.transcript_error || null;
       }
@@ -533,13 +535,15 @@ export async function render(container) {
     }
     attachmentsEl.style.display = '';
     attachmentsEl.innerHTML = attachments.map(att => {
-      const icon = att.type === 'audio' ? '\u{1F3B5}' : att.type === 'image' ? '\u{1F5BC}' : '\u{1F4CE}';
+      const icon = att.type === 'audio' ? '\u{1F3B5}' : att.type === 'video' ? '\u{1F3AC}' : att.type === 'image' ? '\u{1F5BC}' : '\u{1F4CE}';
       let stateClass = 'ready';
       let statusText = '';
       if (att.uploading) { stateClass = 'uploading'; statusText = t('chat.uploading'); }
       else if (att.error) { stateClass = 'error'; statusText = att.error; }
       else if (att.transcript) { statusText = t('chat.transcribed'); }
       else if (att.transcriptError) { statusText = t('chat.noSTT'); }
+      else if (att.duration_secs) { statusText = `${att.duration_secs}s`; }
+      else if (att.size_mb) { statusText = `${att.size_mb}MB`; }
       return `
         <div class="chat-att-pill ${stateClass}" data-att-id="${att.id}">
           <span class="chat-att-icon">${icon}</span>
@@ -649,6 +653,8 @@ export async function render(container) {
           filename: a.filename,
           type: a.type,
           path: a.path,
+          size_mb: a.size_mb,
+          duration_secs: a.duration_secs,
           transcript: a.transcript
         }));
       }
@@ -692,11 +698,30 @@ export async function render(container) {
 
     eventSource = new EventSource(`/api/chat/stream/${messageId}`);
     let stepCount = 0;
+    let progressEl = null;
 
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data);
 
+      if (data.type === 'progress') {
+        const msg = data.progress?.message || '';
+        if (!progressEl) {
+          progressEl = document.createElement('div');
+          progressEl.className = 'chat-progress';
+          stepsContainer.appendChild(progressEl);
+        }
+        const esc = window.GhostUtils?.escapeHtml || ((s) => s);
+        progressEl.innerHTML = `
+          <div class="chat-progress-inner">
+            <span class="chat-progress-spinner"></span>
+            <span class="chat-progress-text">${esc(msg)}</span>
+          </div>`;
+        statusEl.textContent = msg;
+        scrollToBottom(messagesEl);
+      }
+
       if (data.type === 'step') {
+        if (progressEl) { progressEl.remove(); progressEl = null; }
         stepCount++;
         statusEl.textContent = t('chat.stepProgress', {n: stepCount, tool: data.step.tool});
         appendStep(stepsContainer, data.step);

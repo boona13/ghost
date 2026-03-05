@@ -1,0 +1,25 @@
+name: comfyui-workflow
+version: 0.1.0
+description: "Run any ComfyUI workflow JSON natively, or import community workflows as Ghost nodes."
+author: ghost
+category: utility
+license: MIT
+
+requires:
+  python: ">=3.10"
+  gpu: false
+  vram_gb: 0
+  disk_gb: 0.1
+  deps: []
+
+models: []
+
+tools:
+  - comfyui_run
+  - comfyui_import
+  - comfyui_analyze
+
+inputs: ["text"]
+outputs: ["image", "json"]
+
+tags: ["comfyui", "workflow", "converter", "pipeline"]

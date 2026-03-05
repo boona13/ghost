@@ -1,0 +1,48 @@
+name: stable-diffusion
+version: 2.0.0
+description: "Text-to-image and image-to-image generation using FLUX.2, FLUX.1, and SDXL. Supports NVIDIA CUDA, Apple MLX, and MPS backends."
+author: ghost-ai
+category: image_generation
+license: MIT
+
+requires:
+  python: ">=3.10"
+  gpu: true
+  vram_gb: 8
+  disk_gb: 15
+  deps: ["torch", "diffusers", "transformers", "accelerate", "safetensors", "sentencepiece", "protobuf", "Pillow"]
+
+models:
+  - id: "black-forest-labs/FLUX.2-klein-4B"
+    size_gb: 8
+    default: true
+    license: "Apache 2.0"
+    notes: "FLUX.2 4B — fast, open license, sub-second on good GPU"
+  - id: "black-forest-labs/FLUX.2-klein-9B"
+    size_gb: 13
+    notes: "FLUX.2 9B — best quality-to-latency ratio"
+  - id: "black-forest-labs/FLUX.2-dev"
+    size_gb: 20
+    notes: "FLUX.2 32B — maximum quality, requires 20+ GB VRAM (FP8)"
+  - id: "black-forest-labs/FLUX.1-schnell"
+    size_gb: 12
+    license: "Apache 2.0"
+    notes: "FLUX.1 12B — 1-4 step generation, excellent quality"
+  - id: "black-forest-labs/FLUX.1-dev"
+    size_gb: 12
+    notes: "FLUX.1 12B — 50 step guidance-distilled, high quality"
+  - id: "stabilityai/stable-diffusion-xl-base-1.0"
+    size_gb: 6.5
+    notes: "SDXL 1.0 — classic, widely supported"
+  - id: "stabilityai/sdxl-turbo"
+    size_gb: 6.5
+    notes: "SDXL Turbo — 1-4 step generation"
+
+tools:
+  - text_to_image_local
+  - image_to_image_local
+
+inputs: ["text"]
+outputs: ["image"]
+
+tags: ["flux", "flux2", "sdxl", "text2img", "img2img", "diffusers", "mlx", "apple-silicon"]

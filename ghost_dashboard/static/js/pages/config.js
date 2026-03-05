@@ -33,6 +33,7 @@ export async function render(container) {
     { id: 'growth',   label: t('config.growth'),   icon: 'M13 7h8m0 0v8m0-8l-8 8-4-4-6 6' },
     { id: 'security', label: t('config.security'), icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z' },
     { id: 'models',   label: t('config.modelsTab'),   icon: 'M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z' },
+    { id: 'cloud',    label: 'Cloud Providers',      icon: 'M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z' },
   ];
 
   container.innerHTML = `
@@ -246,6 +247,43 @@ export async function render(container) {
 
     <!-- ── Security ─────────────────────────────────────────── -->
     <div class="cfg-tab-panel" data-panel="security">
+
+      <!-- Channel Security / Allowlist -->
+      <div class="stat-card mb-6">
+        <h3 class="text-sm font-semibold text-white mb-1">${t('config.channelSecurity')}</h3>
+        <div class="text-[10px] text-zinc-600 mb-4">${t('config.channelSecurityDesc')}</div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <div class="flex items-center justify-between py-2 border-b border-surface-600/30 mb-3">
+              <div>
+                <span class="text-sm text-zinc-300">${t('config.inboundEnabled')}</span>
+                <div class="text-[10px] text-zinc-600 mt-0.5">${t('config.inboundEnabledDesc')}</div>
+              </div>
+              <div class="toggle ${cfg.channel_inbound_enabled !== false ? 'on' : ''}" data-toggle="channel_inbound_enabled"><span class="toggle-dot"></span></div>
+            </div>
+            <label class="form-label">${t('config.dmPolicy')}</label>
+            <select class="form-input w-full text-xs" id="cfg-dm-policy">
+              <option value="open" ${(cfg.channel_dm_policy||'open')==='open'?'selected':''}>${t('config.dmPolicyOpen')}</option>
+              <option value="allowlist" ${cfg.channel_dm_policy==='allowlist'?'selected':''}>${t('config.dmPolicyAllowlist')}</option>
+              <option value="blocklist" ${cfg.channel_dm_policy==='blocklist'?'selected':''}>${t('config.dmPolicyBlocklist')}</option>
+              <option value="block" ${cfg.channel_dm_policy==='block'?'selected':''}>${t('config.dmPolicyBlock')}</option>
+            </select>
+            <div class="text-[10px] text-zinc-600 mt-1">${t('config.dmPolicyDesc')}</div>
+          </div>
+
+          <div>
+            <label class="form-label">${t('config.allowedSenders')}</label>
+            <div class="text-[10px] text-zinc-600 mb-2">${t('config.allowedSendersDesc')}</div>
+            <div id="allowlist-senders" class="space-y-1 mb-2 max-h-40 overflow-y-auto"></div>
+            <div class="flex gap-2">
+              <input type="text" class="form-input text-xs flex-1 font-mono" id="new-sender-id" placeholder="${t('config.addSenderPlaceholder')}">
+              <button id="btn-add-sender" class="btn btn-sm btn-primary">${t('config.addSender')}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div class="stat-card">
           <h3 class="text-sm font-semibold text-white mb-3">${t('config.allowedCommands')}</h3>
@@ -333,6 +371,59 @@ export async function render(container) {
     <!-- ── Models ───────────────────────────────────────────── -->
     <div class="cfg-tab-panel" data-panel="models">
       <div class="stat-card mb-4">
+        <h3 class="text-sm font-semibold text-white mb-1">${t('config.hfTokenTitle')}</h3>
+        <div class="text-[10px] text-zinc-600 mb-3">${t('config.hfTokenDesc')}</div>
+
+        <!-- Main login area -->
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-[10px] px-2 py-0.5 rounded-full ${cfg.hf_token ? 'bg-green-900/40 text-green-400' : 'bg-zinc-800 text-zinc-500'}">${cfg.hf_token ? t('config.hfConnected') : t('config.hfNotConnected')}</span>
+        </div>
+
+        <div class="flex items-center gap-3 mb-2">
+          <button id="btn-hf-oauth" class="btn h-10 bg-yellow-600 hover:bg-yellow-500 text-black font-semibold px-6 text-sm">
+            <svg class="w-4 h-4 mr-2 inline-block -mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"/></svg>
+            ${cfg.hf_token ? t('config.hfReconnectBtn') : t('config.hfLoginBtn')}
+          </button>
+          <span id="hf-oauth-status" class="text-xs"></span>
+        </div>
+
+        <!-- Device flow UI (hidden by default, shown during auth) -->
+        <div id="hf-device-flow" class="hidden mt-3 p-4 rounded-lg bg-surface-900/80 border border-ghost-700/30">
+          <div class="text-center">
+            <div class="text-xs text-zinc-400 mb-2">${t('config.hfDeviceStep1')}</div>
+            <a id="hf-device-link" href="https://huggingface.co/device" target="_blank" rel="noopener" class="text-base text-ghost-400 hover:text-ghost-300 underline font-mono">huggingface.co/device</a>
+            <div class="text-xs text-zinc-400 mt-4 mb-1">${t('config.hfDeviceStep2')}</div>
+            <div id="hf-device-code" class="text-3xl font-bold font-mono text-white tracking-[0.3em] my-2 select-all">----</div>
+            <button id="btn-hf-copy-code" class="text-xs text-ghost-400 hover:text-ghost-300 underline mt-1">${t('config.hfCopyCode')}</button>
+            <div class="mt-4">
+              <div class="flex items-center justify-center gap-2">
+                <div class="w-3.5 h-3.5 border-2 border-ghost-400 border-t-transparent rounded-full animate-spin"></div>
+                <span class="text-xs text-zinc-400">${t('config.hfWaiting')}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Hidden client ID (for advanced override only) -->
+        <input type="hidden" id="cfg-hf-client-id" value="${cfg.hf_oauth_client_id || ''}">
+
+        <!-- Manual token (collapsible alternative) -->
+        <details class="group mt-3">
+          <summary class="text-[10px] text-zinc-500 cursor-pointer hover:text-zinc-400 mb-2 select-none">
+            ${t('config.hfManualToken')} ▸
+          </summary>
+          <div class="flex gap-2 items-end">
+            <div class="flex-1">
+              <label class="form-label">${t('config.hfToken')}</label>
+              <input type="password" class="form-input w-full text-xs font-mono" id="cfg-hf-token" value="${cfg.hf_token || ''}" placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off">
+            </div>
+            <button id="btn-hf-test" class="btn btn-sm btn-primary h-8">${t('config.hfTestBtn')}</button>
+          </div>
+          <div id="hf-token-status" class="text-[10px] mt-2"></div>
+          <div class="text-[10px] text-zinc-600 mt-1">${t('config.hfTokenHelp')}</div>
+        </details>
+      </div>
+      <div class="stat-card mb-4">
         <h3 class="text-sm font-semibold text-white mb-1">${t('config.anthropicSettings')}</h3>
         <div class="text-[10px] text-zinc-600 mb-3">${t('config.anthropicOnlyNote')}</div>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -383,6 +474,21 @@ export async function render(container) {
         <h3 class="text-sm font-semibold text-white mb-1">${t('config.providerFallbackChains')}</h3>
         <div class="text-[10px] text-zinc-600 mb-3">${t('config.providerFallbackChainsDesc')}</div>
         <div id="provider-chains-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+      </div>
+    </div>
+
+    <!-- ── Cloud Providers ────────────────────────────────────── -->
+    <div class="cfg-tab-panel" data-panel="cloud">
+      <div class="stat-card mb-4">
+        <h3 class="text-sm font-semibold text-white mb-1">Cloud Video Providers</h3>
+        <div class="text-[10px] text-zinc-600 mb-3">Configure paid cloud APIs for high-quality video generation. Each provider requires an API key and has per-generation costs.</div>
+      </div>
+      <div id="cloud-providers-container" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="stat-card animate-pulse"><div class="h-32 bg-surface-800 rounded"></div></div>
+      </div>
+      <div id="cloud-costs-card" class="stat-card mt-4">
+        <h3 class="text-sm font-semibold text-white mb-2">Monthly Costs</h3>
+        <div id="cloud-costs-summary" class="text-xs text-zinc-400">Loading...</div>
       </div>
     </div>
 
@@ -726,6 +832,65 @@ export async function render(container) {
     });
   });
 
+  // ── Channel Security Allowlist ────────────────────────────────
+  const allowlistContainer = container.querySelector('#allowlist-senders');
+  const newSenderInput = container.querySelector('#new-sender-id');
+  const addSenderBtn = container.querySelector('#btn-add-sender');
+  const dmPolicySelect = container.querySelector('#cfg-dm-policy');
+  let currentAllowlist = [...(cfg.channel_allowed_senders || [])];
+
+  function renderAllowlist() {
+    if (!allowlistContainer) return;
+    if (currentAllowlist.length === 0) {
+      allowlistContainer.innerHTML = '<div class="text-[10px] text-zinc-600">' + t('config.noSendersYet') + '</div>';
+      return;
+    }
+    allowlistContainer.innerHTML = currentAllowlist.map(sid => {
+      return '<div class="flex items-center gap-2 bg-surface-700/50 rounded px-2 py-1">' +
+        '<span class="text-xs text-zinc-300 font-mono flex-1">' + u.escapeHtml(sid) + '</span>' +
+        '<button class="btn btn-ghost btn-sm text-zinc-500 hover:text-red-400 remove-sender" data-sender="' + u.escapeHtml(sid) + '" title="' + t('common.remove') + '">\u00d7</button>' +
+        '</div>';
+    }).join('');
+    allowlistContainer.querySelectorAll('.remove-sender').forEach(btn => {
+      btn.addEventListener('click', () => {
+        currentAllowlist = currentAllowlist.filter(s => s !== btn.dataset.sender);
+        renderAllowlist();
+      });
+    });
+  }
+
+  renderAllowlist();
+
+  if (addSenderBtn) {
+    addSenderBtn.addEventListener('click', () => {
+      const sid = newSenderInput?.value.trim();
+      if (!sid) { u.toast(t('config.senderRequired'), 'error'); return; }
+      if (currentAllowlist.includes(sid)) { u.toast(t('config.senderExists'), 'error'); return; }
+      currentAllowlist.push(sid);
+      if (newSenderInput) newSenderInput.value = '';
+      renderAllowlist();
+    });
+  }
+
+  if (newSenderInput) {
+    newSenderInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); addSenderBtn?.click(); }
+    });
+  }
+
+  if (dmPolicySelect) {
+    dmPolicySelect.addEventListener('change', () => {
+      const panel = allowlistContainer?.closest('.grid');
+      const senderCol = panel?.querySelector('#allowlist-senders')?.closest('div');
+      if (senderCol) {
+        const isAllowlist = dmPolicySelect.value === 'allowlist';
+        senderCol.style.opacity = isAllowlist ? '1' : '0.4';
+        senderCol.style.pointerEvents = isAllowlist ? 'auto' : 'none';
+      }
+    });
+    dmPolicySelect.dispatchEvent(new Event('change'));
+  }
+
   // ── Voice controls ───────────────────────────────────────────
   const voiceStateEl = container.querySelector('#voice-state');
   const wakeBtn = container.querySelector('#btn-voice-wake');
@@ -816,6 +981,19 @@ export async function render(container) {
     }
     updates.provider_chains = chains;
 
+    const dmPolicyEl = document.getElementById('cfg-dm-policy');
+    if (dmPolicyEl) updates.channel_dm_policy = dmPolicyEl.value;
+    updates.channel_allowed_senders = currentAllowlist;
+
+    const hfTokenEl = document.getElementById('cfg-hf-token');
+    if (hfTokenEl && hfTokenEl.value && !hfTokenEl.value.includes('...')) {
+      updates.hf_token = hfTokenEl.value.trim();
+    }
+    const hfClientIdEl = document.getElementById('cfg-hf-client-id');
+    if (hfClientIdEl && hfClientIdEl.value.trim()) {
+      updates.hf_oauth_client_id = hfClientIdEl.value.trim();
+    }
+
     const anthropicEffortEl = document.getElementById('cfg-anthropic-effort');
     if (anthropicEffortEl) updates.anthropic_effort = anthropicEffortEl.value;
 
@@ -851,4 +1029,287 @@ export async function render(container) {
     u.toast(t('config.resetDefaults'));
     render(container);
   });
+
+  document.getElementById('btn-hf-test')?.addEventListener('click', async () => {
+    const tokenEl = document.getElementById('cfg-hf-token');
+    const statusEl = document.getElementById('hf-token-status');
+    const token = tokenEl?.value?.trim();
+    if (!token || token.includes('...')) {
+      statusEl.innerHTML = '<span class="text-yellow-400">Enter a token first</span>';
+      return;
+    }
+    statusEl.innerHTML = '<span class="text-zinc-400">Testing...</span>';
+    try {
+      const res = await api.post('/api/nodes/hf-test', { token });
+      if (res.ok) {
+        statusEl.innerHTML = `<span class="text-green-400">${u.escapeHtml(res.message || 'Token valid!')}</span>`;
+      } else {
+        statusEl.innerHTML = `<span class="text-red-400">${u.escapeHtml(res.error || 'Token invalid')}</span>`;
+      }
+    } catch (e) {
+      statusEl.innerHTML = `<span class="text-red-400">Test failed: ${u.escapeHtml(e.message)}</span>`;
+    }
+  });
+
+  // ── HuggingFace OAuth Device Flow ───────────────────────────────
+  const GHOST_HF_CLIENT_ID = 'ca3820af-dfad-4c6f-9a45-c9584be6abe1';
+
+  document.getElementById('btn-hf-oauth')?.addEventListener('click', async () => {
+    const clientIdEl = document.getElementById('cfg-hf-client-id');
+    const statusEl = document.getElementById('hf-oauth-status');
+    const flowEl = document.getElementById('hf-device-flow');
+    const codeEl = document.getElementById('hf-device-code');
+    const linkEl = document.getElementById('hf-device-link');
+    const clientId = clientIdEl?.value?.trim() || GHOST_HF_CLIENT_ID;
+
+    statusEl.innerHTML = `<span class="text-zinc-400">${t('config.hfStarting')}</span>`;
+
+    try {
+      const res = await api.post('/api/nodes/hf-device-start', { client_id: clientId });
+      if (!res.ok) {
+        statusEl.innerHTML = `<span class="text-red-400">${u.escapeHtml(res.error)}</span>`;
+        return;
+      }
+
+      codeEl.textContent = res.user_code;
+      linkEl.href = res.verification_uri;
+      linkEl.textContent = res.verification_uri.replace('https://', '');
+      flowEl.classList.remove('hidden');
+      statusEl.innerHTML = '';
+
+      const interval = (res.interval || 5) * 1000;
+      const expiresAt = Date.now() + (res.expires_in || 900) * 1000;
+      const deviceCode = res.device_code;
+
+      const poll = async () => {
+        if (Date.now() > expiresAt) {
+          flowEl.classList.add('hidden');
+          statusEl.innerHTML = `<span class="text-red-400">${t('config.hfExpired')}</span>`;
+          return;
+        }
+        try {
+          const pollRes = await api.post('/api/nodes/hf-device-poll', {
+            device_code: deviceCode,
+            client_id: clientId,
+          });
+          if (pollRes.ok && pollRes.status === 'authorized') {
+            flowEl.classList.add('hidden');
+            statusEl.innerHTML = `<span class="text-green-400">✓ ${u.escapeHtml(pollRes.message)}</span>`;
+            const badge = flowEl.closest('.stat-card')?.querySelector('.rounded-full');
+            if (badge) {
+              badge.className = 'text-[10px] px-2 py-0.5 rounded-full bg-green-900/40 text-green-400';
+              badge.textContent = t('config.hfConnected');
+            }
+            const hfTokenInput = document.getElementById('cfg-hf-token');
+            if (hfTokenInput) hfTokenInput.value = '(set via OAuth)';
+            return;
+          }
+          if (!pollRes.ok && pollRes.status === 'pending') {
+            setTimeout(poll, interval);
+            return;
+          }
+          flowEl.classList.add('hidden');
+          statusEl.innerHTML = `<span class="text-red-400">${u.escapeHtml(pollRes.error || 'Auth failed')}</span>`;
+        } catch (e) {
+          setTimeout(poll, interval);
+        }
+      };
+      setTimeout(poll, interval);
+    } catch (e) {
+      statusEl.innerHTML = `<span class="text-red-400">${u.escapeHtml(e.message)}</span>`;
+    }
+  });
+
+  document.getElementById('btn-hf-copy-code')?.addEventListener('click', () => {
+    const code = document.getElementById('hf-device-code')?.textContent;
+    if (code && code !== '----') {
+      navigator.clipboard.writeText(code).then(() => {
+        u.toast(t('config.hfCodeCopied'));
+      });
+    }
+  });
+
+  // ── Cloud Providers ───────────────────────────────────────────
+  const cpContainer = container.querySelector('#cloud-providers-container');
+  const cpCostsSummary = container.querySelector('#cloud-costs-summary');
+
+  async function loadCloudProviders() {
+    try {
+      const data = await api.get('/api/cloud-providers');
+      const providers = data.providers || [];
+      const costs = data.costs || {};
+
+      if (cpContainer) {
+        cpContainer.innerHTML = providers.map(p => {
+          const statusColor = p.configured ? (p.enabled ? 'bg-emerald-500/20 text-emerald-400' : 'bg-yellow-500/20 text-yellow-400') : 'bg-zinc-700 text-zinc-500';
+          const statusText = p.configured ? (p.enabled ? 'Active' : 'Configured') : 'Not configured';
+          const budgetBar = p.monthly_budget_usd > 0
+            ? `<div class="mt-2">
+                <div class="flex justify-between text-[10px] text-zinc-500 mb-1">
+                  <span>Budget</span>
+                  <span>$${(p.month_spend_usd || 0).toFixed(2)} / $${p.monthly_budget_usd.toFixed(2)}</span>
+                </div>
+                <div class="w-full bg-surface-800 rounded-full h-1.5">
+                  <div class="${(p.month_spend_usd / p.monthly_budget_usd) > 0.9 ? 'bg-red-500' : (p.month_spend_usd / p.monthly_budget_usd) > 0.7 ? 'bg-amber-500' : 'bg-ghost-500'} h-1.5 rounded-full transition-all" style="width: ${Math.min(100, (p.month_spend_usd / p.monthly_budget_usd) * 100)}%"></div>
+                </div>
+              </div>` : '';
+
+          return `
+            <div class="stat-card cloud-provider-card" data-provider="${u.escapeHtml(p.name)}">
+              <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center gap-2">
+                  <span class="text-lg">☁️</span>
+                  <div>
+                    <div class="text-sm font-semibold text-white">${u.escapeHtml(p.display_name)}</div>
+                    <div class="flex gap-2 flex-wrap">
+                      <a href="${u.escapeHtml(p.docs_url)}" target="_blank" rel="noopener" class="text-[10px] text-ghost-400 hover:underline">${t('config.cpApiDocs')}</a>
+                      ${p.credits_url ? `<a href="${u.escapeHtml(p.credits_url)}" target="_blank" rel="noopener" class="text-[10px] text-emerald-400 hover:underline">${t('config.cpBuyCredits')}</a>` : ''}
+                      ${p.keys_url ? `<a href="${u.escapeHtml(p.keys_url)}" target="_blank" rel="noopener" class="text-[10px] text-amber-400 hover:underline">${t('config.cpGetKeys')}</a>` : ''}
+                    </div>
+                  </div>
+                </div>
+                <span class="text-[10px] px-2 py-0.5 rounded-full ${statusColor}">${statusText}</span>
+              </div>
+
+              <div class="space-y-2">
+                <div>
+                  <label class="form-label text-[10px]">${p.needs_secret_key ? t('config.cpAccessKey') : t('config.cpApiKey')}</label>
+                  <div class="flex gap-2">
+                    <input type="password" class="form-input flex-1 text-xs font-mono cp-api-key" data-provider="${u.escapeHtml(p.name)}"
+                           data-has-stored="${p.api_key_masked ? 'true' : 'false'}"
+                           placeholder="${p.api_key_masked ? '✓ ' + t('config.cpKeyStored') : (p.needs_secret_key ? t('config.cpEnterAccessKey') : t('config.cpEnterApiKey'))}" autocomplete="off">
+                    <button class="btn btn-sm btn-primary cp-test-btn" data-provider="${u.escapeHtml(p.name)}">${t('config.cpTestConnection')}</button>
+                  </div>
+                  <div class="cp-test-status text-[10px] mt-1" data-provider="${u.escapeHtml(p.name)}"></div>
+                </div>
+                ${p.needs_secret_key ? `<div>
+                  <label class="form-label text-[10px]">${t('config.cpSecretKey')}</label>
+                  <input type="password" class="form-input w-full text-xs font-mono cp-secret-key" data-provider="${u.escapeHtml(p.name)}"
+                         data-has-stored="${p.secret_key_masked ? 'true' : 'false'}"
+                         placeholder="${p.secret_key_masked ? '✓ ' + t('config.cpKeyStored') : t('config.cpEnterSecretKey')}" autocomplete="off">
+                </div>` : ''}
+
+                <div class="flex items-center justify-between py-1">
+                  <span class="text-xs text-zinc-300">Enabled</span>
+                  <div class="toggle cp-toggle ${p.enabled ? 'on' : ''}" data-provider="${u.escapeHtml(p.name)}"><span class="toggle-dot"></span></div>
+                </div>
+
+                <div>
+                  <label class="form-label text-[10px]">Monthly Budget (USD)</label>
+                  <input type="number" class="form-input w-full text-xs cp-budget" data-provider="${u.escapeHtml(p.name)}"
+                         value="${p.monthly_budget_usd || 0}" min="0" max="1000" step="5" placeholder="0 = no limit">
+                </div>
+
+                ${budgetBar}
+
+                <button class="btn btn-sm bg-surface-700 text-zinc-300 hover:bg-ghost-500/20 hover:text-ghost-400 w-full mt-2 cp-save-btn" data-provider="${u.escapeHtml(p.name)}">Save ${u.escapeHtml(p.display_name)} Settings</button>
+              </div>
+            </div>`;
+        }).join('');
+
+        cpContainer.querySelectorAll('.cp-toggle').forEach(toggle => {
+          toggle.addEventListener('click', () => toggle.classList.toggle('on'));
+        });
+
+        cpContainer.querySelectorAll('.cp-test-btn').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const prov = btn.dataset.provider;
+            const keyEl = cpContainer.querySelector(`.cp-api-key[data-provider="${prov}"]`);
+            const secretEl = cpContainer.querySelector(`.cp-secret-key[data-provider="${prov}"]`);
+            const statusEl = cpContainer.querySelector(`.cp-test-status[data-provider="${prov}"]`);
+            const keyVal = keyEl?.value?.trim();
+            const hasStored = keyEl?.dataset.hasStored === 'true';
+
+            if (!keyVal && !hasStored) {
+              statusEl.innerHTML = `<span class="text-yellow-400">${t('config.cpEnterKeyFirst')}</span>`;
+              return;
+            }
+
+            const payload = {};
+            if (keyVal) {
+              payload.api_key = keyVal;
+            }
+            if (secretEl) {
+              const secretVal = secretEl.value?.trim();
+              if (secretVal) {
+                payload.secret_key = secretVal;
+              }
+            }
+            statusEl.innerHTML = `<span class="text-zinc-400">${t('config.cpTestingConnection')}</span>`;
+            btn.disabled = true;
+            try {
+              const res = await api.post(`/api/cloud-providers/${prov}/test`, payload);
+              statusEl.innerHTML = res.ok
+                ? `<span class="text-green-400">${u.escapeHtml(res.message)}</span>`
+                : `<span class="text-red-400">${u.escapeHtml(res.error)}</span>`;
+            } catch (e) {
+              statusEl.innerHTML = `<span class="text-red-400">${u.escapeHtml(e.message)}</span>`;
+            }
+            btn.disabled = false;
+          });
+        });
+
+        cpContainer.querySelectorAll('.cp-save-btn').forEach(btn => {
+          btn.addEventListener('click', async () => {
+            const prov = btn.dataset.provider;
+            const keyEl = cpContainer.querySelector(`.cp-api-key[data-provider="${prov}"]`);
+            const secretEl = cpContainer.querySelector(`.cp-secret-key[data-provider="${prov}"]`);
+            const toggleEl = cpContainer.querySelector(`.cp-toggle[data-provider="${prov}"]`);
+            const budgetEl = cpContainer.querySelector(`.cp-budget[data-provider="${prov}"]`);
+
+            const payload = {};
+            const keyVal = keyEl?.value?.trim();
+            if (keyVal) {
+              payload.api_key = keyVal;
+            }
+            if (secretEl) {
+              const secretVal = secretEl.value?.trim();
+              if (secretVal) {
+                payload.secret_key = secretVal;
+              }
+            }
+            payload.enabled = toggleEl?.classList.contains('on') || false;
+            payload.monthly_budget_usd = parseFloat(budgetEl?.value) || 0;
+
+            btn.disabled = true;
+            btn.textContent = t('config.cpSavingSettings');
+            try {
+              await api.put(`/api/cloud-providers/${prov}`, payload);
+              u.toast(t('config.cpSettingsSaved').replace('{provider}', prov), 'success');
+              loadCloudProviders();
+            } catch (e) {
+              u.toast(e.message, 'error');
+            }
+            btn.disabled = false;
+            btn.textContent = t('config.cpSaveSettings').replace('{provider}', prov);
+          });
+        });
+      }
+
+      if (cpCostsSummary && costs.by_provider) {
+        const entries = Object.entries(costs.by_provider);
+        if (entries.length === 0) {
+          cpCostsSummary.innerHTML = '<span class="text-zinc-500">No cloud usage this month.</span>';
+        } else {
+          cpCostsSummary.innerHTML = `
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-zinc-300 font-medium">This month: $${(costs.total_usd || 0).toFixed(2)}</span>
+              <span class="text-zinc-500">${costs.month}</span>
+            </div>
+            <div class="space-y-1">
+              ${entries.map(([prov, info]) => `
+                <div class="flex items-center justify-between text-[10px]">
+                  <span class="text-zinc-400">${u.escapeHtml(prov)}</span>
+                  <span class="text-zinc-300">$${(info.total_usd || 0).toFixed(2)} (${info.generations || 0} generations)</span>
+                </div>
+              `).join('')}
+            </div>`;
+        }
+      }
+    } catch (e) {
+      if (cpContainer) cpContainer.innerHTML = `<div class="text-red-400 text-xs">${u.escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  loadCloudProviders();
 }

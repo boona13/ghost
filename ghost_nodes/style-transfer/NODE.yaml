@@ -1,0 +1,11 @@
+name: style-transfer
+version: "1.0.0"
+description: "Apply artistic styles to any photo — Van Gogh, Monet, Picasso, anime, and more. Uses neural style transfer for stunning artistic transformations."
+author: ghost
+category: image
+tags: [style, art, transfer, painting, artistic]
+estimated_vram_gb: 1.0
+dependencies:
+  - torch
+  - torchvision
+  - Pillow

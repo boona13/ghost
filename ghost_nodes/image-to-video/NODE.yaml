@@ -1,0 +1,19 @@
+name: image-to-video
+version: "1.1.0"
+description: "Animate images using Stable Video Diffusion. Lightweight alternative for cinematic camera-motion animations."
+author: ghost
+category: video
+tags: [video, animation, image2video, svd, cinematic, motion]
+estimated_vram_gb: 4.0
+dependencies:
+  - torch
+  - diffusers
+  - transformers
+  - Pillow
+  - imageio
+  - imageio-ffmpeg
+models:
+  - id: stabilityai/stable-video-diffusion-img2vid
+    size_gb: 9.0
+  - id: stabilityai/stable-video-diffusion-img2vid-xt
+    size_gb: 9.0

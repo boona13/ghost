@@ -1,0 +1,37 @@
+name: kling-video
+version: 2.0.0
+description: >
+  High-quality video generation via Kling AI cloud API.
+  Kling V3 (Feb 2026): 3-15s duration, multi-shot narratives, native audio,
+  start/end frame control, up to 1080p. V2.6 models also supported.
+  Text-to-video and image-to-video. Requires a Kling API key.
+author: ghost-ai
+category: video
+license: MIT
+
+requires:
+  gpu: false
+  cloud_provider: kling
+  api_key_env: KLING_ACCESS_KEY
+  secret_key_env: KLING_SECRET_KEY
+  deps:
+    - PyJWT>=2.8
+
+tools:
+  - kling_text_to_video
+  - kling_image_to_video
+
+inputs: ["text", "image"]
+outputs: ["video"]
+
+tags:
+  - video
+  - cloud
+  - kling
+  - text2video
+  - image2video
+  - 1080p
+  - high-quality
+  - paid
+  - multi-shot
+  - v3

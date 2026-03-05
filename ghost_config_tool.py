@@ -24,9 +24,11 @@ CONFIG_BACKUP_DIR = GHOST_HOME / "config_backups"
 BLOCKED_KEYS = frozenset({
     "api_key",
     "firecrawl_api_key",
+    "hf_token",
     "google_client_id",
     "google_client_secret",
     "google_refresh_token",
+    "cloud_providers",
 })
 
 SENSITIVE_KEYS = frozenset({
@@ -104,6 +106,12 @@ CONFIG_SCHEMA = {
     "enable_growth": {"type": "boolean", "description": "Enable autonomy growth routines"},
     "enable_web_search": {"type": "boolean", "description": "Enable web search tool"},
     "enable_web_fetch": {"type": "boolean", "description": "Enable web fetch tool"},
+    "enable_nodes": {"type": "boolean", "description": "Enable GhostNodes AI plugin ecosystem (local image gen, video, audio, vision, 3D)"},
+    "hf_token": {"type": "string", "description": "HuggingFace API token for downloading gated models (FLUX, etc.). Get yours at https://huggingface.co/settings/tokens"},
+    "hf_oauth_client_id": {"type": "string", "description": "HuggingFace OAuth app client ID for device-flow login. Create a public app at https://huggingface.co/settings/applications/new"},
+    "gpu_memory_budget_gb": {"type": "number", "description": "GPU VRAM budget in GB for GhostNodes models (0 = auto-detect 85% of total)"},
+    "media_disk_budget_mb": {"type": "integer", "description": "Max disk space for generated media in MB (default 5000)"},
+    "disabled_nodes": {"type": "array", "description": "List of node names to keep disabled"},
     "enable_image_gen": {"type": "boolean", "description": "Enable image generation"},
     "enable_vision": {"type": "boolean", "description": "Enable image analysis/vision"},
     "enable_tts": {"type": "boolean", "description": "Enable text-to-speech"},
@@ -417,6 +425,22 @@ def _validate_patch(patch: dict) -> tuple[bool, str]:
         if not isinstance(val, int) or val < 50 or val > 10000:
             return False, "session_disk_budget_mb must be 50-10000"
     
+    # GhostNodes config validation
+    if "gpu_memory_budget_gb" in patch:
+        val = patch["gpu_memory_budget_gb"]
+        if not isinstance(val, (int, float)) or val < 0 or val > 128:
+            return False, "gpu_memory_budget_gb must be 0-128 (0 = auto-detect)"
+
+    if "media_disk_budget_mb" in patch:
+        val = patch["media_disk_budget_mb"]
+        if not isinstance(val, int) or val < 100 or val > 100000:
+            return False, "media_disk_budget_mb must be 100-100000"
+
+    if "disabled_nodes" in patch:
+        val = patch["disabled_nodes"]
+        if not isinstance(val, list) or not all(isinstance(n, str) for n in val):
+            return False, "disabled_nodes must be an array of node name strings"
+
     # When enabling dangerous interpreters, require secure policy minimums
     if "enable_dangerous_interpreters" in patch:
         enabling = patch["enable_dangerous_interpreters"]

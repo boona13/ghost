@@ -87,6 +87,13 @@ from ghost_mcp import MCPClientManager, build_mcp_tools
 from ghost_subagents import build_subagent_tools
 from ghost_langfuse import get_langfuse_manager, build_langfuse_tools
 from ghost_browser_use import build_browser_use_tools
+from ghost_resource_manager import ResourceManager, build_resource_manager_tools
+from ghost_node_manager import NodeManager, build_node_manager_tools
+from ghost_media_store import MediaStore, build_media_store_tools
+from ghost_pipeline import PipelineEngine, build_pipeline_tools
+from ghost_node_registry import NodeRegistry, build_node_registry_tools
+from ghost_node_sdk import build_node_sdk_tools
+from ghost_cloud_providers import ProviderRegistry
 
 # responses capabilities wiring marker: dashboard-managed feature flags loaded via config/routes
 
@@ -422,6 +429,33 @@ DEFAULT_CONFIG = {
 }
 
 _DEEP_MERGE_KEYS = {"mcp_servers", "skill_model_aliases", "provider_chains"}
+
+
+def _hf_login(cfg):
+    """Authenticate with HuggingFace Hub if a token is configured.
+
+    Tries (in order): config hf_token, HF_TOKEN env var, existing cached token.
+    Sets the token globally via env var (works with both standard and OAuth tokens)
+    and attempts login() for standard tokens.
+    """
+    import os
+    token = cfg.get("hf_token") or os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+    if not token:
+        cached = Path.home() / ".cache" / "huggingface" / "token"
+        if cached.exists():
+            token = cached.read_text().strip()
+    if not token:
+        return
+    os.environ["HF_TOKEN"] = token
+    try:
+        from huggingface_hub import HfApi
+        username = HfApi(token=token).whoami().get("name", "unknown")
+        log.info("HuggingFace Hub authenticated as: %s", username)
+    except ImportError:
+        log.debug("huggingface_hub not installed, skipping HF login")
+    except Exception as e:
+        log.warning("HuggingFace login failed: %s", e)
+
 
 def load_config():
     cfg = dict(DEFAULT_CONFIG)
@@ -1233,6 +1267,78 @@ class GhostDaemon:
         if cfg.get("enable_canvas", True):
             for tool_def in build_canvas_tools(cfg=cfg):
                 self.tool_registry.register(tool_def)
+
+        # ── HuggingFace authentication (needed for gated models like FLUX) ──
+        _hf_login(cfg)
+
+        # ── GhostNodes: AI Plugin Ecosystem ─────────────────────────
+        self.resource_manager = None
+        self.node_manager = None
+        self.media_store = None
+        self.pipeline_engine = None
+        self.node_registry = None
+        self.cloud_providers = None
+
+        if cfg.get("enable_nodes", True):
+            try:
+                self.resource_manager = ResourceManager(cfg)
+                self.media_store = MediaStore(cfg)
+                self.cloud_providers = ProviderRegistry(cfg)
+                self.node_manager = NodeManager(
+                    tool_registry=self.tool_registry,
+                    resource_manager=self.resource_manager,
+                    media_store=self.media_store,
+                    cloud_providers=self.cloud_providers,
+                    cfg=cfg,
+                )
+                self.node_manager.load_all()
+            except Exception as e:
+                log.warning("GhostNodes core init error (non-fatal): %s", e, exc_info=True)
+
+            if self.node_manager:
+                try:
+                    self.pipeline_engine = PipelineEngine(
+                        tool_registry=self.tool_registry,
+                        node_manager=self.node_manager,
+                    )
+                except Exception as e:
+                    log.warning("Pipeline engine init error (non-fatal): %s", e, exc_info=True)
+
+                try:
+                    for tool_def in build_resource_manager_tools(self.resource_manager):
+                        self.tool_registry.register(tool_def)
+                    for tool_def in build_node_manager_tools(self.node_manager):
+                        self.tool_registry.register(tool_def)
+                    if self.media_store:
+                        for tool_def in build_media_store_tools(self.media_store):
+                            self.tool_registry.register(tool_def)
+                    if self.pipeline_engine:
+                        for tool_def in build_pipeline_tools(self.pipeline_engine):
+                            self.tool_registry.register(tool_def)
+                except Exception as e:
+                    log.warning("GhostNodes tool registration error (non-fatal): %s", e, exc_info=True)
+
+                try:
+                    self.node_registry = NodeRegistry(cfg)
+                    for tool_def in build_node_registry_tools(self.node_registry, self.node_manager):
+                        self.tool_registry.register(tool_def)
+                except Exception as e:
+                    log.warning("Node registry init error (non-fatal): %s", e, exc_info=True)
+
+                try:
+                    for tool_def in build_node_sdk_tools():
+                        self.tool_registry.register(tool_def)
+                except Exception as e:
+                    log.warning("Node SDK init error (non-fatal): %s", e, exc_info=True)
+
+                node_count = len(self.node_manager.nodes)
+                node_tools = self.node_manager.get_node_tools()
+                dev_info = self.resource_manager.device_info
+                device_str = dev_info.best_device
+                if dev_info.has_mlx:
+                    device_str += f" (MLX v{dev_info.mlx_version})"
+                log.info("GhostNodes loaded: %d nodes, %d tools | device=%s",
+                         node_count, len(node_tools), device_str)
 
         # Security Audit tools (self-auditing + auto-fix)
         if cfg.get("enable_security_audit", True):
