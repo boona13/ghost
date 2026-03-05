@@ -1455,7 +1455,7 @@ class NativeControlNetLoader:
         from diffusers import ControlNetModel
         path = resolve_model_path(control_net_name, "controlnet")
         device = _normalize_torch_device("auto")
-        dtype = torch.float16 if device != "cpu" else torch.float32
+        dtype = torch.float16 if device == "cuda" else torch.float32
 
         from safetensors.torch import load_file
         raw_sd = load_file(str(path))
