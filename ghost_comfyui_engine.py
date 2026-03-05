@@ -16,6 +16,7 @@ Usage:
 """
 
 import hashlib
+import importlib.util
 import json
 import logging
 import os
@@ -255,10 +256,11 @@ def resolve_model_path(filename: str, subdir: str = "checkpoints",
         _download_file(url, dest)
         return dest
 
+    fallback_dir = MODELS_DIR / MODEL_SUBDIRS.get(subdir, subdir)
     raise FileNotFoundError(
         f"Model not found and no download source: {filename}\n"
         f"Searched locally + ComfyUI-Manager registry + HuggingFace.\n"
-        f"Place the file manually in: {dest_dir}/"
+        f"Place the file manually in: {fallback_dir}/"
     )
 
 
@@ -344,6 +346,11 @@ _HF_KNOWN_MODELS: dict[str, str] = {
         "https://huggingface.co/stabilityai/sdxl-turbo/resolve/main/sd_xl_turbo_1.0.safetensors",
     "sd_xl_turbo_1.0_fp16.safetensors":
         "https://huggingface.co/stabilityai/sdxl-turbo/resolve/main/sd_xl_turbo_1.0_fp16.safetensors",
+    # Common LoRAs
+    "lcm-lora-sdv1-5.safetensors":
+        "https://huggingface.co/latent-consistency/lcm-lora-sdv1-5/resolve/main/pytorch_lora_weights.safetensors",
+    "lcm-lora-sdxl.safetensors":
+        "https://huggingface.co/latent-consistency/lcm-lora-sdxl/resolve/main/pytorch_lora_weights.safetensors",
 }
 
 
@@ -362,10 +369,14 @@ def _resolve_download_url(filename: str, subdir: str,
     """
     basename = Path(filename).name
 
-    # 1) ComfyUI-Manager registry (primary, most comprehensive)
+    # 1) ComfyUI-Manager registry (exact then fuzzy stem match)
     model_list = _get_model_list()
+    target_stem = Path(basename).stem.lower()
+    fuzzy_hit: dict | None = None
+
     for entry in model_list:
-        if entry.get("filename") == basename:
+        entry_filename = entry.get("filename", "")
+        if entry_filename == basename:
             url = entry.get("url", "")
             if url:
                 save_path = entry.get("save_path", "")
@@ -373,6 +384,18 @@ def _resolve_download_url(filename: str, subdir: str,
                     _dest_override.append(save_path)
                 log.info("Found in ComfyUI-Manager registry: %s → %s", basename, url[:80])
                 return url
+        elif not fuzzy_hit and Path(entry_filename).stem.lower() == target_stem:
+            fuzzy_hit = entry
+
+    if fuzzy_hit:
+        url = fuzzy_hit.get("url", "")
+        if url:
+            save_path = fuzzy_hit.get("save_path", "")
+            if _dest_override is not None and save_path and save_path != "default":
+                _dest_override.append(save_path)
+            log.info("Found in ComfyUI-Manager registry (stem match): %s → %s",
+                     basename, url[:80])
+            return url
 
     # 2) HuggingFace known-models hardcoded table
     if basename in _HF_KNOWN_MODELS:
@@ -380,15 +403,14 @@ def _resolve_download_url(filename: str, subdir: str,
         log.info("Found in HF known-models: %s", basename)
         return url
 
-    # 3) CivitAI search (needs API token)
-    civitai_token = os.environ.get("CIVITAI_API_TOKEN", "")
-    if civitai_token:
-        url = _search_civitai(basename, civitai_token)
-        if url:
-            return url
-
-    # 4) HuggingFace Hub API search (fuzzy)
+    # 3) HuggingFace Hub API search (multi-strategy, fuzzy)
     url = _search_huggingface(basename)
+    if url:
+        return url
+
+    # 4) CivitAI search (works without token for free models)
+    civitai_token = os.environ.get("CIVITAI_API_TOKEN", "")
+    url = _search_civitai(basename, civitai_token)
     if url:
         return url
 
@@ -396,72 +418,161 @@ def _resolve_download_url(filename: str, subdir: str,
     return None
 
 
-def _search_civitai(filename: str, token: str) -> str | None:
-    """Search CivitAI for a model by filename."""
+def _decompose_filename(filename: str) -> list[str]:
+    """Break a model filename into multiple search queries, most specific first."""
+    stem = Path(filename).stem
+    queries = [stem]
+
+    clean = stem.replace("_", "-").replace(".", "-")
+    if clean != stem:
+        queries.append(clean)
+
+    import re
+    no_version = re.sub(r'[-_]?(v\d[\d.]*|fp\d+|bf\d+|f\d+|pruned|emaonly|ema)$', '', stem, flags=re.I)
+    if no_version and no_version != stem:
+        queries.append(no_version)
+
+    parts = re.split(r'[-_]', stem)
+    if len(parts) >= 3:
+        queries.append(" ".join(parts[:3]))
+    if len(parts) >= 2:
+        queries.append(" ".join(parts[:2]))
+
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for q in queries:
+        q = q.strip()
+        if q and q.lower() not in seen:
+            seen.add(q.lower())
+            deduped.append(q)
+    return deduped
+
+
+def _search_civitai(filename: str, token: str = "") -> str | None:
+    """Search CivitAI for a model — works with or without token.
+
+    Public search API doesn't require auth. Download URLs for free models
+    also work without tokens.
+    """
     import urllib.request
     import urllib.parse
 
-    stem = Path(filename).stem
-    query = urllib.parse.quote(stem)
-    api_url = f"https://civitai.com/api/v1/models?query={query}&limit=5"
+    headers = {"User-Agent": "Ghost/1.0", "Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
 
-    try:
-        req = urllib.request.Request(
-            api_url,
-            headers={"User-Agent": "Ghost/1.0", "Authorization": f"Bearer {token}"},
+    for query_str in _decompose_filename(filename):
+        api_url = (
+            f"https://civitai.com/api/v1/models"
+            f"?query={urllib.parse.quote(query_str)}&limit=10&sort=Most%20Downloaded"
         )
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read())
+        try:
+            req = urllib.request.Request(api_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read())
 
-        for model in data.get("items", []):
-            for version in model.get("modelVersions", []):
-                for file in version.get("files", []):
-                    if file.get("name") == filename:
-                        download_url = file.get("downloadUrl", "")
-                        if download_url:
-                            if "?" in download_url:
-                                download_url += f"&token={token}"
-                            else:
-                                download_url += f"?token={token}"
-                            log.info("Found on CivitAI: %s (model %s)", filename, model.get("name"))
-                            return download_url
-    except Exception as e:
-        log.debug("CivitAI search failed for %s: %s", filename, e)
+            for model in data.get("items", []):
+                for version in model.get("modelVersions", []):
+                    for file in version.get("files", []):
+                        fname = file.get("name", "")
+                        if fname == filename:
+                            download_url = file.get("downloadUrl", "")
+                            if download_url:
+                                if token:
+                                    sep = "&" if "?" in download_url else "?"
+                                    download_url += f"{sep}token={token}"
+                                log.info("Found on CivitAI (exact): %s → %s",
+                                         filename, model.get("name"))
+                                return download_url
+
+                        if Path(fname).stem.lower() == Path(filename).stem.lower():
+                            download_url = file.get("downloadUrl", "")
+                            if download_url:
+                                if token:
+                                    sep = "&" if "?" in download_url else "?"
+                                    download_url += f"{sep}token={token}"
+                                log.info("Found on CivitAI (stem match): %s → %s (%s)",
+                                         filename, model.get("name"), fname)
+                                return download_url
+        except Exception as e:
+            log.debug("CivitAI search '%s' failed: %s", query_str, e)
 
     return None
 
 
 def _search_huggingface(filename: str) -> str | None:
-    """Search HuggingFace Hub API for a model file."""
+    """Search HuggingFace Hub API with multiple query strategies.
+
+    Tries exact filename match first, then fuzzy stem match, across
+    multiple decomposed search terms.
+    """
     import urllib.request
     import urllib.parse
 
-    stem = Path(filename).stem
-    query = urllib.parse.quote(stem)
-    api_url = f"https://huggingface.co/api/models?search={query}&limit=5"
+    target_name = Path(filename).name
+    target_stem = Path(filename).stem.lower()
+    safetensor_exts = {".safetensors", ".bin", ".pt", ".ckpt", ".pth"}
 
-    try:
-        req = urllib.request.Request(api_url, headers={"User-Agent": "Ghost/1.0"})
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            models = json.loads(resp.read())
+    searched_models: set[str] = set()
+
+    for query_str in _decompose_filename(filename):
+        api_url = (
+            f"https://huggingface.co/api/models"
+            f"?search={urllib.parse.quote(query_str)}&limit=10&sort=downloads&direction=-1"
+        )
+        try:
+            req = urllib.request.Request(api_url, headers={"User-Agent": "Ghost/1.0"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                models = json.loads(resp.read())
+        except Exception as e:
+            log.debug("HF search '%s' failed: %s", query_str, e)
+            continue
 
         for model in models:
             model_id = model.get("modelId", model.get("id", ""))
-            if not model_id:
+            if not model_id or model_id in searched_models:
                 continue
-            siblings_url = f"https://huggingface.co/api/models/{model_id}"
-            req2 = urllib.request.Request(siblings_url, headers={"User-Agent": "Ghost/1.0"})
-            with urllib.request.urlopen(req2, timeout=10) as resp2:
-                details = json.loads(resp2.read())
+            searched_models.add(model_id)
+
+            try:
+                detail_url = f"https://huggingface.co/api/models/{model_id}"
+                req2 = urllib.request.Request(detail_url, headers={"User-Agent": "Ghost/1.0"})
+                with urllib.request.urlopen(req2, timeout=10) as resp2:
+                    details = json.loads(resp2.read())
+            except Exception:
+                continue
+
+            exact_match = None
+            stem_match = None
 
             for sib in details.get("siblings", []):
                 rfilename = sib.get("rfilename", "")
-                if Path(rfilename).name == filename:
-                    url = f"https://huggingface.co/{model_id}/resolve/main/{rfilename}"
-                    log.info("Found on HuggingFace: %s → %s/%s", filename, model_id, rfilename)
-                    return url
-    except Exception as e:
-        log.debug("HuggingFace search failed for %s: %s", filename, e)
+                sib_name = Path(rfilename).name
+                sib_ext = Path(rfilename).suffix.lower()
+
+                if sib_ext not in safetensor_exts:
+                    continue
+
+                if sib_name == target_name:
+                    exact_match = rfilename
+                    break
+
+                if Path(sib_name).stem.lower() == target_stem:
+                    stem_match = rfilename
+
+                if not stem_match and target_stem in sib_name.lower():
+                    stem_match = rfilename
+
+            if exact_match:
+                url = f"https://huggingface.co/{model_id}/resolve/main/{exact_match}"
+                log.info("Found on HuggingFace (exact): %s → %s/%s",
+                         filename, model_id, exact_match)
+                return url
+            if stem_match:
+                url = f"https://huggingface.co/{model_id}/resolve/main/{stem_match}"
+                log.info("Found on HuggingFace (fuzzy): %s → %s/%s",
+                         filename, model_id, stem_match)
+                return url
 
     return None
 
@@ -967,12 +1078,13 @@ class NativeLoraLoader:
         import torch
 
         device = next(model.unet.parameters()).device
+        load_device = "cpu" if "mps" in str(device) else str(device)
         lora_sd = {}
         if str(path).endswith(".safetensors"):
             from safetensors.torch import load_file
-            lora_sd = load_file(str(path), device=str(device))
+            lora_sd = load_file(str(path), device=load_device)
         else:
-            lora_sd = torch.load(str(path), map_location=device, weights_only=True)
+            lora_sd = torch.load(str(path), map_location=load_device, weights_only=True)
 
         from diffusers.loaders.lora_pipeline import StableDiffusionLoraLoaderMixin
         try:
@@ -1164,22 +1276,34 @@ def _load_comfyui_nodes() -> dict[str, type]:
     for cn_dir in [CUSTOM_NODES_DIR, Path.home() / "ComfyUI" / "custom_nodes"]:
         if not cn_dir.is_dir():
             continue
+        if str(cn_dir) not in sys.path:
+            sys.path.insert(0, str(cn_dir))
         for pkg in cn_dir.iterdir():
-            if not pkg.is_dir():
-                continue
-            init = pkg / "__init__.py"
-            if not init.exists():
-                continue
-            try:
-                if str(pkg.parent) not in sys.path:
-                    sys.path.insert(0, str(pkg.parent))
-                mod = __import__(pkg.name, fromlist=["NODE_CLASS_MAPPINGS"])
-                if hasattr(mod, "NODE_CLASS_MAPPINGS"):
-                    mappings.update(mod.NODE_CLASS_MAPPINGS)
-                    log.info("Custom nodes loaded: %s (%d nodes)",
-                             pkg.name, len(mod.NODE_CLASS_MAPPINGS))
-            except Exception as e:
-                log.warning("Failed to load custom nodes from %s: %s", pkg.name, e)
+            if pkg.is_dir():
+                init = pkg / "__init__.py"
+                if not init.exists():
+                    continue
+                try:
+                    mod = __import__(pkg.name, fromlist=["NODE_CLASS_MAPPINGS"])
+                    if hasattr(mod, "NODE_CLASS_MAPPINGS"):
+                        mappings.update(mod.NODE_CLASS_MAPPINGS)
+                        log.info("Custom nodes loaded: %s (%d nodes)",
+                                 pkg.name, len(mod.NODE_CLASS_MAPPINGS))
+                except Exception as e:
+                    log.warning("Failed to load custom nodes from %s: %s", pkg.name, e)
+            elif pkg.suffix == ".py" and pkg.name != "__init__.py":
+                try:
+                    spec = importlib.util.spec_from_file_location(pkg.stem, str(pkg))
+                    if spec and spec.loader:
+                        mod = importlib.util.module_from_spec(spec)
+                        sys.modules[pkg.stem] = mod
+                        spec.loader.exec_module(mod)
+                        if hasattr(mod, "NODE_CLASS_MAPPINGS"):
+                            mappings.update(mod.NODE_CLASS_MAPPINGS)
+                            log.info("Custom node file loaded: %s (%d nodes)",
+                                     pkg.name, len(mod.NODE_CLASS_MAPPINGS))
+                except Exception as e:
+                    log.warning("Failed to load custom node file %s: %s", pkg.name, e)
 
     _comfyui_nodes = mappings
     return mappings
@@ -1211,31 +1335,67 @@ def _fetch_extension_node_map() -> dict:
 
 
 def _find_package_for_node(class_type: str) -> str | None:
-    """Look up which git repo provides a given node class_type."""
+    """Look up which git repo provides a given node class_type.
+
+    extension-node-map.json format:
+      {repo_url: [["NodeA", "NodeB"], {"title_aux": "..."}]}
+    The value is a 2-element list: [node_names, metadata].
+    """
     ext_map = _fetch_extension_node_map()
-    for repo_url, node_list in ext_map.items():
-        if isinstance(node_list, list) and class_type in node_list:
-            return repo_url
-        if isinstance(node_list, dict):
-            nodes = node_list.get("nodenames", node_list.get("nodes", []))
+    for repo_url, entry in ext_map.items():
+        if isinstance(entry, list) and len(entry) >= 1:
+            node_names = entry[0] if isinstance(entry[0], list) else entry
+            if class_type in node_names:
+                return repo_url
+        elif isinstance(entry, dict):
+            nodes = entry.get("nodenames", entry.get("nodes", []))
             if class_type in nodes:
                 return repo_url
     return None
 
 
 def _install_comfyui_package(repo_url: str) -> bool:
-    """pip install a ComfyUI custom node package from git."""
+    """Clone a ComfyUI custom node repo and install its dependencies.
+
+    ComfyUI custom nodes are plain directories with __init__.py and
+    NODE_CLASS_MAPPINGS — not pip packages. This mirrors how
+    ComfyUI-Manager installs: git clone, then pip install -r requirements.txt.
+    """
     log.info("Auto-installing custom node package: %s", repo_url)
+    CUSTOM_NODES_DIR.mkdir(parents=True, exist_ok=True)
+
+    repo_name = repo_url.rstrip("/").split("/")[-1]
+    if repo_name.endswith(".git"):
+        repo_name = repo_name[:-4]
+    dest = CUSTOM_NODES_DIR / repo_name
+
     try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "install",
-             f"git+{repo_url}", "--target", str(CUSTOM_NODES_DIR),
-             "--quiet", "--no-warn-script-location"],
-            capture_output=True, text=True, timeout=300,
-        )
-        if result.returncode != 0:
-            log.error("Install failed for %s: %s", repo_url, result.stderr[:500])
-            return False
+        if dest.exists():
+            log.info("Custom node dir already exists: %s — pulling latest", dest)
+            result = subprocess.run(
+                ["git", "-C", str(dest), "pull", "--ff-only"],
+                capture_output=True, text=True, timeout=120,
+            )
+            if result.returncode != 0:
+                log.warning("git pull failed for %s: %s", dest, result.stderr[:300])
+        else:
+            log.info("Cloning %s → %s", repo_url, dest)
+            result = subprocess.run(
+                ["git", "clone", "--depth", "1", repo_url, str(dest)],
+                capture_output=True, text=True, timeout=300,
+            )
+            if result.returncode != 0:
+                log.error("git clone failed for %s: %s", repo_url, result.stderr[:500])
+                return False
+
+        req_file = dest / "requirements.txt"
+        if req_file.exists():
+            log.info("Installing dependencies from %s", req_file)
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "-r", str(req_file),
+                 "--quiet", "--no-warn-script-location"],
+                capture_output=True, text=True, timeout=300,
+            )
 
         global _comfyui_nodes
         _comfyui_nodes = None
