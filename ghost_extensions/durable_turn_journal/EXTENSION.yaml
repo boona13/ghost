@@ -1,0 +1,43 @@
+name: durable_turn_journal
+version: 1.0.0
+description: "Durable turn journal for long-running tasks. Checkpoint and resume tool-loop state with auto-capture on tool results and generation interrupts."
+author: ghost-ai
+category: automation
+
+requires:
+  ghost_version: ">=2.0"
+  deps: []
+  extensions: []
+
+provides:
+  tools:
+    - journal_checkpoint
+    - journal_list
+    - journal_resume
+    - journal_export
+    - journal_import
+  routes: []
+  pages:
+    - durable_turn_journal
+  cron_jobs: []
+  settings:
+    - key: auto_checkpoint_enabled
+      type: boolean
+      default: true
+      label: "Auto Checkpoint Enabled"
+      description: "Automatically create checkpoints after successful tool calls"
+    - key: max_checkpoints_per_session
+      type: integer
+      default: 50
+      label: "Max Checkpoints Per Session"
+      description: "Maximum number of checkpoints to keep per session (oldest auto-pruned)"
+    - key: retention_days
+      type: integer
+      default: 30
+      label: "Retention Days"
+      description: "Number of days to keep checkpoints before auto-pruning"
+
+hooks:
+  - on_tool_result
+  - on_generation_interrupt
+  - on_boot
