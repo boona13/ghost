@@ -49,6 +49,8 @@ PROVIDERS: dict[str, ProviderConfig] = {
         models=[
             "moonshotai/kimi-k2.5",
             "anthropic/claude-opus-4.6",
+            "openai/gpt-5.4",
+            "openai/gpt-5.4-pro",
             "openai/gpt-5.3-codex",
             "google/gemini-2.5-pro",
             "anthropic/claude-sonnet-4",
@@ -67,6 +69,10 @@ PROVIDERS: dict[str, ProviderConfig] = {
         default_model="gpt-5.3-codex",
         env_key="OPENAI_API_KEY",
         models=[
+            "gpt-5.4",
+            "gpt-5.4-extended",
+            "gpt-5.4-pro",
+            "gpt-5.4-thinking",
             "gpt-5.3-codex",
             "gpt-4.1",
             "gpt-4.1-mini",
