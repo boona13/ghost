@@ -774,8 +774,8 @@ class EvolutionEngine:
                 manifest = ExtensionManifest.from_yaml(manifest_path)
                 if not manifest.name:
                     issues.append(f"Extension '{ext_name}': manifest missing 'name' field")
-                manifest_tools = manifest.provides.get("tools", []) if isinstance(manifest.provides, dict) else []
-                raw_settings = manifest.provides.get("settings", []) if isinstance(manifest.provides, dict) else []
+                manifest_tools = manifest.tools if isinstance(manifest.tools, list) else []
+                raw_settings = manifest.settings if isinstance(manifest.settings, list) else []
                 manifest_settings = [s.get("key") for s in raw_settings if isinstance(s, dict) and s.get("key")]
             except Exception as e:
                 issues.append(f"Extension '{ext_name}': invalid manifest: {e}")
