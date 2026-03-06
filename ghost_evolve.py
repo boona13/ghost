@@ -668,6 +668,8 @@ class EvolutionEngine:
                 results["passed"] = False
 
         if results["passed"] and changed_py:
+            self._install_tool_deps_for_testing(changed_py)
+
             for f in changed_py:
                 if f in deleted_py:
                     continue
@@ -675,7 +677,7 @@ class EvolutionEngine:
                 try:
                     r = subprocess.run(
                         [sys.executable, "-c", f"import {module_name}"],
-                        capture_output=True, text=True, timeout=10,
+                        capture_output=True, text=True, timeout=30,
                         cwd=str(PROJECT_DIR),
                     )
                     ok = r.returncode == 0
@@ -743,6 +745,34 @@ class EvolutionEngine:
         evo["status"] = "tested_pass" if results["passed"] else "tested_fail"
 
         return results["passed"], results
+
+    @staticmethod
+    def _install_tool_deps_for_testing(changed_py):
+        """Install pip deps declared in TOOL.yaml for any changed ghost_tools/ files."""
+        installed_tools: set[str] = set()
+        for f in changed_py:
+            if not f.startswith("ghost_tools/"):
+                continue
+            parts = Path(f).parts
+            if len(parts) < 2:
+                continue
+            tool_name = parts[1]
+            if tool_name in installed_tools or tool_name.startswith((".", "_")):
+                continue
+            installed_tools.add(tool_name)
+            manifest_path = PROJECT_DIR / "ghost_tools" / tool_name / "TOOL.yaml"
+            if not manifest_path.exists():
+                continue
+            try:
+                from ghost_tool_builder import ToolManifest
+                manifest = ToolManifest.from_yaml(manifest_path)
+                if manifest.deps:
+                    subprocess.run(
+                        [sys.executable, "-m", "pip", "install", "--quiet"] + manifest.deps,
+                        capture_output=True, text=True, timeout=120,
+                    )
+            except Exception:
+                pass
 
     @staticmethod
     def _validate_tools(evo):
