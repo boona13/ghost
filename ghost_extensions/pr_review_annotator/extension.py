@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import requests
+from flask import Blueprint, jsonify
 
 logger = logging.getLogger(__name__)
 _file_lock = threading.Lock()
@@ -201,6 +202,20 @@ def _annotate(files: list[dict[str, Any]], checks: list[dict[str, str]]) -> list
 
 
 def register(api):
+    # Create Flask blueprint for dashboard API routes
+    bp = Blueprint("pr_review_annotator", __name__, url_prefix="/extensions/pr_review_annotator")
+
+    @bp.route("/ruleset", methods=["GET"])
+    def _route_ruleset_get():
+        try:
+            rules = _load_rules(api)
+            return jsonify({"status": "ok", "ruleset": rules})
+        except Exception as exc:
+            logger.warning("Failed to load ruleset: %s", exc)
+            return jsonify({"status": "error", "error": "failed to load ruleset"}), 500
+
+    api.register_route(bp)
+
     def pr_review_ruleset_get(**kwargs):
         _ = kwargs
         rules = _load_rules(api)
