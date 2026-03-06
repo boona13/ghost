@@ -275,11 +275,24 @@ class AuditLog:
     def get_stats(self) -> dict:
         """Get summary statistics of the audit log."""
         if not self._log_file.exists():
-            return {"total_entries": 0, "oldest": None, "newest": None}
+            return {
+                "total_entries": 0,
+                "oldest": None,
+                "newest": None,
+                "today_entries": 0,
+                "successful_entries": 0,
+                "failed_entries": 0,
+            }
         
         total = 0
         oldest = None
         newest = None
+        today_entries = 0
+        successful_entries = 0
+        failed_entries = 0
+        
+        # Get today's date for comparison
+        today = datetime.now(timezone.utc).date().isoformat()
         
         try:
             with open(self._log_file, "r", encoding="utf-8") as f:
@@ -296,6 +309,14 @@ class AuditLog:
                                 oldest = ts
                             if newest is None or ts > newest:
                                 newest = ts
+                            # Check if entry is from today
+                            if ts.startswith(today):
+                                today_entries += 1
+                        # Count success/failure
+                        if entry.get("success") is True:
+                            successful_entries += 1
+                        elif entry.get("success") is False:
+                            failed_entries += 1
                     except json.JSONDecodeError:
                         continue
         except OSError as e:
@@ -305,6 +326,9 @@ class AuditLog:
             "total_entries": total,
             "oldest": oldest,
             "newest": newest,
+            "today_entries": today_entries,
+            "successful_entries": successful_entries,
+            "failed_entries": failed_entries,
         }
 
 
