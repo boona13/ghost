@@ -195,12 +195,83 @@ export async function render(container) {
     });
   });
 
-  // Settings toggle handlers
+  // Settings toggle + dynamic form rendering
   container.querySelectorAll('[data-ext-settings]').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const name = btn.dataset.extSettings;
       const panel = container.querySelector(`#ext-settings-${name}`);
-      if (panel) panel.classList.toggle('hidden');
+      if (!panel) return;
+
+      const isHidden = panel.classList.contains('hidden');
+      panel.classList.toggle('hidden');
+      if (!isHidden) return;
+
+      if (panel.dataset.loaded) return;
+      panel.innerHTML = '<div class="text-zinc-500">Loading settings...</div>';
+
+      try {
+        const res = await fetch(`/api/extensions/${encodeURIComponent(name)}/settings`);
+        const data = await res.json();
+        if (!res.ok) { panel.innerHTML = `<div class="text-red-400">${u.escapeHtml(data.error || 'Failed to load')}</div>`; return; }
+
+        const schema = data.schema || [];
+        const values = data.settings || {};
+        if (!schema.length) { panel.innerHTML = '<div class="text-zinc-500">No configurable settings</div>'; return; }
+
+        let html = '<form class="space-y-3" data-settings-form="' + u.escapeHtml(name) + '">';
+        for (const s of schema) {
+          const key = s.key || '';
+          const val = values[key] !== undefined ? values[key] : (s.default !== undefined ? s.default : '');
+          const label = u.escapeHtml(s.label || key);
+          const desc = s.description ? `<div class="text-[10px] text-zinc-500 mt-0.5">${u.escapeHtml(s.description)}</div>` : '';
+
+          if (s.type === 'boolean') {
+            html += `<label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" name="${u.escapeHtml(key)}" ${val ? 'checked' : ''} class="accent-brand-500 rounded">
+              <span>${label}</span></label>${desc}`;
+          } else if (s.type === 'integer' || s.type === 'number') {
+            html += `<div><label class="block text-zinc-400 mb-1">${label}</label>
+              <input type="number" name="${u.escapeHtml(key)}" value="${u.escapeHtml(String(val))}" class="w-full bg-surface-800 border border-surface-600 rounded px-2 py-1 text-zinc-200 text-xs">
+              ${desc}</div>`;
+          } else if (s.type === 'select' && s.options) {
+            const opts = s.options.map(o => `<option value="${u.escapeHtml(o)}" ${o === val ? 'selected' : ''}>${u.escapeHtml(o)}</option>`).join('');
+            html += `<div><label class="block text-zinc-400 mb-1">${label}</label>
+              <select name="${u.escapeHtml(key)}" class="w-full bg-surface-800 border border-surface-600 rounded px-2 py-1 text-zinc-200 text-xs">${opts}</select>
+              ${desc}</div>`;
+          } else {
+            html += `<div><label class="block text-zinc-400 mb-1">${label}</label>
+              <input type="text" name="${u.escapeHtml(key)}" value="${u.escapeHtml(String(val))}" class="w-full bg-surface-800 border border-surface-600 rounded px-2 py-1 text-zinc-200 text-xs">
+              ${desc}</div>`;
+          }
+        }
+        html += '<div class="pt-2"><button type="submit" class="btn btn-sm btn-primary text-xs">Save Settings</button></div></form>';
+        panel.innerHTML = html;
+        panel.dataset.loaded = '1';
+
+        const form = panel.querySelector('form');
+        form.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const formData = {};
+          for (const s of schema) {
+            const el = form.elements[s.key];
+            if (!el) continue;
+            if (s.type === 'boolean') formData[s.key] = el.checked;
+            else if (s.type === 'integer') formData[s.key] = parseInt(el.value, 10) || 0;
+            else if (s.type === 'number') formData[s.key] = parseFloat(el.value) || 0;
+            else formData[s.key] = el.value;
+          }
+          try {
+            const saveRes = await fetch(`/api/extensions/${encodeURIComponent(name)}/settings`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ settings: formData })
+            });
+            if (saveRes.ok) u.toast('Settings saved', 'success');
+            else { const err = await saveRes.json(); u.toast(err.error || 'Save failed', 'error'); }
+          } catch (err) { u.toast('Save failed: ' + err.message, 'error'); }
+        });
+      } catch (err) {
+        panel.innerHTML = `<div class="text-red-400">Error: ${u.escapeHtml(err.message)}</div>`;
+      }
     });
   });
 
@@ -396,7 +467,7 @@ function renderExtensionCard(ext, u) {
         ${hasSettings ? `<button data-ext-settings="${ext.name}" class="btn btn-sm btn-ghost text-xs ml-auto">Settings</button>` : ''}
       </div>
 
-      ${hasSettings ? `<div id="ext-settings-${ext.name}" class="hidden mt-3 pt-3 border-t border-surface-600/30 text-xs text-zinc-400">Settings panel — coming soon</div>` : ''}
+      ${hasSettings ? `<div id="ext-settings-${ext.name}" class="hidden mt-3 pt-3 border-t border-surface-600/30 text-xs text-zinc-400"></div>` : ''}
     </div>
   `;
 }
