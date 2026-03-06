@@ -1506,10 +1506,18 @@ class GhostDaemon:
                 enabled = [s for s in servers if s.get("enabled")]
                 print(f"  [mcp] Initialized with {len(servers)} server(s) ({len(enabled)} enabled)")
                 if enabled and not dry_run:
-                    results = self.mcp_manager.auto_connect()
-                    connected = sum(1 for r in results.values() if r.get("ok"))
-                    print(f"  [mcp] Auto-connected {connected}/{len(enabled)} server(s)")
-                    self.mcp_manager.start_monitor()
+                    def _mcp_background_connect(mgr=self.mcp_manager):
+                        try:
+                            results = mgr.auto_connect()
+                            connected = sum(1 for r in results.values() if r.get("ok"))
+                            print(f"  [mcp] Auto-connected {connected}/{len(enabled)} server(s)")
+                            mgr.start_monitor()
+                        except Exception as exc:
+                            log.warning("MCP background connect error: %s", exc)
+                    t = threading.Thread(target=_mcp_background_connect, daemon=True,
+                                         name="mcp-auto-connect")
+                    t.start()
+                    print("  [mcp] Connecting servers in background...")
             except Exception as e:
                 print(f"  [mcp] Failed to initialize: {e}")
 
@@ -1560,6 +1568,11 @@ class GhostDaemon:
             self._user_cache = load_user()
             self._user_mtime = mtime
         return self._user_cache
+
+    def _get_extension_tool_names(self) -> list:
+        """Return tool names from loaded extensions (always available in tool selection)."""
+        mgr = getattr(self, "extension_manager", None)
+        return mgr.get_extension_tools() if mgr else []
 
     def _build_identity_context(self):
         """Build the identity preamble from SOUL.md + USER.md.
@@ -1859,6 +1872,8 @@ class GhostDaemon:
                         "  routes/           # optional Flask blueprints\n"
                         "  static/           # optional JS/CSS for dashboard pages\n"
                         "```\n\n"
+                        "⚠️ NAMING: Directory names MUST use underscores, NOT hyphens.\n"
+                        "  GOOD: ghost_extensions/my_feature/  BAD: ghost_extensions/my-feature/\n\n"
                         "### Extension register(api) pattern:\n"
                         "```python\n"
                         "def register(api):\n"
@@ -2420,7 +2435,8 @@ class GhostDaemon:
                 needed = self.skill_loader.get_tools_for_skills(matched_skills)
                 if needed:
                     always_tools = ["memory_search", "memory_save", "notify"]
-                    all_names = list(set(needed + always_tools))
+                    ext_tools = self._get_extension_tool_names()
+                    all_names = list(set(needed + always_tools + ext_tools))
                     available = tool_reg.names()
                     valid_names = [n for n in all_names if n in available]
                     if valid_names:
@@ -2538,6 +2554,7 @@ class GhostDaemon:
             tool_names = ["memory_search", "memory_save", "notify"]
             if matched_skills:
                 tool_names += self.skill_loader.get_tools_for_skills(matched_skills)
+            tool_names += self._get_extension_tool_names()
             available = self.tool_registry.names()
             valid = [n for n in set(tool_names) if n in available]
             tool_reg = self.tool_registry.subset(valid) if valid else None
@@ -2688,7 +2705,7 @@ class GhostDaemon:
                 "## RESEARCH METHODOLOGY (CRITICAL — follow this for any 'find/search/who' task):\n"
                 "When asked to find information about a person, project, or topic:\n"
                 "1. **Start with the authoritative source.** To find who created a project → go to its GitHub page FIRST.\n"
-                "   Example: github.com/openclaw/clawbot → the repo page shows the owner/creator directly.\n"
+                "   Example: github.com/owner/project → the repo page shows the owner/creator directly.\n"
                 "2. **Verify before concluding.** Read the actual repo page, README, or profile. Check the owner username.\n"
                 "3. **Cross-reference.** If asked to find them on X/Twitter, search for the specific username you found on GitHub.\n"
                 "4. **Do NOT click random search results and assume they are the answer.** X search results are not reliable.\n"

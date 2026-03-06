@@ -648,6 +648,8 @@ class EvolutionEngine:
             for f in changed_py:
                 if f in deleted_py:
                     continue
+                if f.startswith("ghost_extensions/"):
+                    continue
                 module_name = Path(f).with_suffix("").as_posix().replace("/", ".")
                 try:
                     r = subprocess.run(

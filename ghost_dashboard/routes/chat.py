@@ -632,6 +632,9 @@ def _process_message(session, daemon):
                         "add_future_feature", "list_future_features",
                         "get_future_feature", "get_feature_stats",
                     }
+                    ext_mgr = getattr(daemon, "extension_manager", None)
+                    if ext_mgr:
+                        _ALWAYS_AVAILABLE.update(ext_mgr.get_extension_tools())
                     allowed = skill_tools | _ALWAYS_AVAILABLE
                     scoped_names = [n for n in chat_registry.names() if n in allowed]
                     if scoped_names:

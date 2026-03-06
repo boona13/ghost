@@ -1,4 +1,4 @@
-name: example-extension
+name: example_extension
 version: 0.1.0
 description: "Reference extension demonstrating the Ghost extension architecture"
 author: ghost-ai

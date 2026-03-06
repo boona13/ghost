@@ -62,7 +62,7 @@ Every routine queues changes instead of evolving directly:
 - **Tech Scout**: AI/tech news discoveries → `add_future_feature(source='tech_scout')`
 - **Bug Hunter**: Error fixes → `add_future_feature(priority='P1', category='bugfix', source='bug_hunter')`
 - **Security Patrol**: Vulnerability fixes → `add_future_feature(priority='P1', category='security')`
-- **Competitive Intel**: OpenClaw research → `add_future_feature(source='competitive_intel')`
+- **AI Landscape Research**: Ecosystem trends and user needs → `add_future_feature(source='competitive_intel')`
 - **Skill Improver**: Skill improvements → `add_future_feature(category='improvement')`
 - **Soul Evolver**: SOUL.md updates → `add_future_feature(category='soul_update')`
 - **User Chat**: User requests → `add_future_feature(priority='P0', source='user_request')`
