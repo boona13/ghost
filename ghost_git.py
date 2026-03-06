@@ -246,9 +246,20 @@ def get_log(branch: Optional[str] = None, limit: int = 10) -> str:
 
 
 def stash_and_checkout(branch: str) -> Tuple[bool, str]:
-    """Stash any uncommitted changes, then checkout the target branch."""
+    """Commit uncommitted changes on the current branch, then checkout target.
+
+    Previous behaviour stashed changes and never popped them, silently losing
+    work (both user edits and evolution changes).  Committing instead keeps
+    the changes on the source branch where they can be recovered via git log.
+    """
     try:
-        _run(["stash", "--include-untracked"], check=False)
+        r = _run(["status", "--porcelain"], check=False)
+        if r.stdout.strip():
+            current = current_branch() or "unknown"
+            _run(["add", "-A"], check=False)
+            _run(["commit", "-m",
+                  f"Auto-save: uncommitted changes on {current} before checkout"],
+                 check=False)
         ok, msg = checkout(branch)
         return ok, msg
     except Exception as e:

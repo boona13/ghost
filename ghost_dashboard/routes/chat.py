@@ -245,10 +245,10 @@ def _build_chat_history(daemon, max_turns=10):
 
 
 def _rollback_evolutions(evolution_ids, daemon):
-    """Restore files from backup for any in-progress evolutions after cancellation.
+    """Revert in-progress evolutions after chat cancellation.
 
-    Uses _restore_backup directly instead of the full rollback() flow
-    to avoid writing a deploy marker (which would trigger an unnecessary restart).
+    Uses selective restore (only evolution-modified files) to avoid wiping
+    unrelated changes. Falls back to git branch cleanup if no backup available.
     """
     lines = []
     try:
@@ -257,9 +257,8 @@ def _rollback_evolutions(evolution_ids, daemon):
         for evo_id in evolution_ids:
             evo = evolve_engine._active_evolutions.get(evo_id)
             if not evo:
-                # Check if evolution was already rolled back via cleanup_incomplete()
                 already_rolled_back = any(
-                    e.get("rolled_back_evolution") == evo_id or 
+                    e.get("rolled_back_evolution") == evo_id or
                     (e.get("id") == evo_id and e.get("status") == "rolled_back")
                     for e in evolve_engine._history
                 )
@@ -268,16 +267,37 @@ def _rollback_evolutions(evolution_ids, daemon):
                 else:
                     lines.append(f"Evolution `{evo_id}` not found — may already be cleaned up.")
                 continue
+
+            git_branch = evo.get("git_branch")
+            if git_branch:
+                try:
+                    import ghost_git
+                    if ghost_git.current_branch() == git_branch:
+                        ghost_git.stash_and_checkout("main")
+                    ghost_git.delete_branch(git_branch)
+                except Exception:
+                    pass
+
+            changed_files = [c["file"] for c in evo.get("changes", []) if c.get("file")]
             backup_path = evo.get("backup_path")
-            if not backup_path:
-                lines.append(f"No backup for evolution `{evo_id}` — cannot revert.")
-                continue
-            ok, msg = evolve_engine._restore_backup(backup_path)
-            if ok:
-                evolve_engine._active_evolutions.pop(evo_id, None)
-                lines.append(f"Rolled back evolution `{evo_id}` — all code changes reverted.")
+            if backup_path and changed_files:
+                ok, msg = evolve_engine._restore_backup(backup_path, only_files=changed_files)
+                if ok:
+                    for change in evo.get("changes", []):
+                        from pathlib import Path
+                        file_path = Path(backup_path).parent.parent.parent / change["file"]
+                        if file_path.exists() and "(new file)" in change.get("diff", ""):
+                            try:
+                                file_path.unlink()
+                            except Exception:
+                                pass
+                    evolve_engine._active_evolutions.pop(evo_id, None)
+                    lines.append(f"Rolled back evolution `{evo_id}` — changed files reverted.")
+                else:
+                    lines.append(f"Could not rollback `{evo_id}`: {msg}")
             else:
-                lines.append(f"Could not rollback `{evo_id}`: {msg}")
+                evolve_engine._active_evolutions.pop(evo_id, None)
+                lines.append(f"Cleaned up evolution `{evo_id}` via git branch removal.")
     except Exception as e:
         lines.append(f"Rollback error: {e}")
     return "\n".join(lines) if lines else ""
