@@ -64,12 +64,21 @@ def create_app():
         app.config["SECRET_KEY"] = os.environ.get("GHOST_SECRET_KEY", secrets.token_hex(32))
         app.config["WTF_CSRF_TIME_LIMIT"] = 3600  # 1 hour token validity
         csrf = CSRFProtect(app)
-        # Exempt webhook endpoints that use Bearer token auth
-        csrf.exempt("/api/webhooks/trigger")
+        # Exempt webhook endpoints that use Bearer token auth (all paths under /api/webhooks/)
+        csrf.exempt("/api/webhooks/")
+        # Exempt CSRF token endpoint itself
+        csrf.exempt("/api/csrf-token")
     else:
         logging.getLogger("ghost_dashboard").warning(
             "CSRF protection not available - install flask-wtf: pip install flask-wtf"
         )
+
+    # Context processor to provide csrf_token() in templates (fallback when flask-wtf not installed)
+    @app.context_processor
+    def inject_csrf_token():
+        if _csrf_available and generate_csrf:
+            return dict(csrf_token=generate_csrf)
+        return dict(csrf_token=lambda: "")
 
     try:
         from ghost_device_auth import get_pairing_store as _get_pairing_store
