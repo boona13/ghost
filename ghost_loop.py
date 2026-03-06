@@ -402,6 +402,7 @@ class EvolveContextLogger:
         self._feature_title = ""
         self._session_id = ""
         self._caller = ""
+        self._warning_count = 0
 
     # ── Internal ─────────────────────────────────────────────────
 
