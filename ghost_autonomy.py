@@ -871,7 +871,7 @@ GROWTH_ROUTINES = [
             "   After evolve_test passes, you MUST run these checks BEFORE submitting the PR.\n"
             "   If you skip this step, your PR WILL be rejected.\n\n"
             "   a) For EACH file you modified, run:\n"
-            "      file_read('<file>', offset=1, limit=30)\n"
+            "      file_read('<file>', offset=1, max_lines=30)\n"
             "      Check: are ALL imports present? If you used log.warning(), does the file\n"
             "      have 'import logging' and 'log = logging.getLogger(...)' at the top?\n"
             "      If you used json, threading, Path — are they imported? FIX if missing.\n\n"
