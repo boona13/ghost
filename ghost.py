@@ -1816,6 +1816,7 @@ class GhostDaemon:
         payload = job.get("payload", {})
         ptype = payload.get("type", "task")
         console_bus.emit("info", "cron", job_name, f"Cron fired ({ptype})")
+        self.actions_today += 1
 
         if job_name == _FEATURE_IMPLEMENTER_JOB and not self.cfg.get("enable_future_features", True):
             console_bus.emit("info", "cron", job_name, "Skipped — Future Features disabled in config")
@@ -1997,6 +1998,21 @@ class GhostDaemon:
 
     def stop(self, *_):
         console_bus.emit("warn", "system", "daemon_stop", "Ghost shutting down")
+
+        # Wait for active cron jobs (especially the Feature Implementer) to finish
+        # before tearing down. Ghost should never die mid-work.
+        if self.cron:
+            _max_wait = 600  # 10 minutes max for long evolve cycles
+            _waited = 0
+            while self.cron.get_active_count() > 0 and _waited < _max_wait:
+                if _waited == 0:
+                    active = self.cron.get_active_jobs()
+                    print(f"  {YLW}Waiting for {len(active)} active cron job(s) to finish before shutdown...{RST}")
+                time.sleep(2)
+                _waited += 2
+            if _waited >= _max_wait:
+                print(f"  {RED}Timed out waiting for cron jobs — forcing shutdown{RST}")
+
         if getattr(self, "tool_event_bus", None):
             try:
                 self.tool_event_bus.emit("on_shutdown")

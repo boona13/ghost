@@ -311,19 +311,30 @@ class FutureFeaturesStore:
         complete_future_feature).
         Returns list of reset feature IDs.
         """
-        # Load deploy timestamps from evolve history to detect if a deploy
-        # happened while the feature was in_progress (deploy-before-complete scenario)
-        deploy_timestamps = []
+        deploy_info = []  # list of (timestamp, evolution_id)
         try:
             evolve_history = GHOST_HOME / "evolve" / "history.json"
             if evolve_history.exists():
                 history = json.loads(evolve_history.read_text(encoding="utf-8"))
-                for entry in history:
-                    if entry.get("status") == "deployed" and entry.get("deployed_at"):
-                        try:
-                            deploy_timestamps.append(datetime.fromisoformat(entry["deployed_at"]))
-                        except (ValueError, TypeError):
-                            pass
+                if isinstance(history, list):
+                    for entry in history:
+                        if entry.get("status") == "deployed" and entry.get("deployed_at"):
+                            try:
+                                dt = datetime.fromisoformat(entry["deployed_at"])
+                                evo_id = entry.get("id", "")
+                                deploy_info.append((dt, evo_id))
+                            except (ValueError, TypeError):
+                                pass
+        except Exception:
+            pass
+
+        # Also check last_deploy.json for the most recent deploy
+        try:
+            last_deploy = GHOST_HOME / "evolve" / "last_deploy.json"
+            if last_deploy.exists():
+                ld = json.loads(last_deploy.read_text(encoding="utf-8"))
+                if ld.get("feature_id"):
+                    deploy_info.append((datetime.now(), ld.get("evolution_id", "")))
         except Exception:
             pass
 
@@ -336,19 +347,30 @@ class FutureFeaturesStore:
                 continue
             started = f.get("started_at", "")
             if not started:
+                f["status"] = STATUS_PENDING
+                f["updated_at"] = now.isoformat()
+                reset_ids.append(f["id"])
+                changed = True
                 continue
             try:
                 started_dt = datetime.fromisoformat(started)
                 age = (now - started_dt).total_seconds()
                 if age > max_age_seconds:
-                    # Check if any deploy happened after this feature started.
-                    # If so, the feature was likely deployed successfully but
-                    # complete_future_feature wasn't called before the restart.
-                    deployed_after_start = any(dt > started_dt for dt in deploy_timestamps)
-                    if deployed_after_start:
+                    feature_evo_id = f.get("evolution_id", "")
+                    # First: try exact match via evolution_id
+                    evo_match = any(
+                        evo_id == feature_evo_id
+                        for _, evo_id in deploy_info
+                        if feature_evo_id and evo_id
+                    )
+                    # Fallback: any deploy at or after the feature started
+                    time_match = any(dt >= started_dt for dt, _ in deploy_info)
+
+                    if evo_match or time_match:
                         f["status"] = STATUS_IMPLEMENTED
                         f["updated_at"] = now.isoformat()
                         f["completed_at"] = now.isoformat()
+                        f["implemented_at"] = now.isoformat()
                         changed = True
                     else:
                         f["status"] = STATUS_PENDING

@@ -1,0 +1,7 @@
+name: text_stats
+version: 1.0.0
+description: Text statistics analyzer - provides word count, character count, sentence
+  count, average word length, reading time estimate, and top N most frequent words.
+  Pure Python, no external dependencies.
+author: ghost
+category: utility

@@ -122,6 +122,8 @@ class GhostSupervisor:
         SUPERVISOR_PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
         signal.signal(signal.SIGTERM, self._handle_signal)
         signal.signal(signal.SIGINT, self._handle_signal)
+        if hasattr(signal, "SIGHUP"):
+            signal.signal(signal.SIGHUP, signal.SIG_IGN)
 
         SHUTDOWN_MARKER.unlink(missing_ok=True)
 
@@ -165,11 +167,16 @@ class GhostSupervisor:
                 if rc not in intentional_exit_codes:
                     self._handle_crash()
                 else:
+                    if SHUTDOWN_MARKER.exists():
+                        SHUTDOWN_MARKER.unlink(missing_ok=True)
+                        log("Ghost exited — shutdown was requested, supervisor stopping")
+                        break
                     if rc is not None and rc != 0:
-                        log(f"Ghost exited with signal-based code {rc} (intentional)")
+                        log(f"Ghost exited with signal-based code {rc} — restarting")
                     else:
-                        log("Ghost exited cleanly")
-                    break
+                        log("Ghost exited cleanly — restarting (Ghost should always be running)")
+                    self.crash_times.clear()
+                    time.sleep(RESTART_DELAY)
         finally:
             self._cleanup()
 

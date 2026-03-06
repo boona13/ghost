@@ -216,6 +216,7 @@ class CronStore:
 
     def _save(self):
         try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self._path.with_suffix(".tmp")
             data = {"version": 1, "jobs": self._jobs}
             tmp.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
