@@ -4,6 +4,8 @@ import logging
 from pathlib import Path
 from flask import Blueprint, jsonify, request
 
+from ghost_dashboard.rate_limiter import rate_limit
+
 log = logging.getLogger(__name__)
 
 bp = Blueprint("extensions", __name__)
@@ -74,6 +76,7 @@ def disable_extension(name):
 
 
 @bp.route("/api/extensions/install", methods=["POST"])
+@rate_limit(requests_per_minute=5)
 def install_extension():
     mgr = _get_ext_manager()
     if not mgr:
@@ -204,6 +207,7 @@ def hub_nodes():
 
 
 @bp.route("/api/hub/install", methods=["POST"])
+@rate_limit(requests_per_minute=10)
 def hub_install():
     """Install an extension or node from the community hub."""
     hub = _get_hub()

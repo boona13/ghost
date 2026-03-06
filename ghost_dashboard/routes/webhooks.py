@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
+from ghost_dashboard.rate_limiter import rate_limit
+
 bp = Blueprint("webhooks", __name__)
 
 
@@ -19,7 +21,16 @@ def _get_handler():
 
 # ── Inbound webhook endpoint (external services POST here) ──────
 
+def _webhook_key_func(req):
+    """Generate rate limit key including trigger_id for per-trigger limiting."""
+    from ghost_dashboard.rate_limiter import _get_client_ip
+    trigger_id = req.view_args.get('trigger_id', 'unknown') if req.view_args else 'unknown'
+    ip = _get_client_ip()
+    return f"{trigger_id}:{ip}"
+
+
 @bp.route("/api/webhooks/<trigger_id>", methods=["POST"])
+@rate_limit(requests_per_minute=60, key_func=_webhook_key_func)
 def fire_webhook(trigger_id):
     handler = _get_handler()
     if not handler:
