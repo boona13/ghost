@@ -147,7 +147,24 @@ class MCPClientManager:
 
                 env = os.environ.copy()
                 env.update(config.env)
-                cmd_list = [config.command] + config.args
+                # Force stdio mode by ensuring no --port arg is present for known HTTP-mode servers
+                args = list(config.args)
+                if server_name == "playwright":
+                    # Filter out any --port arg to force stdio mode and avoid port conflicts
+                    filtered_args = []
+                    skip_next = False
+                    for arg in args:
+                        if skip_next:
+                            skip_next = False
+                            continue
+                        if arg == "--port":
+                            skip_next = True
+                            continue
+                        if arg.startswith("--port="):
+                            continue
+                        filtered_args.append(arg)
+                    args = filtered_args
+                cmd_list = [config.command] + args
                 log.info(f"Starting MCP server \'{server_name}\': {' '.join(cmd_list)}")
 
                 try:
