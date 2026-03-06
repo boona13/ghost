@@ -23,7 +23,7 @@ def register(api):
         return LlamaParse(api_key=api_key)
 
     def parse_document(source: str, tier: str = "fast", output_format: str = "markdown", 
-                       include_tables: bool = True, include_images: bool = False, **kwargs):
+                       **kwargs):
         """
         Parse a document (file path or URL) using LlamaParse.
         
@@ -31,8 +31,6 @@ def register(api):
             source: File path or URL to document
             tier: Parsing tier - 'fast', 'cost_effective', 'agentic', 'agentic_plus'
             output_format: Output format - 'markdown', 'json', 'text'
-            include_tables: Extract tables from document
-            include_images: Include image descriptions
         """
         try:
             client = _get_client()
@@ -65,11 +63,11 @@ def register(api):
             
             # Format output
             if output_format == "json":
-                output = json.dumps({
+                output = {
                     "text": text,
                     "metadata": metadata,
                     "pages": len(result) if result else 0
-                }, indent=2)
+                }
             else:
                 output = text
             
@@ -115,16 +113,6 @@ def register(api):
                     "enum": ["markdown", "json", "text"],
                     "default": "markdown",
                     "description": "Output format for parsed content"
-                },
-                "include_tables": {
-                    "type": "boolean",
-                    "default": True,
-                    "description": "Extract tables from the document"
-                },
-                "include_images": {
-                    "type": "boolean",
-                    "default": False,
-                    "description": "Include image descriptions in output"
                 }
             },
             "required": ["source"]
