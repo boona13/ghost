@@ -1,0 +1,50 @@
+name: stabilization-mode
+version: 0.1.0
+description: "Stabilization mode controls feature intake and exposes status controls in the dashboard"
+author: ghost-ai
+category: monitoring
+
+requires:
+  ghost_version: ">=2.0"
+  deps: []
+  extensions: []
+
+provides:
+  tools:
+    - stabilization_mode_status
+    - stabilization_mode_set
+    - stabilization_mode_evaluate_health
+  routes:
+    - stabilization_mode_api
+  pages:
+    - future-features-stabilization
+  cron_jobs: []
+  settings:
+    - key: stabilization_mode
+      type: boolean
+      default: false
+      label: "Stabilization Mode"
+      description: "Lock down feature intake while core stability work is in progress"
+    - key: stabilization_require_p0_approval
+      type: boolean
+      default: true
+      label: "Require P0 Approval"
+      description: "When enabled, P0 features stay approval_required while stabilization mode is on"
+    - key: stabilization_auto_reject_p1_p2
+      type: boolean
+      default: true
+      label: "Auto-reject P1/P2"
+      description: "Automatically reject newly added P1/P2 features during stabilization mode"
+    - key: stabilization_crash_threshold
+      type: integer
+      default: 3
+      label: "Crash Threshold"
+      description: "Crash count in lookback window before auto-enabling stabilization mode"
+    - key: stabilization_lookback_minutes
+      type: integer
+      default: 60
+      label: "Lookback Minutes"
+      description: "Window size used by crash detector"
+
+hooks:
+  - on_boot
