@@ -673,10 +673,24 @@ class EvolutionEngine:
             for f in changed_py:
                 if f in deleted_py:
                     continue
-                module_name = Path(f).with_suffix("").as_posix().replace("/", ".")
+                abs_f = PROJECT_DIR / f
+                if not abs_f.exists():
+                    continue
+
+                if f.startswith("ghost_tools/"):
+                    import_cmd = (
+                        "import importlib.util, sys; "
+                        f"spec = importlib.util.spec_from_file_location('_test', r'{abs_f}'); "
+                        "mod = importlib.util.module_from_spec(spec); "
+                        "spec.loader.exec_module(mod)"
+                    )
+                else:
+                    module_name = Path(f).with_suffix("").as_posix().replace("/", ".")
+                    import_cmd = f"import {module_name}"
+
                 try:
                     r = subprocess.run(
-                        [sys.executable, "-c", f"import {module_name}"],
+                        [sys.executable, "-c", import_cmd],
                         capture_output=True, text=True, timeout=30,
                         cwd=str(PROJECT_DIR),
                     )
@@ -686,7 +700,7 @@ class EvolutionEngine:
                     ok, output = False, "Import timed out"
 
                 results["import"].append({
-                    "module": module_name, "ok": ok,
+                    "module": f, "ok": ok,
                     "error": output if not ok else None,
                 })
                 if not ok:
