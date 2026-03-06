@@ -12,8 +12,8 @@ Tools:
   - journal_import: Import checkpoints from JSON
 
 Hooks:
-  - on_tool_result: Auto-capture lightweight checkpoints after successful tool calls
-  - on_generation_interrupt: Capture state when generation is interrupted
+  - on_tool_call: Auto-capture lightweight checkpoints after significant tool calls
+  - on_tool_loop_error: Capture state when a tool loop encounters an error
   - on_boot: Prune old checkpoints on startup
 
 Security: Secrets/tokens are redacted from captured payloads.
@@ -26,7 +26,7 @@ import re
 import tempfile
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -122,8 +122,8 @@ def register(api):
         """Prune old checkpoints for a session based on retention settings."""
         max_checkpoints = api.get_setting("max_checkpoints_per_session", 50)
         retention_days = api.get_setting("retention_days", 30)
-        cutoff_date = datetime.now() - timedelta(days=retention_days)
-        
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
+
         path = _get_session_path(session_id)
         if not path.exists():
             return
@@ -785,7 +785,7 @@ def register(api):
         log.info("Durable Turn Journal extension booted")
         
         retention_days = api.get_setting("retention_days", 30)
-        cutoff_date = datetime.now() - timedelta(days=retention_days)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=retention_days)
         
         pruned_sessions = 0
         pruned_checkpoints = 0

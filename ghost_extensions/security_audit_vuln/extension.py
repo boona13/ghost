@@ -281,7 +281,7 @@ def register(api):
             if not isinstance(history, list):
                 history = []
         except (json.JSONDecodeError, ValueError) as exc:
-            log.warning(f"Failed to parse audit history, starting fresh: {exc}")
+            log.warning("Failed to parse audit history, starting fresh: %s", exc)
             history = []
         
         history.append(audit_record)
@@ -491,8 +491,8 @@ def register(api):
                 if critical > 0:
                     api.log(f"Previous audit found {critical} critical vulnerabilities - run security_audit_vulnerabilities")
         except (json.JSONDecodeError, ValueError) as exc:
-            log.warning(f"Failed to parse audit history on boot: {exc}")
+            log.warning("Failed to parse audit history on boot: %s", exc)
         except Exception as exc:
-            log.warning(f"Error checking audit history on boot: {exc}")
+            log.warning("Error checking audit history on boot: %s", exc)
 
     api.register_hook("on_boot", on_boot)

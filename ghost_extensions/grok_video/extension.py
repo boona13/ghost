@@ -42,29 +42,34 @@ def _atomic_write_json(path: Path, data: Any):
         raise
 
 
-def _load_video_history(data_dir: Path) -> List[Dict]:
-    """Load video generation history from disk."""
+def _load_video_history_unlocked(data_dir: Path) -> List[Dict]:
+    """Load video history from disk (caller must hold _file_lock)."""
     path = data_dir / VIDEO_HISTORY_FILE
     if not path.exists():
         return []
     try:
-        with _file_lock:
-            raw = path.read_text(encoding="utf-8")
-            if not raw.strip():
-                return []
-            data = json.loads(raw)
-            if isinstance(data, list):
-                return data[-VIDEO_HISTORY_MAX:]
+        raw = path.read_text(encoding="utf-8")
+        if not raw.strip():
+            return []
+        data = json.loads(raw)
+        if isinstance(data, list):
+            return data[-VIDEO_HISTORY_MAX:]
     except (json.JSONDecodeError, ValueError, OSError) as exc:
         log.warning("Failed to load video history: %s", exc)
     return []
+
+
+def _load_video_history(data_dir: Path) -> List[Dict]:
+    """Load video generation history from disk (thread-safe)."""
+    with _file_lock:
+        return _load_video_history_unlocked(data_dir)
 
 
 def _save_video_history(data_dir: Path, entry: Dict):
     """Append entry to video history."""
     path = data_dir / VIDEO_HISTORY_FILE
     with _file_lock:
-        history = _load_video_history(data_dir)
+        history = _load_video_history_unlocked(data_dir)
         history.append(entry)
         history = history[-VIDEO_HISTORY_MAX:]
         _atomic_write_json(path, history)
@@ -269,6 +274,15 @@ def register(api):
     
     api.register_hook("on_boot", on_boot)
     
+    # Register dashboard page
+    api.register_page({
+        "id": "grok_video",
+        "label": "Grok Video",
+        "icon": "video",
+        "section": "integrations",
+        "js_path": "grok_video.js",
+    })
+
     # Register routes
     bp = _build_routes(api, data_dir)
     api.register_route(bp)
@@ -288,9 +302,12 @@ def _build_routes(api, data_dir: Path):
     def get_settings():
         """Get current settings (API key masked)."""
         api_key = api.get_setting("xai_api_key", "")
+        masked = ""
+        if api_key:
+            masked = api_key[:4] + "•" * min(len(api_key) - 4, 20) if len(api_key) > 4 else "•" * len(api_key)
         return jsonify({
-            "xai_api_key": api_key,
             "has_key": bool(api_key),
+            "masked_key": masked,
         })
     
     @bp.route("/settings", methods=["POST"])

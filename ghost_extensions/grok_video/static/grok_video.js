@@ -108,11 +108,9 @@ export function render(container) {
 
 async function loadApiStatus() {
   try {
-    const resp = await fetch('/api/grok_video/settings');
-    const data = await resp.json();
-    const hasKey = data.xai_api_key && data.xai_api_key.length > 0;
+    const data = await window.GhostAPI.get('/api/grok_video/settings');
     const statusEl = document.getElementById('api-status');
-    if (hasKey) {
+    if (data.has_key) {
       statusEl.textContent = 'Configured';
       statusEl.className = 'badge badge-green';
     } else {
@@ -134,13 +132,8 @@ async function saveApiKey() {
   }
   
   try {
-    const resp = await fetch('/api/grok_video/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ xai_api_key: key }),
-    });
-    
-    if (resp.ok) {
+    const data = await window.GhostAPI.post('/api/grok_video/settings', { xai_api_key: key });
+    if (data.success) {
       showToast('API key saved', 'success');
       input.value = '';
       loadApiStatus();
@@ -154,9 +147,7 @@ async function saveApiKey() {
 
 async function testConnection() {
   try {
-    const resp = await fetch('/api/grok_video/test', { method: 'POST' });
-    const data = await resp.json();
-    
+    const data = await window.GhostAPI.post('/api/grok_video/test', {});
     if (data.success) {
       showToast('Connection successful', 'success');
     } else {
@@ -182,14 +173,9 @@ async function quickGenerate() {
   btn.textContent = 'Generating...';
   
   try {
-    const resp = await fetch('/api/grok_video/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, aspect_ratio: ratio, n: count }),
+    const data = await window.GhostAPI.post('/api/grok_video/generate', {
+      prompt, aspect_ratio: ratio, n: count,
     });
-    
-    const data = await resp.json();
-    
     if (data.success) {
       showToast(`Generated ${data.videos?.length || 0} video(s)`, 'success');
       document.getElementById('quick-prompt').value = '';
@@ -207,8 +193,7 @@ async function quickGenerate() {
 
 async function loadHistory() {
   try {
-    const resp = await fetch('/api/grok_video/history');
-    const data = await resp.json();
+    const data = await window.GhostAPI.get('/api/grok_video/history');
     renderHistory(data.history || []);
   } catch (err) {
     console.error('Failed to load history:', err);
@@ -272,7 +257,7 @@ async function clearHistory() {
   if (!confirm('Clear all video generation history?')) return;
   
   try {
-    await fetch('/api/grok_video/history', { method: 'DELETE' });
+    await window.GhostAPI.del('/api/grok_video/history');
     loadHistory();
     showToast('History cleared', 'success');
   } catch (err) {

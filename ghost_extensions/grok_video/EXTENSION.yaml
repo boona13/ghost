@@ -14,6 +14,8 @@ provides:
     - grok_video
   hooks:
     - on_boot
+  routes:
+    - grok_video
   pages:
     - id: grok_video
       label: "Grok Video"
