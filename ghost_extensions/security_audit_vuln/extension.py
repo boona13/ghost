@@ -62,8 +62,8 @@ def _run_pip_audit(requirements_file: Path = None, allowed_roots: list = None) -
             req_path = Path(requirements_file).resolve()
             # Default allowed roots if none provided
             roots = allowed_roots or [Path.cwd().resolve()]
-            # Ensure the file is within allowed roots
-            is_allowed = any(str(req_path).startswith(str(Path(r).resolve())) for r in roots)
+            # Ensure the file is within allowed roots using proper path comparison
+            is_allowed = any(req_path.is_relative_to(Path(r).resolve()) for r in roots)
             if not is_allowed:
                 return {
                     "installed": True,
