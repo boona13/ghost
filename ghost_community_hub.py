@@ -1,16 +1,14 @@
 """
 Ghost Community Hub — central registry client for discovering, installing, and
-publishing extensions and nodes.
+publishing nodes and tools.
 
 The registry is a GitHub repo (ghost-ai/community-hub) containing metadata JSON
-files. Actual extension/node code lives in developer GitHub repos. This module
+files. Actual node/tool code lives in developer GitHub repos. This module
 fetches the index, supports search, and handles install-from-hub and publish flows.
 
 Registry layout (GitHub repo):
     community-hub/
-      extensions/registry.json     — extension metadata index
       nodes/registry.json          — node metadata index
-      extensions/submissions/      — one YAML per extension (for review)
       nodes/submissions/           — one YAML per node (for review)
 """
 
@@ -75,19 +73,6 @@ class CommunityHub:
 
     # ── Fetch indices ──────────────────────────────────────────────
 
-    def fetch_extensions_index(self, force_refresh: bool = False) -> list[dict]:
-        """Fetch the extensions registry index."""
-        if not force_refresh:
-            cached = self._get_cached("extensions")
-            if cached is not None:
-                return cached
-
-        url = f"{self.REGISTRY_RAW_URL}/extensions/registry.json"
-        data = self._fetch_json(url)
-        items = data.get("extensions", [])
-        self._set_cache("extensions", items)
-        return items
-
     def fetch_nodes_index(self, force_refresh: bool = False) -> list[dict]:
         """Fetch the nodes registry index."""
         if not force_refresh:
@@ -104,10 +89,9 @@ class CommunityHub:
     # ── Search ─────────────────────────────────────────────────────
 
     def search(self, query: str, category: str = "",
-               kind: str = "extensions") -> list[dict]:
+               kind: str = "nodes") -> list[dict]:
         """Search the registry by query string and optional category."""
-        items = (self.fetch_extensions_index() if kind == "extensions"
-                 else self.fetch_nodes_index())
+        items = self.fetch_nodes_index()
 
         query_lower = query.lower()
         results = []
@@ -132,13 +116,6 @@ class CommunityHub:
         results.sort(key=lambda x: -x[0])
         return [item for _, item in results]
 
-    def get_extension_details(self, name: str) -> Optional[dict]:
-        """Get full details for a specific extension."""
-        for ext in self.fetch_extensions_index():
-            if ext.get("name") == name:
-                return ext
-        return None
-
     def get_node_details(self, name: str) -> Optional[dict]:
         """Get full details for a specific node."""
         for node in self.fetch_nodes_index():
@@ -147,25 +124,6 @@ class CommunityHub:
         return None
 
     # ── Install from Hub ───────────────────────────────────────────
-
-    def install_from_hub(self, name: str, ext_manager) -> dict:
-        """Install an extension from the community hub.
-
-        Looks up the extension in the registry, clones its repo, and
-        delegates to ExtensionManager.install_local().
-        """
-        details = self.get_extension_details(name)
-        if not details:
-            return {"status": "error", "error": f"Extension '{name}' not found in community hub"}
-
-        repo_url = details.get("repo", "")
-        if not repo_url:
-            return {"status": "error", "error": f"No repo URL for '{name}'"}
-
-        result = ext_manager.install_from_github(repo_url)
-        if result.get("status") == "ok":
-            self._report_download(name, kind="extensions")
-        return result
 
     def install_node_from_hub(self, name: str, node_manager) -> dict:
         """Install a node from the community hub."""
@@ -182,30 +140,22 @@ class CommunityHub:
             self._report_download(name, kind="nodes")
         return result
 
-    def _report_download(self, name: str, kind: str = "extensions"):
+    def _report_download(self, name: str, kind: str = "nodes"):
         """Best-effort download count increment (non-blocking)."""
         pass
 
     # ── Publish ────────────────────────────────────────────────────
 
-    def publish_extension(self, extension_dir: Path) -> dict:
-        """Validate and publish an extension to the community hub.
-
-        Creates a submission YAML and opens a PR on the registry repo.
-        Requires a GitHub token with repo scope.
-        """
-        return self._publish(extension_dir, kind="extension")
-
     def publish_node(self, node_dir: Path) -> dict:
         """Validate and publish a node to the community hub."""
         return self._publish(node_dir, kind="node")
 
-    def _publish(self, source_dir: Path, kind: str = "extension") -> dict:
+    def _publish(self, source_dir: Path, kind: str = "node") -> dict:
         if not self._github_token:
             return {"status": "error", "error": "GitHub token required for publishing. Set github_token in config."}
 
-        manifest_name = "EXTENSION.yaml" if kind == "extension" else "NODE.yaml"
-        entry_name = "extension.py" if kind == "extension" else "node.py"
+        manifest_name = "NODE.yaml"
+        entry_name = "node.py"
 
         manifest_path = source_dir / manifest_name
         if not manifest_path.exists():
@@ -216,12 +166,8 @@ class CommunityHub:
             return {"status": "error", "error": f"No {entry_name} found in {source_dir}"}
 
         try:
-            if kind == "extension":
-                from ghost_extension_manager import ExtensionManifest
-                manifest = ExtensionManifest.from_yaml(manifest_path)
-            else:
-                from ghost_node_manager import NodeManifest
-                manifest = NodeManifest.from_yaml(manifest_path)
+            from ghost_node_manager import NodeManifest
+            manifest = NodeManifest.from_yaml(manifest_path)
         except Exception as e:
             return {"status": "error", "error": f"Invalid manifest: {e}"}
 
@@ -246,8 +192,6 @@ class CommunityHub:
             "category": getattr(manifest, "category", "utility"),
         }
 
-        plural = "extensions" if kind == "extension" else "nodes"
-
         try:
             fork_url = f"https://api.github.com/repos/{self.REGISTRY_REPO}/forks"
             req = Request(fork_url, method="POST", headers={
@@ -267,7 +211,7 @@ class CommunityHub:
                 "message": (
                     f"Submission prepared for '{manifest.name}'. "
                     f"To complete publishing, submit a PR to {self.REGISTRY_REPO} with "
-                    f"the file '{plural}/submissions/{manifest.name}.yaml'."
+                    f"the file 'nodes/submissions/{manifest.name}.yaml'."
                 ),
                 "submission": submission,
                 "fork": fork_full_name,
@@ -284,7 +228,7 @@ class CommunityHub:
 
     def get_hub_status(self) -> dict:
         """Check if the community hub registry is reachable."""
-        url = f"{self.REGISTRY_RAW_URL}/extensions/registry.json"
+        url = f"{self.REGISTRY_RAW_URL}/nodes/registry.json"
         try:
             req = Request(url, method="HEAD")
             with urlopen(req, timeout=5):
@@ -293,16 +237,14 @@ class CommunityHub:
             return {"reachable": False, "repo": self.REGISTRY_REPO}
 
 
-def build_community_hub_tools(hub: CommunityHub, ext_manager=None, node_manager=None):
+def build_community_hub_tools(hub: CommunityHub, node_manager=None):
     """Build LLM tools for interacting with the Community Hub."""
 
-    def execute_browse(kind: str = "extensions", category: str = "", query: str = "", **_kw):
+    def execute_browse(category: str = "", query: str = "", **_kw):
         if query:
-            items = hub.search(query, category=category, kind=kind)
-        elif kind == "nodes":
-            items = hub.fetch_nodes_index()
+            items = hub.search(query, category=category)
         else:
-            items = hub.fetch_extensions_index()
+            items = hub.fetch_nodes_index()
 
         if category:
             items = [i for i in items if i.get("category") == category]
@@ -313,30 +255,23 @@ def build_community_hub_tools(hub: CommunityHub, ext_manager=None, node_manager=
             "items": items[:50],
         }, default=str)
 
-    def execute_install(name: str = "", kind: str = "extension", **_kw):
+    def execute_install(name: str = "", **_kw):
         if not name:
             return json.dumps({"status": "error", "error": "name required"})
-        if kind == "node" and node_manager:
+        if node_manager:
             return json.dumps(hub.install_node_from_hub(name, node_manager), default=str)
-        elif ext_manager:
-            return json.dumps(hub.install_from_hub(name, ext_manager), default=str)
-        return json.dumps({"status": "error", "error": "Manager not available"})
+        return json.dumps({"status": "error", "error": "Node manager not available"})
 
     return [
         {
             "name": "community_hub_browse",
             "description": (
-                "Browse the Ghost Community Hub for extensions and nodes. "
+                "Browse the Ghost Community Hub for nodes. "
                 "Search by query, filter by category, or list all."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "kind": {
-                        "type": "string",
-                        "description": "Type to browse",
-                        "enum": ["extensions", "nodes"],
-                    },
                     "category": {
                         "type": "string",
                         "description": "Optional category filter",
@@ -351,18 +286,13 @@ def build_community_hub_tools(hub: CommunityHub, ext_manager=None, node_manager=
         },
         {
             "name": "community_hub_install",
-            "description": "Install an extension or node from the Community Hub by name.",
+            "description": "Install a node from the Community Hub by name.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": "Name of the extension or node to install",
-                    },
-                    "kind": {
-                        "type": "string",
-                        "description": "Type to install",
-                        "enum": ["extension", "node"],
+                        "description": "Name of the node to install",
                     },
                 },
                 "required": ["name"],

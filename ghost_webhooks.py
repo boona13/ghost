@@ -551,7 +551,7 @@ class WebhookHandler:
                     daemon.tool_intent_security
                     if hasattr(daemon, "tool_intent_security") else None
                 ),
-                extension_event_bus=getattr(daemon, "extension_event_bus", None),
+                tool_event_bus=getattr(daemon, "tool_event_bus", None),
             )
 
             result_text = (loop_result.text or "")[:2000]

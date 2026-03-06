@@ -43,7 +43,7 @@ You are Ghost, a self-evolving AI agent. This skill guides you through researchi
 
 ## Philosophy
 
-Ghost does not have a single competitor. The landscape includes many AI assistants, agent frameworks, automation tools, and productivity platforms. Your job is to learn from all of them — their successes, failures, and the gaps they leave — and bring the best ideas home as Ghost extensions.
+Ghost does not have a single competitor. The landscape includes many AI assistants, agent frameworks, automation tools, and productivity platforms. Your job is to learn from all of them — their successes, failures, and the gaps they leave — and bring the best ideas home as Ghost tools.
 
 **Always think about the user.** Every feature you discover should answer: "How does this make Ghost more useful for the person using it?"
 
@@ -90,20 +90,19 @@ When you find an interesting project or idea:
 - Read documentation for design decisions
 - Identify what concepts could translate to Ghost
 
-**IMPORTANT:** Ghost is Python. When studying projects in other languages (TypeScript, Go, Rust, etc.), extract the **concept and design** — never copy code. Reimplement ideas using Ghost's patterns (extensions, `ExtensionAPI`, `EXTENSION.yaml`).
+**IMPORTANT:** Ghost is Python. When studying projects in other languages (TypeScript, Go, Rust, etc.), extract the **concept and design** — never copy code. Reimplement ideas using Ghost's patterns (`ghost_tools/<name>/`, `ToolAPI`, `TOOL.yaml`).
 
-### Step 4: Design as Extensions
+### Step 4: Design as Ghost Tools
 
-When you find a feature worth adding to Ghost, think about it as an extension:
+When you find a feature worth adding to Ghost, think about it as a ghost tool:
 
-- **What tools would it provide?** (registered via `api.register_tool()`)
-- **Does it need a dashboard page?** (registered via `api.register_page()`)
+- **What LLM tools would it provide?** (registered via `api.register_tool()`)
 - **Does it need scheduled work?** (registered via `api.register_cron()`)
-- **What events should it react to?** (registered via `api.on()`)
+- **What events should it react to?** (registered via `api.register_hook()`)
 - **What settings does the user need?** (registered via `api.register_setting()`)
-- **What pip dependencies does it need?** (declared in `EXTENSION.yaml` requires.pip)
+- **What pip dependencies does it need?** (declared in `TOOL.yaml` deps)
 
-Then queue it via `add_future_feature` with category `feature` and include the extension design in the description.
+Then queue it via `add_future_feature` with category `feature` and include the tool design in the description.
 
 ### Step 5: Prioritize
 
@@ -120,7 +119,7 @@ Then queue it via `add_future_feature` with category `feature` and include the e
 - Self-evolution engine — Ghost modifies and deploys its own code
 - Self-healing crash recovery — automatic diagnosis and fix
 - Autonomous growth via cron routines — proactive improvement
-- Extension system — modular features that don't break core
+- Tool Builder — modular features in ghost_tools/ that don't break core
 - Built-in web dashboard — full UI out of the box
 - Browser automation via Playwright
 - Multi-provider LLM support with automatic fallback
@@ -130,7 +129,7 @@ Then queue it via `add_future_feature` with category `feature` and include the e
 After completing research, always produce:
 
 1. **Findings Summary** — What you discovered, with sources
-2. **Recommendation** — What Ghost should implement, prioritized, designed as extensions
+2. **Recommendation** — What Ghost should implement, prioritized, designed as ghost tools
 3. **Action** — Queue via `add_future_feature` or create an action item
 4. **Growth Log Entry** — Record what you found via `log_growth_activity`
 5. **Memory Save** — Persist findings via `memory_save` with tag "landscape-research"
@@ -139,7 +138,7 @@ After completing research, always produce:
 
 - Always use the **current year** in search queries (check date context)
 - Focus on what users ACTUALLY want, not what looks impressive on paper
-- Design every new feature as an extension first — not core code changes
-- Extension directory names MUST use underscores, not hyphens (e.g. `smart_calendar`, not `smart-calendar`)
+- Design every new feature as a ghost tool first — not core code changes
+- Tool directory names MUST use underscores, not hyphens (e.g. `smart_calendar`, not `smart-calendar`)
 - Ghost ships batteries-included — that's the differentiator. Features should work out of the box
 - Don't get tunnel-visioned on a single competitor. The whole ecosystem has lessons

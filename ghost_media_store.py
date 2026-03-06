@@ -72,7 +72,7 @@ class MediaStore:
         self._db_lock = threading.Lock()
         self._disk_budget_mb = self.cfg.get("media_disk_budget_mb", 5000)
         self._default_ttl = self.cfg.get("media_default_ttl_secs", 0)
-        self.extension_event_bus = None
+        self.tool_event_bus = None
 
     def _migrate_add_provider_columns(self):
         """Add provider and cost_usd columns if they don't exist (v2 migration)."""
@@ -131,9 +131,9 @@ class MediaStore:
         log.info("Media saved: %s (%s, %d bytes, node=%s, provider=%s)",
                  safe_name, media_type, size_bytes, source_node, provider)
 
-        if self.extension_event_bus:
+        if self.tool_event_bus:
             try:
-                self.extension_event_bus.emit(
+                self.tool_event_bus.emit(
                     "on_media_generated",
                     path=str(out_path),
                     type=media_type,
@@ -175,9 +175,9 @@ class MediaStore:
             )
             self._db.commit()
 
-        if self.extension_event_bus:
+        if self.tool_event_bus:
             try:
-                self.extension_event_bus.emit(
+                self.tool_event_bus.emit(
                     "on_media_generated",
                     path=str(p),
                     type=media_type,

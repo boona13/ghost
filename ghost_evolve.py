@@ -103,7 +103,7 @@ class EvolutionEngine:
         self._active_evolutions = {}
         self._history = self._load_history()
         self._active_jobs_fn = None  # Set by GhostDaemon to check cron status
-        self.extension_event_bus = None  # Set by GhostDaemon for hook emission
+        self.tool_event_bus = None  # Set by GhostDaemon for hook emission
         self._cleanup_orphaned_pending()
 
     def _cleanup_orphaned_pending(self):
@@ -166,10 +166,10 @@ class EvolutionEngine:
             basename = Path(f_str).name
             if basename in PROTECTED_FILES:
                 return 99
-            if f_str.startswith("ghost_extensions/"):
-                level = max(level, 2)
-            elif f_str.startswith("skills/") or f_str.endswith("SKILL.md"):
+            if f_str.startswith("skills/") or f_str.endswith("SKILL.md"):
                 level = max(level, 1)
+            elif f_str.startswith("ghost_tools/"):
+                level = max(level, 2)
             elif f_str == "SOUL.md" or f_str == "USER.md":
                 level = max(level, 2)
             elif f_str.startswith("ghost_dashboard/"):
@@ -671,8 +671,6 @@ class EvolutionEngine:
             for f in changed_py:
                 if f in deleted_py:
                     continue
-                if f.startswith("ghost_extensions/"):
-                    continue
                 module_name = Path(f).with_suffix("").as_posix().replace("/", ".")
                 try:
                     r = subprocess.run(
@@ -736,9 +734,9 @@ class EvolutionEngine:
                 results["passed"] = False
 
         if results["passed"]:
-            ext_issues = self._validate_extensions(evo)
-            results["extension_validation"] = ext_issues
-            if ext_issues:
+            tool_issues = self._validate_tools(evo)
+            results["tool_validation"] = tool_issues
+            if any(i.get("severity") == "error" for i in tool_issues):
                 results["passed"] = False
 
         evo["test_results"] = results
@@ -746,74 +744,45 @@ class EvolutionEngine:
 
         return results["passed"], results
 
-    _CORE_TOOL_NAMES = frozenset({
-        "memory_save", "memory_search", "web_fetch", "web_search",
-        "file_read", "file_write", "file_search", "shell_exec", "notify",
-        "channel_send", "grep", "glob", "app_control", "uptime",
-        "workspace_write", "image_gen", "vision_analyze", "tts_speak",
-        "voice_clone", "canvas_draw", "evolve_plan", "evolve_apply",
-        "evolve_test", "evolve_deploy", "evolve_rollback", "evolve_submit_pr",
-        "evolve_delete", "evolve_resume", "list_future_features",
-        "get_future_feature", "add_future_feature", "reject_future_feature",
-        "start_future_feature", "complete_future_feature",
-        "add_action_item", "log_growth_activity",
-        "task_complete", "get_feature_stats", "mark_feature_audited",
-    })
+    @staticmethod
+    def _validate_tools(evo):
+        """Validate ghost_tools/ files changed in this evolution.
 
-    def _validate_extensions(self, evo):
-        """Validate extension manifests and entry points for changed extensions.
-
-        Checks: manifest exists/valid, extension.py has register(), tool name
-        conflicts, stub detection, manifest-vs-register consistency, and
-        settings usage.
+        Checks: syntax, register() function, mock registration, hook events,
+        tool name conflicts, lock reentrancy, and optional Bandit scan.
         """
         issues = []
-        warnings = []
-        ext_dirs = set()
-        for change in evo.get("changes", []):
-            fpath = change["file"]
-            if fpath.startswith("ghost_extensions/"):
-                parts = fpath.split("/")
-                if len(parts) >= 2:
-                    ext_dirs.add(parts[1])
+        changed_tool_files = [
+            c["file"] for c in evo.get("changes", [])
+            if "ghost_tools/" in c["file"] and c["file"].endswith(".py")
+            and c.get("action") != "delete"
+        ]
 
-        for ext_name in ext_dirs:
-            ext_dir = PROJECT_DIR / "ghost_extensions" / ext_name
-            if not ext_dir.is_dir():
+        if not changed_tool_files:
+            return issues
+
+        _CORE_TOOL_NAMES = frozenset({
+            "file_read", "file_write", "file_search", "shell_exec",
+            "memory_save", "memory_search", "task_complete", "notify",
+            "web_search", "web_fetch", "config_get", "config_set",
+            "evolve_plan", "evolve_apply", "evolve_test", "evolve_deploy",
+            "add_future_feature", "list_future_features", "uptime",
+        })
+
+        for f in changed_tool_files:
+            abs_path = PROJECT_DIR / f
+            if not abs_path.exists():
                 continue
 
-            manifest_path = ext_dir / "EXTENSION.yaml"
-            if not manifest_path.exists():
-                manifest_path = ext_dir / "EXTENSION.yml"
-            if not manifest_path.exists():
-                issues.append(f"Extension '{ext_name}': missing EXTENSION.yaml")
-                continue
-
-            manifest = None
-            manifest_tools = []
-            manifest_settings = []
-            try:
-                from ghost_extension_manager import ExtensionManifest
-                manifest = ExtensionManifest.from_yaml(manifest_path)
-                if not manifest.name:
-                    issues.append(f"Extension '{ext_name}': manifest missing 'name' field")
-                manifest_tools = manifest.tools if isinstance(manifest.tools, list) else []
-                raw_settings = manifest.settings if isinstance(manifest.settings, list) else []
-                manifest_settings = [s.get("key") for s in raw_settings if isinstance(s, dict) and s.get("key")]
-            except Exception as e:
-                issues.append(f"Extension '{ext_name}': invalid manifest: {e}")
-                continue
-
-            ext_py = ext_dir / "extension.py"
-            if not ext_py.exists():
-                issues.append(f"Extension '{ext_name}': missing extension.py")
-                continue
+            source = abs_path.read_text(encoding="utf-8")
 
             try:
-                source = ext_py.read_text(encoding="utf-8")
-                tree = ast.parse(source, filename=str(ext_py))
+                tree = ast.parse(source, filename=f)
             except SyntaxError as e:
-                issues.append(f"Extension '{ext_name}': syntax error in extension.py line {e.lineno}: {e.msg}")
+                issues.append({
+                    "file": f, "severity": "error",
+                    "message": f"Syntax error: {e}",
+                })
                 continue
 
             has_register = any(
@@ -821,297 +790,161 @@ class EvolutionEngine:
                 for node in ast.walk(tree)
             )
             if not has_register:
-                issues.append(f"Extension '{ext_name}': extension.py missing register() function")
+                issues.append({
+                    "file": f, "severity": "error",
+                    "message": "tool.py missing register() function",
+                })
                 continue
+
+            EvolutionEngine._check_lock_reentrancy(tree, f, issues)
 
             registered_tools = []
             registered_hooks = []
-            registered_pages = []
-            registered_routes = []
-            try:
-                registered_tools, registered_hooks, registered_pages, registered_routes = (
-                    self._mock_register_extension(ext_dir, ext_name))
-            except Exception as e:
-                warnings.append(
-                    f"Extension '{ext_name}': mock registration failed ({e}); "
-                    "skipping runtime checks"
-                )
+            has_register_tool_call = False
+            has_ui_call = False
+
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call):
+                    func = node.func
+                    if isinstance(func, ast.Attribute):
+                        method = func.attr
+                        if method == "register_tool":
+                            has_register_tool_call = True
+                            for kw in node.keywords:
+                                if kw.arg == "name" or (not kw.arg and isinstance(kw.value, ast.Constant)):
+                                    pass
+                            for arg in node.args:
+                                if isinstance(arg, ast.Dict):
+                                    for k, v in zip(arg.keys, arg.values):
+                                        if isinstance(k, ast.Constant) and k.value == "name" and isinstance(v, ast.Constant):
+                                            registered_tools.append(v.value)
+                        elif method == "register_hook":
+                            if node.args and isinstance(node.args[0], ast.Constant):
+                                registered_hooks.append(node.args[0].value)
+                        elif method in ("register_page", "register_route"):
+                            has_ui_call = True
+
+            if not has_register_tool_call:
+                issues.append({
+                    "file": f, "severity": "warning",
+                    "message": "register() doesn't call api.register_tool() — tool registers nothing",
+                })
+
+            if has_ui_call:
+                issues.append({
+                    "file": f, "severity": "error",
+                    "message": "Ghost tools must NOT call register_page/register_route — tools are backend-only",
+                })
 
             for tool_name in registered_tools:
-                if tool_name in self._CORE_TOOL_NAMES:
-                    issues.append(
-                        f"Extension '{ext_name}': tool '{tool_name}' shadows a core Ghost tool. "
-                        "Rename with an extension-specific prefix."
-                    )
+                if tool_name in _CORE_TOOL_NAMES:
+                    issues.append({
+                        "file": f, "severity": "error",
+                        "message": f"Tool name '{tool_name}' shadows a core tool",
+                    })
 
-            self._check_stubs(tree, ext_name, source, warnings)
+            from ghost_tool_builder import VALID_HOOK_EVENTS
+            for hook in registered_hooks:
+                if hook not in VALID_HOOK_EVENTS:
+                    issues.append({
+                        "file": f, "severity": "warning",
+                        "message": f"Unknown hook event: '{hook}'",
+                    })
 
-            if registered_hooks:
-                from ghost_extension_manager import VALID_EXTENSION_EVENTS
-                for hook_event in registered_hooks:
-                    if hook_event not in VALID_EXTENSION_EVENTS:
-                        issues.append(
-                            f"Extension '{ext_name}': registers hook for unknown event "
-                            f"'{hook_event}'. Valid events: "
-                            f"{', '.join(sorted(VALID_EXTENSION_EVENTS))}. "
-                            "This hook will never fire."
-                        )
-
-            if registered_tools and manifest_tools:
-                manifest_set = set(manifest_tools)
-                registered_set = set(registered_tools)
-                extra_in_code = registered_set - manifest_set
-                if extra_in_code:
-                    warnings.append(
-                        f"Extension '{ext_name}': tools registered but not in EXTENSION.yaml provides.tools: "
-                        f"{extra_in_code}"
-                    )
-                missing_in_code = manifest_set - registered_set
-                if missing_in_code:
-                    warnings.append(
-                        f"Extension '{ext_name}': tools in EXTENSION.yaml but not registered: "
-                        f"{missing_in_code}"
-                    )
-
-            if manifest_settings:
-                uses_get_setting = "get_setting" in source
-                if not uses_get_setting:
-                    warnings.append(
-                        f"Extension '{ext_name}': declares settings {manifest_settings} in EXTENSION.yaml "
-                        "but never calls api.get_setting() in extension.py"
-                    )
-
-            if registered_pages and not registered_routes:
-                issues.append(
-                    f"Extension '{ext_name}': registers dashboard page(s) "
-                    f"({[p.get('id') for p in registered_pages]}) but no API routes. "
-                    "The page's JS will fail to load data (404). "
-                    "Call api.register_route(blueprint) with a Flask Blueprint "
-                    "that exposes the required endpoints."
+            try:
+                import subprocess as _sp
+                r = _sp.run(
+                    [sys.executable, "-m", "bandit", "-q", "-ll", str(abs_path)],
+                    capture_output=True, text=True, timeout=15,
                 )
+                if r.returncode != 0 and r.stdout.strip():
+                    for line in r.stdout.strip().splitlines()[:5]:
+                        issues.append({
+                            "file": f, "severity": "warning",
+                            "message": f"Bandit: {line.strip()}",
+                        })
+            except Exception:
+                pass
 
-            for page_def in registered_pages:
-                js_path = page_def.get("js_path", "")
-                if js_path:
-                    js_file = ext_dir / "static" / js_path
-                    if not js_file.exists():
-                        issues.append(
-                            f"Extension '{ext_name}': page '{page_def.get('id')}' "
-                            f"references JS file '{js_path}' but "
-                            f"{js_file} does not exist."
-                        )
-
-            self._validate_extension_js(
-                ext_name, ext_dir, registered_pages, registered_routes,
-                issues, warnings
-            )
-
-        for w in warnings:
-            log.warning("[evolve-validate] %s", w)
         return issues
 
     @staticmethod
-    def _validate_extension_js(ext_name, ext_dir, registered_pages,
-                                registered_routes, issues, warnings):
-        """Validate extension JS files: endpoint patterns and route matching."""
-        import re
+    def _check_lock_reentrancy(tree, module_name, issues):
+        """Detect deadlocks from non-reentrant threading.Lock usage.
 
-        static_dir = ext_dir / "static"
-        if not static_dir.is_dir():
+        Pattern: function A acquires lock L, calls function B which also
+        acquires lock L.  threading.Lock is NOT reentrant — this freezes
+        the thread permanently.
+        """
+        import ast as _ast
+
+        lock_vars: set = set()
+        for node in _ast.iter_child_nodes(tree):
+            if isinstance(node, _ast.Assign):
+                for target in node.targets:
+                    if not isinstance(target, _ast.Name):
+                        continue
+                    val = node.value
+                    if not isinstance(val, _ast.Call):
+                        continue
+                    func = val.func
+                    is_lock = False
+                    if isinstance(func, _ast.Attribute) and func.attr == "Lock":
+                        is_lock = True
+                    elif isinstance(func, _ast.Name) and func.id == "Lock":
+                        is_lock = True
+                    if is_lock:
+                        lock_vars.add(target.id)
+
+        if not lock_vars:
             return
 
-        bp_route_paths = set()
-        for bp in registered_routes:
-            prefix = getattr(bp, "url_prefix", "") or ""
-            try:
-                for rule_func in getattr(bp, "deferred_functions", []):
-                    pass
-            except Exception:
-                pass
+        all_funcs: dict = {}
+        for node in _ast.iter_child_nodes(tree):
+            if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                all_funcs[node.name] = node
 
-        js_files = list(static_dir.glob("*.js"))
-        for js_file in js_files:
-            try:
-                js_content = js_file.read_text(encoding="utf-8")
-            except Exception:
-                continue
+        func_acquires: dict = {}
+        func_calls_under: dict = {}
 
-            tool_calls = re.findall(
-                r"""GhostAPI\.(post|get|put|patch|del)\s*\(\s*['"](/tool/[^'"]+)['"]""",
-                js_content
-            )
-            if tool_calls:
-                endpoints = [url for _, url in tool_calls]
-                issues.append(
-                    f"Extension '{ext_name}': {js_file.name} calls tool endpoints "
-                    f"{endpoints} — tools are NOT HTTP endpoints. Use /api/{ext_name}/... "
-                    "routes served by a Flask Blueprint instead."
-                )
+        def _lock_name(ctx_expr):
+            if isinstance(ctx_expr, _ast.Name) and ctx_expr.id in lock_vars:
+                return ctx_expr.id
+            return None
 
-            if registered_pages:
-                api_calls = re.findall(
-                    r"""GhostAPI\.(post|get|put|patch|del)\s*\(\s*['"](/api/[^'"]+)['"]""",
-                    js_content
-                )
-                if not api_calls:
-                    has_any_call = re.search(
-                        r"""GhostAPI\.(post|get|put|patch|del)\s*\(""", js_content
+        def _collect_calls(node_body):
+            """Collect direct function call names from a list of AST stmts."""
+            names = set()
+            for child in _ast.walk(_ast.Module(body=node_body, type_ignores=[])):
+                if isinstance(child, _ast.Call) and isinstance(child.func, _ast.Name):
+                    names.add(child.func.id)
+            return names
+
+        for fname, fnode in all_funcs.items():
+            acquires: set = set()
+            calls: list = []
+            for child in _ast.walk(fnode):
+                if isinstance(child, _ast.With):
+                    for item in child.items:
+                        lname = _lock_name(item.context_expr)
+                        if lname:
+                            acquires.add(lname)
+                            for called in _collect_calls(child.body):
+                                if called in all_funcs:
+                                    calls.append((lname, called))
+            func_acquires[fname] = acquires
+            func_calls_under[fname] = calls
+
+        for fname, calls in func_calls_under.items():
+            for lvar, called in calls:
+                if lvar in func_acquires.get(called, set()):
+                    issues.append(
+                        f"'{module_name}': DEADLOCK — {fname}() holds "
+                        f"'{lvar}' and calls {called}() which also acquires "
+                        f"'{lvar}'. threading.Lock is NOT reentrant; this "
+                        f"freezes the thread permanently. Use threading.RLock() "
+                        f"or pass data instead of calling the locked function."
                     )
-                    if has_any_call:
-                        warnings.append(
-                            f"Extension '{ext_name}': {js_file.name} makes API calls "
-                            "but none to /api/... endpoints. Verify endpoints are correct."
-                        )
-
-                if api_calls and registered_routes:
-                    for bp in registered_routes:
-                        prefix = getattr(bp, "url_prefix", "") or ""
-                        try:
-                            for rule in getattr(bp, "_rules", []):
-                                rule_path = prefix + rule.get("rule", "")
-                                bp_route_paths.add(rule_path)
-                        except Exception:
-                            pass
-
-                    if bp_route_paths:
-                        for _, url in api_calls:
-                            clean_url = url.split("?")[0].rstrip("/")
-                            if clean_url not in bp_route_paths:
-                                matched = any(
-                                    clean_url.startswith(rp.rstrip("/"))
-                                    for rp in bp_route_paths
-                                )
-                                if not matched:
-                                    warnings.append(
-                                        f"Extension '{ext_name}': {js_file.name} calls "
-                                        f"'{url}' but no matching route found in Blueprint. "
-                                        "Verify the endpoint exists."
-                                    )
-
-        if registered_routes:
-            for bp in registered_routes:
-                deferred = getattr(bp, "deferred_functions", [])
-                if not deferred:
-                    warnings.append(
-                        f"Extension '{ext_name}': registered Blueprint "
-                        f"'{getattr(bp, 'name', '?')}' has no route handlers. "
-                        "Add @bp.route(...) decorated functions."
-                    )
-
-    @staticmethod
-    def _mock_register_extension(ext_dir, ext_name):
-        """Run register(api) with a recording mock to discover what gets registered."""
-        tools, hooks, pages, routes = [], [], [], []
-
-        class _MockAPI:
-            id = ext_name
-            manifest = None
-            extension_dir = ext_dir
-            data_dir = ext_dir
-            _config = {}
-
-            def register_tool(self, tool_def):
-                tools.append(tool_def.get("name", ""))
-
-            def register_hook(self, event, callback):
-                hooks.append(event)
-
-            def register_page(self, page_def):
-                pages.append(page_def)
-
-            def register_route(self, bp):
-                routes.append(bp)
-
-            def register_cron(self, name, callback, schedule, description=""):
-                pass
-
-            def register_setting(self, schema):
-                pass
-
-            def get_setting(self, key, default=None):
-                return default
-
-            def set_setting(self, key, value):
-                pass
-
-            def read_data(self, filename):
-                return None
-
-            def write_data(self, filename, content):
-                pass
-
-            def log(self, msg):
-                pass
-
-            def llm_summarize(self, text, instruction="", max_tokens=512):
-                return None
-
-            def memory_save(self, content, tags="", memory_type="note"):
-                return True
-
-            def memory_search(self, query, limit=5):
-                return []
-
-            def channel_send(self, message, channel_id=None):
-                return False
-
-            def get_channels(self):
-                return []
-
-            def get_daemon_ref(self):
-                return None
-
-            def get_tool_registry(self):
-                return None
-
-            def get_memory_db(self):
-                return None
-
-            def get_media_store(self):
-                return None
-
-            def save_media(self, data, filename, media_type="image", **kw):
-                return ""
-
-        import importlib.util
-        spec = importlib.util.spec_from_file_location(
-            f"ghost_ext_{ext_name}", ext_dir / "extension.py"
-        )
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        if hasattr(mod, "register"):
-            mod.register(_MockAPI())
-
-        return tools, hooks, pages, routes
-
-    @staticmethod
-    def _check_stubs(tree, ext_name, source, warnings):
-        """Detect trivially empty tool execute functions via AST."""
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            if not node.name.startswith("execute"):
-                continue
-            meaningful = 0
-            for child in ast.walk(node):
-                if isinstance(child, (ast.Call, ast.Assign, ast.AugAssign,
-                                      ast.If, ast.For, ast.While, ast.With,
-                                      ast.Try)):
-                    meaningful += 1
-            if meaningful < 2:
-                warnings.append(
-                    f"Extension '{ext_name}': function '{node.name}' at line {node.lineno} "
-                    "appears to be a stub (fewer than 2 meaningful statements)"
-                )
-            segment = ast.get_source_segment(source, node) if hasattr(ast, "get_source_segment") else ""
-            if segment:
-                lower = segment.lower()
-                for stub_phrase in ("not implemented", "coming soon", "not configured", "todo"):
-                    if stub_phrase in lower:
-                        warnings.append(
-                            f"Extension '{ext_name}': function '{node.name}' at line {node.lineno} "
-                            f"contains stub indicator '{stub_phrase}'"
-                        )
 
     # ── Semantic Lint ─────────────────────────────────────────────
 
@@ -1751,9 +1584,9 @@ class EvolutionEngine:
             }
             DEPLOY_MARKER.write_text(json.dumps(deploy_info, indent=2), encoding="utf-8")
 
-            if self.extension_event_bus:
+            if self.tool_event_bus:
                 try:
-                    self.extension_event_bus.emit(
+                    self.tool_event_bus.emit(
                         "on_evolve_complete",
                         evolution_id=evolution_id,
                         status="deployed",

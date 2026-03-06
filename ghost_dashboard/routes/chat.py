@@ -652,9 +652,6 @@ def _process_message(session, daemon):
                         "add_future_feature", "list_future_features",
                         "get_future_feature", "get_feature_stats",
                     }
-                    ext_mgr = getattr(daemon, "extension_manager", None)
-                    if ext_mgr:
-                        _ALWAYS_AVAILABLE.update(ext_mgr.get_extension_tools())
                     allowed = skill_tools | _ALWAYS_AVAILABLE
                     scoped_names = [n for n in chat_registry.names() if n in allowed]
                     if scoped_names:
@@ -673,7 +670,7 @@ def _process_message(session, daemon):
                 cancel_check=lambda: session.cancelled,
                 images=image_attachments if image_attachments else None,
                 enable_reasoning=enable_reasoning,
-                extension_event_bus=getattr(daemon, "extension_event_bus", None),
+                    tool_event_bus=getattr(daemon, "tool_event_bus", None),
             )
             session.result = loop_result.text
             session.tools_used = [tc["tool"] for tc in loop_result.tool_calls]

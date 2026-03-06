@@ -1684,7 +1684,7 @@ class ToolLoopEngine:
             max_steps=DEFAULT_MAX_STEPS, temperature=0.3, max_tokens=DEFAULT_MAX_TOKENS,
             image_b64=None, images=None, on_step=None, force_tool=False, history=None,
             cancel_check=None, hook_runner=None, tool_intent_security=None, model_override=None,
-            enable_reasoning=False, extension_event_bus=None):
+            enable_reasoning=False, tool_event_bus=None):
         """
         Run the autonomous tool loop.
 
@@ -1742,9 +1742,9 @@ class ToolLoopEngine:
         else:
             messages.append({"role": "user", "content": user_message})
 
-        if extension_event_bus:
+        if tool_event_bus:
             try:
-                extension_event_bus.emit(
+                tool_event_bus.emit(
                     "on_chat_message",
                     role="user",
                     content=user_message,
@@ -1911,9 +1911,9 @@ class ToolLoopEngine:
                     log.error("Context overflow persists after %d compaction attempts", consecutive_errors)
                     final_text = f"Context overflow — could not reduce context after {consecutive_errors} attempts"
                     exit_reason = "context_overflow"
-                    if extension_event_bus:
+                    if tool_event_bus:
                         try:
-                            extension_event_bus.emit(
+                            tool_event_bus.emit(
                                 "on_tool_loop_error",
                                 session_id=_debug_logger._session_id or "",
                                 error=final_text,
@@ -1926,9 +1926,9 @@ class ToolLoopEngine:
                 if consecutive_errors >= 3:
                     final_text = error
                     exit_reason = "llm_error"
-                    if extension_event_bus:
+                    if tool_event_bus:
                         try:
-                            extension_event_bus.emit(
+                            tool_event_bus.emit(
                                 "on_tool_loop_error",
                                 session_id=_debug_logger._session_id or "",
                                 error=error[:500],
@@ -2110,9 +2110,9 @@ class ToolLoopEngine:
                             if modified_result is not None and isinstance(modified_result, str):
                                 tool_result = modified_result
 
-                        if extension_event_bus:
+                        if tool_event_bus:
                             try:
-                                extension_event_bus.emit(
+                                tool_event_bus.emit(
                                     "on_tool_call",
                                     tool_name=fn_name,
                                     args=exec_args,
@@ -2399,9 +2399,9 @@ class ToolLoopEngine:
                 _ctx_logger._feature_id = _prev_ctx_feature_id
                 _ctx_logger._feature_title = _prev_ctx_feature_title
 
-        if extension_event_bus:
+        if tool_event_bus:
             try:
-                extension_event_bus.emit(
+                tool_event_bus.emit(
                     "on_tool_loop_complete",
                     session_id=_debug_logger._session_id or "",
                     tool_count=len(tool_calls_log),

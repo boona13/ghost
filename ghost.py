@@ -19,6 +19,8 @@ Set OPENROUTER_API_KEY env var or pass --api-key.
 
 import os, sys, json, re, time, subprocess, threading, signal, base64, platform, secrets
 import logging
+from collections import defaultdict
+from collections.abc import Callable
 import requests
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -96,17 +98,14 @@ from ghost_pipeline import PipelineEngine, build_pipeline_tools
 from ghost_node_registry import NodeRegistry, build_node_registry_tools
 from ghost_node_sdk import build_node_sdk_tools
 from ghost_cloud_providers import ProviderRegistry
-from ghost_extension_manager import (
-    ExtensionManager, ExtensionEventBus,
-    build_extension_manager_tools,
-    get_extension_cron_callback,
-)
 from ghost_community_hub import CommunityHub, build_community_hub_tools
+from ghost_tool_builder import ToolManager, ToolEventBus, build_tool_manager_tools
 
 # responses capabilities wiring marker: dashboard-managed feature flags loaded via config/routes
 
 # ── Logging ──────────────────────────────────────────────────────────
 log = logging.getLogger("ghost")
+
 
 # ── Paths ────────────────────────────────────────────────────────────
 GHOST_HOME   = Path.home() / ".ghost"
@@ -333,7 +332,6 @@ DEFAULT_CONFIG = {
     "enable_cron": True,
     "enable_evolve": True,
     "enable_future_features": True,
-    "enable_extensions": True,
     "evolve_auto_approve": False,
     "max_evolutions_per_hour": 25,
     "enable_integrations": True,
@@ -1280,11 +1278,11 @@ class GhostDaemon:
         # ── HuggingFace authentication (needed for gated models like FLUX) ──
         _hf_login(cfg)
 
-        # ── Extension Event Bus (initialized early, used by multiple subsystems) ──
-        self.extension_event_bus = ExtensionEventBus()
+        # ── Tool Event Bus (generic pub/sub for lifecycle hooks) ──
+        self.tool_event_bus = ToolEventBus()
 
         if self.evolve_engine:
-            self.evolve_engine.extension_event_bus = self.extension_event_bus
+            self.evolve_engine.tool_event_bus = self.tool_event_bus
 
         # ── GhostNodes: AI Plugin Ecosystem ─────────────────────────
         self.resource_manager = None
@@ -1298,7 +1296,7 @@ class GhostDaemon:
             try:
                 self.resource_manager = ResourceManager(cfg)
                 self.media_store = MediaStore(cfg)
-                self.media_store.extension_event_bus = self.extension_event_bus
+                self.media_store.tool_event_bus = self.tool_event_bus
                 self.cloud_providers = ProviderRegistry(cfg)
                 self.node_manager = NodeManager(
                     tool_registry=self.tool_registry,
@@ -1356,46 +1354,46 @@ class GhostDaemon:
                 log.info("GhostNodes loaded: %d nodes, %d tools | device=%s",
                          node_count, len(node_tools), device_str)
 
-        # ── Ghost Extensions: Feature Plugin Ecosystem ──────────────
-        self.extension_manager = None
-
-        if cfg.get("enable_extensions", True):
-            try:
-                self.extension_manager = ExtensionManager(
-                    tool_registry=self.tool_registry,
-                    event_bus=self.extension_event_bus,
-                    cron_service=self.cron,
-                    cfg=cfg,
-                    daemon_ref=self,
-                )
-                self.extension_manager.load_all()
-
-                for tool_def in build_extension_manager_tools(self.extension_manager):
-                    self.tool_registry.register(tool_def)
-
-                ext_count = len(self.extension_manager.extensions)
-                ext_tools = self.extension_manager.get_extension_tools()
-                ext_pages = self.extension_manager.get_all_pages()
-                if ext_count:
-                    log.info("Extensions loaded: %d extensions, %d tools, %d pages",
-                             ext_count, len(ext_tools), len(ext_pages))
-            except Exception as e:
-                log.warning("Extension system init error (non-fatal): %s", e, exc_info=True)
-
-        # ── Community Hub: Extension/Node Marketplace ──────────────
+        # ── Community Hub: Node Marketplace ──────────────
         self.community_hub = None
-        if cfg.get("enable_extensions", True):
-            try:
-                gh_token = cfg.get("github_token", "")
-                self.community_hub = CommunityHub(github_token=gh_token)
-                for tool_def in build_community_hub_tools(
-                    self.community_hub,
-                    ext_manager=self.extension_manager,
-                    node_manager=self.node_manager,
-                ):
-                    self.tool_registry.register(tool_def)
-            except Exception as e:
-                log.warning("Community Hub init error (non-fatal): %s", e, exc_info=True)
+        try:
+            gh_token = cfg.get("github_token", "")
+            self.community_hub = CommunityHub(github_token=gh_token)
+            for tool_def in build_community_hub_tools(
+                self.community_hub,
+                node_manager=self.node_manager,
+            ):
+                self.tool_registry.register(tool_def)
+        except Exception as e:
+            log.warning("Community Hub init error (non-fatal): %s", e, exc_info=True)
+
+        # ── Ghost Tool Builder: LLM-callable tool ecosystem ─────
+        self.tool_manager = None
+        try:
+            self.tool_manager = ToolManager(
+                tool_registry=self.tool_registry,
+                event_bus=self.tool_event_bus,
+                cfg=cfg,
+                memory_db=self.memory_db,
+            )
+            self.tool_manager.discover_all()
+            tool_count, tool_names = self.tool_manager.load_all()
+            for tool_def in build_tool_manager_tools(self.tool_manager):
+                self.tool_registry.register(tool_def)
+            if self.cron:
+                for _tname, tinfo in self.tool_manager.tools.items():
+                    for cron_def in tinfo.crons:
+                        self.cron.add_job(
+                            name=cron_def["name"],
+                            schedule=cron_def["schedule"],
+                            payload={"type": "ghost_tool_cron", "callback": cron_def["callback"]},
+                            description=f"Ghost tool cron: {cron_def['name']}",
+                        )
+            if tool_count:
+                log.info("Ghost Tools loaded: %d tools providing %d LLM tools",
+                         tool_count, len(tool_names))
+        except Exception as e:
+            log.warning("ToolManager init error (non-fatal): %s", e, exc_info=True)
 
         # Security Audit tools (self-auditing + auto-fix)
         if cfg.get("enable_security_audit", True):
@@ -1569,10 +1567,6 @@ class GhostDaemon:
             self._user_mtime = mtime
         return self._user_cache
 
-    def _get_extension_tool_names(self) -> list:
-        """Return tool names from loaded extensions (always available in tool selection)."""
-        mgr = getattr(self, "extension_manager", None)
-        return mgr.get_extension_tools() if mgr else []
 
     def _build_identity_context(self):
         """Build the identity preamble from SOUL.md + USER.md.
@@ -1857,54 +1851,6 @@ class GhostDaemon:
             if self.cfg.get("enable_tool_loop", True) and self.tool_registry.get_all():
                 is_evolution_runner = job.get("name") == _FEATURE_IMPLEMENTER_JOB
                 if is_evolution_runner:
-                    system_prompt += (
-                        "\n## EXTENSION ARCHITECTURE (MANDATORY for new features)\n"
-                        "New features MUST be implemented as Ghost extensions in `ghost_extensions/<name>/`.\n"
-                        "Bug fixes and security fixes modify core files as before.\n"
-                        "Each feature's `implementation_type` field indicates the path:\n"
-                        "- `extension`: Build as `ghost_extensions/<name>/` with EXTENSION.yaml + extension.py\n"
-                        "- `core`: Modify core Ghost files directly (bug/security fixes only)\n\n"
-                        "### Extension structure:\n"
-                        "```\n"
-                        "ghost_extensions/<name>/\n"
-                        "  EXTENSION.yaml    # manifest: name, version, provides (tools/routes/pages)\n"
-                        "  extension.py      # register(api) entry point\n"
-                        "  routes/           # optional Flask blueprints\n"
-                        "  static/           # optional JS/CSS for dashboard pages\n"
-                        "```\n\n"
-                        "⚠️ NAMING: Directory names MUST use underscores, NOT hyphens.\n"
-                        "  GOOD: ghost_extensions/my_feature/  BAD: ghost_extensions/my-feature/\n\n"
-                        "### Extension register(api) pattern:\n"
-                        "```python\n"
-                        "def register(api):\n"
-                        "    api.register_tool({...})    # register tools\n"
-                        "    api.register_hook(...)       # subscribe to events\n"
-                        "    api.register_cron(...)       # add cron jobs\n"
-                        "```\n\n"
-                        "### ExtensionAPI full surface:\n"
-                        "Registration:\n"
-                        "- `api.register_tool(tool_def)` — tool_def needs: name, description, parameters, execute\n"
-                        "- `api.register_route(blueprint)` — Flask blueprint for API routes\n"
-                        "- `api.register_page({id, label, icon, js_path})` — SPA dashboard page\n"
-                        "- `api.register_cron(name, callback, schedule, description)` — scheduled task\n"
-                        "- `api.register_hook(event, callback)` — lifecycle events: on_boot, on_chat_message, on_tool_call, on_media_generated, on_evolve_complete, on_shutdown\n"
-                        "Intelligence (USE THESE — do NOT reimplement with regex):\n"
-                        "- `api.llm_summarize(text, instruction, max_tokens=512)` — one-shot LLM call for summarization/extraction/classification\n"
-                        "Memory (USE THESE — do NOT register your own memory_save tool):\n"
-                        "- `api.memory_save(content, tags='', memory_type='note')` — save to Ghost persistent memory\n"
-                        "- `api.memory_search(query, limit=5)` — search Ghost persistent memory\n"
-                        "Channels:\n"
-                        "- `api.channel_send(message, channel_id=None)` — send via Telegram/Slack/etc.\n"
-                        "- `api.get_channels()` — list configured channel IDs\n"
-                        "Settings & Data:\n"
-                        "- `api.get_setting(key)` / `api.set_setting(key, value)` — persistent settings\n"
-                        "- `api.read_data(filename)` / `api.write_data(filename, content)` — persistent data files\n"
-                        "Utilities:\n"
-                        "- `api.save_media(data, filename, media_type)` — save generated media\n"
-                        "- `api.get_daemon_ref()` — access core daemon services (rarely needed)\n\n"
-                        "Use evolve_plan/evolve_apply targeting ghost_extensions/<name>/ paths.\n"
-                        "Do NOT modify ghost.py, ghost_dashboard/routes/__init__.py, or other core files for features.\n"
-                    )
                     _IMPLEMENTER_TOOLS = [
                         # Evolve tools (the whole point of this routine)
                         "evolve_plan", "evolve_apply", "evolve_apply_config",
@@ -1915,9 +1861,6 @@ class GhostDaemon:
                         "start_future_feature", "complete_future_feature",
                         "fail_future_feature", "get_feature_stats",
                         "add_future_feature",
-                        # Extension management
-                        "extensions_list", "extensions_install",
-                        "extensions_enable", "extensions_disable", "extensions_uninstall",
                         # Code reading & searching
                         "file_read", "file_search", "file_write",
                         "grep", "glob", "find_code_patterns",
@@ -1934,6 +1877,10 @@ class GhostDaemon:
                         "memory_save", "memory_search",
                         # Config
                         "config_get", "config_set",
+                        # Tool Builder
+                        "tools_list", "tools_create", "tools_install_github",
+                        "tools_uninstall", "tools_validate",
+                        "tools_enable", "tools_disable",
                         # Completion
                         "task_complete",
                     ]
@@ -1957,7 +1904,7 @@ class GhostDaemon:
                         on_step=terminal_step,
                         hook_runner=self.hooks,
                         tool_intent_security=self.tool_intent_security,
-                        extension_event_bus=self.extension_event_bus,
+                        tool_event_bus=self.tool_event_bus,
                     )
                     result = loop_result.text
                     self._tool_count += len(loop_result.tool_calls)
@@ -2019,8 +1966,16 @@ class GhostDaemon:
             except Exception as e:
                 terminal_print("ask", f"[cron shell] {command[:40]}", f"Error: {e}")
 
+        elif ptype == "ghost_tool_cron":
+            cb = payload.get("callback")
+            if callable(cb):
+                try:
+                    cb()
+                except Exception as e:
+                    log.warning("Tool cron %s failed: %s", job_name, e)
+                    console_bus.emit("error", "cron", job_name, f"Tool cron error: {e}")
+
         elif ptype == "session_maintenance":
-            # Run session cleanup maintenance
             try:
                 from ghost_session_memory import run_maintenance
                 result = run_maintenance(self.cfg)
@@ -2040,31 +1995,11 @@ class GhostDaemon:
                 log.warning("Session maintenance failed: %s", e)
                 console_bus.emit("error", "cron", job_name, f"Session maintenance failed: {e}")
 
-        elif ptype == "extension_cron":
-            ext_id = payload.get("extension_id", "")
-            cb_name = payload.get("callback_name", "")
-            if not ext_id or not cb_name:
-                log.warning("Extension cron missing ext_id or cb_name in job %s", job_name)
-                return
-            cb = get_extension_cron_callback(ext_id, cb_name)
-            if cb:
-                try:
-                    cb()
-                    console_bus.emit(
-                        "success", "cron", job_name,
-                        f"Extension cron completed ({ext_id}/{cb_name})",
-                    )
-                except Exception as e:
-                    log.warning("Extension cron %s/%s failed: %s", ext_id, cb_name, e)
-                    console_bus.emit("error", "cron", job_name, f"Extension cron failed: {e}")
-            else:
-                log.warning("Extension cron callback not found: %s/%s", ext_id, cb_name)
-
     def stop(self, *_):
         console_bus.emit("warn", "system", "daemon_stop", "Ghost shutting down")
-        if getattr(self, "extension_event_bus", None):
+        if getattr(self, "tool_event_bus", None):
             try:
-                self.extension_event_bus.emit("on_shutdown")
+                self.tool_event_bus.emit("on_shutdown")
             except Exception:
                 pass
         self.running = False
@@ -2352,7 +2287,7 @@ class GhostDaemon:
                 force_tool=True,
                 tool_intent_security=self.tool_intent_security,
                 model_override=skill_model,
-                extension_event_bus=self.extension_event_bus,
+                tool_event_bus=self.tool_event_bus,
             )
             reply = loop_result.text
             self._tool_count += len(loop_result.tool_calls)
@@ -2446,8 +2381,7 @@ class GhostDaemon:
                 needed = self.skill_loader.get_tools_for_skills(matched_skills)
                 if needed:
                     always_tools = ["memory_search", "memory_save", "notify"]
-                    ext_tools = self._get_extension_tool_names()
-                    all_names = list(set(needed + always_tools + ext_tools))
+                    all_names = list(set(needed + always_tools))
                     available = tool_reg.names()
                     valid_names = [n for n in all_names if n in available]
                     if valid_names:
@@ -2473,7 +2407,7 @@ class GhostDaemon:
                 hook_runner=self.hooks,
                 tool_intent_security=self.tool_intent_security,
                 model_override=skill_model,
-                extension_event_bus=self.extension_event_bus,
+                tool_event_bus=self.tool_event_bus,
             )
             result = loop_result.text
             self._tool_count += len(loop_result.tool_calls)
@@ -2565,7 +2499,6 @@ class GhostDaemon:
             tool_names = ["memory_search", "memory_save", "notify"]
             if matched_skills:
                 tool_names += self.skill_loader.get_tools_for_skills(matched_skills)
-            tool_names += self._get_extension_tool_names()
             available = self.tool_registry.names()
             valid = [n for n in set(tool_names) if n in available]
             tool_reg = self.tool_registry.subset(valid) if valid else None
@@ -2587,7 +2520,7 @@ class GhostDaemon:
                 hook_runner=self.hooks,
                 tool_intent_security=self.tool_intent_security,
                 model_override=skill_model,
-                extension_event_bus=self.extension_event_bus,
+                tool_event_bus=self.tool_event_bus,
             )
             result = loop_result.text
             tools_used = [tc["tool"] for tc in loop_result.tool_calls]
@@ -2787,7 +2720,7 @@ class GhostDaemon:
                     on_step=terminal_step,
                     hook_runner=self.hooks,
                     tool_intent_security=self.tool_intent_security,
-                    extension_event_bus=self.extension_event_bus,
+                    tool_event_bus=self.tool_event_bus,
                 )
                 result = loop_result.text
                 self._tool_count += len(loop_result.tool_calls)
@@ -2823,7 +2756,7 @@ class GhostDaemon:
                     hook_runner=self.hooks,
                     tool_intent_security=self.tool_intent_security,
                     model_override=None,
-                    extension_event_bus=self.extension_event_bus,
+                    tool_event_bus=self.tool_event_bus,
                 )
                 result = loop_result.text
             else:
@@ -3034,11 +2967,11 @@ class GhostDaemon:
 
         PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
 
-        if self.extension_event_bus:
+        if self.tool_event_bus:
             try:
-                self.extension_event_bus.emit("on_boot")
+                self.tool_event_bus.emit("on_boot")
             except Exception as e:
-                log.warning("Extension on_boot hook error: %s", e)
+                log.warning("on_boot hook error: %s", e)
 
         poll = self.cfg.get("poll_interval", 1.0)
         deploy_marker = Path.home() / ".ghost" / "evolve" / "deploy_pending"
@@ -3545,7 +3478,6 @@ def main():
             "enable_data_extract": False,
             "enable_code_intel": False,
             "enable_sandbox": False,
-            "enable_extensions": False,
         })
         daemon = GhostDaemon(dummy_key, dry_cfg, dry_run=True)
         print("Dry-run: daemon initialized successfully")

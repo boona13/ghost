@@ -1,0 +1,18 @@
+name: _example
+version: 1.0.0
+description: "Example ghost tool — shows the register(api) pattern"
+author: ghost
+category: utility
+enabled: false
+
+tools:
+  - example_greet
+
+hooks:
+  - on_boot
+
+settings:
+  - key: greeting_prefix
+    type: string
+    default: "Hello"
+    label: Greeting Prefix

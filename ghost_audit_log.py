@@ -7,7 +7,6 @@ Stores audit entries in ~/.ghost/audit_log.jsonl (JSON Lines format).
 Logged operations:
 - Config changes (API keys, dangerous settings)
 - Credential operations (save, get, list)
-- Extension operations (install, enable, disable, uninstall)
 - Auth profile operations (set, remove API keys and OAuth tokens)
 """
 
@@ -42,12 +41,6 @@ class AuditAction(str, Enum):
     CREDENTIAL_SAVE = "credential.save"
     CREDENTIAL_GET = "credential.get"
     CREDENTIAL_LIST = "credential.list"
-    
-    # Extension operations
-    EXTENSION_INSTALL = "extension.install"
-    EXTENSION_ENABLE = "extension.enable"
-    EXTENSION_DISABLE = "extension.disable"
-    EXTENSION_UNINSTALL = "extension.uninstall"
     
     # Auth profile operations
     AUTH_PROFILE_SET = "auth_profile.set"
@@ -395,49 +388,6 @@ def audit_credential_save(service: str, success: bool = True, error: str = None)
         action=AuditAction.CREDENTIAL_SAVE,
         resource_type="credential",
         resource_id=service,
-        success=success,
-        error=error,
-    )
-
-
-def audit_extension_install(name: str, source: str, success: bool = True, error: str = None):
-    """Log extension installation."""
-    return get_audit_log().log(
-        action=AuditAction.EXTENSION_INSTALL,
-        resource_type="extension",
-        resource_id=name,
-        success=success,
-        details={"source": source},
-        error=error,
-    )
-
-
-def audit_extension_enable(name: str, success: bool = True):
-    """Log extension enable."""
-    return get_audit_log().log(
-        action=AuditAction.EXTENSION_ENABLE,
-        resource_type="extension",
-        resource_id=name,
-        success=success,
-    )
-
-
-def audit_extension_disable(name: str, success: bool = True):
-    """Log extension disable."""
-    return get_audit_log().log(
-        action=AuditAction.EXTENSION_DISABLE,
-        resource_type="extension",
-        resource_id=name,
-        success=success,
-    )
-
-
-def audit_extension_uninstall(name: str, success: bool = True, error: str = None):
-    """Log extension uninstall."""
-    return get_audit_log().log(
-        action=AuditAction.EXTENSION_UNINSTALL,
-        resource_type="extension",
-        resource_id=name,
         success=success,
         error=error,
     )

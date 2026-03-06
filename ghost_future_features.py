@@ -74,14 +74,11 @@ FEATURE_CATEGORIES = [
 
 
 def _classify_implementation_type(category: str) -> str:
-    """Determine whether a feature should be built as an extension or a core fix.
+    """Classify implementation type for a feature.
 
-    Bug fixes and security fixes modify core Ghost code via the evolve pipeline.
-    New features, improvements, and refactors are built as self-contained extensions.
+    All features are implemented as core changes via the evolve pipeline.
     """
-    if category in (CATEGORY_BUGFIX, CATEGORY_SECURITY):
-        return "core"
-    return "extension"
+    return "core"
 
 
 class FutureFeaturesStore:
@@ -780,7 +777,7 @@ def build_future_features_tools(cfg, on_queue_change=None):
             dep_str = f" [deps: {','.join(deps)}]" if deps else ""
             cat = f.get("category", "")
             cat_str = f" ({cat})" if cat else ""
-            impl_type = f.get("implementation_type", "extension")
+            impl_type = f.get("implementation_type", "core")
             impl_str = f" [{impl_type}]"
             audited_str = " [AUDITED]" if f.get("audited_at") else ""
             cooldown_str = ""
@@ -798,7 +795,7 @@ def build_future_features_tools(cfg, on_queue_change=None):
         f = store.get_by_id(feature_id)
         if not f:
             return f"Feature not found: {feature_id}"
-        impl_type = f.get("implementation_type", "extension")
+        impl_type = f.get("implementation_type", "core")
         lines = [
             f"Feature: {f['title']}",
             f"ID: {f['id']}",
@@ -1011,16 +1008,8 @@ def build_future_features_tools(cfg, on_queue_change=None):
                 "Queue a change for the serial Evolution Runner. "
                 "Do NOT use this for user-requested projects like 'build me a website' — "
                 "do those directly with file_write/shell_exec.\n"
-                "ROUTING RULE: New features/improvements/integrations MUST be designed as "
-                "EXTENSIONS (self-contained plugins in ghost_extensions/<name>/). "
-                "Bug fixes and security fixes modify core Ghost files directly.\n"
-                "For EXTENSIONS: set category='feature' or 'improvement'. In proposed_approach, "
-                "describe the extension structure: what tools it registers, what hooks it uses, "
-                "what dashboard pages it adds. Set affected_files='ghost_extensions/<name>/EXTENSION.yaml, "
-                "ghost_extensions/<name>/extension.py' (plus static/ if it has UI). "
-                "Use UNDERSCORES in names (e.g. my_feature), NEVER hyphens (my-feature).\n"
-                "For BUG/SECURITY FIXES: set category='bugfix' or 'security'. List the actual "
-                "core files that need patching. Be specific about root causes and line numbers.\n"
+                "List the actual files that need to be created or patched in affected_files. "
+                "Be specific about root causes and line numbers for bug fixes.\n"
                 "P0/P1 items trigger the Evolution Runner immediately. "
                 "Write an implementation-ready brief — the Evolution Runner will "
                 "act on your description, affected_files, and proposed_approach WITHOUT "
@@ -1031,8 +1020,8 @@ def build_future_features_tools(cfg, on_queue_change=None):
                 "properties": {
                     "title": {"type": "string", "description": "Short title (e.g. 'Bug fix: crash in chat handler', 'Feature: dark mode toggle')"},
                     "description": {"type": "string", "description": "What and why: describe the problem/opportunity. For bugs: include the error message, traceback snippet, and root cause. For features: what it does and why it matters."},
-                    "affected_files": {"type": "string", "description": "Comma-separated file paths. For extensions: 'ghost_extensions/<name>/EXTENSION.yaml, ghost_extensions/<name>/extension.py'. For bugs: the core files to patch (e.g. 'ghost_tools.py, ghost_dashboard/routes/chat.py'). The Evolution Runner uses this for evolve_plan."},
-                    "proposed_approach": {"type": "string", "description": "Step-by-step implementation plan. For extensions: what tools/hooks/pages/cron to register via ExtensionAPI, what the register(api) function does. For bugs: the exact fix (which function, what to change)."},
+                    "affected_files": {"type": "string", "description": "Comma-separated file paths to create or patch (e.g. 'ghost_tools.py, ghost_dashboard/routes/chat.py'). The Evolution Runner uses this for evolve_plan."},
+                    "proposed_approach": {"type": "string", "description": "Step-by-step implementation plan. The exact fix — which function, what to change, what to add."},
                     "priority": {"type": "string", "enum": ["P0", "P1", "P2", "P3"], "default": "P2", "description": "P0=user-requested(needs approval), P1=urgent(auto), P2=normal(auto), P3=low(manual)"},
                     "source": {"type": "string", "enum": FEATURE_SOURCES, "default": SOURCE_MANUAL, "description": "Where this request came from"},
                     "category": {"type": "string", "enum": FEATURE_CATEGORIES, "default": CATEGORY_FEATURE, "description": "Type: feature/bugfix/security/refactor/improvement/soul_update"},
