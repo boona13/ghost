@@ -230,26 +230,49 @@ class EvolutionEngine:
             backups[0].unlink()
             backups.pop(0)
 
-    def _restore_backup(self, backup_path):
-        """Restore files from a backup archive (project code + config)."""
+    def _restore_backup(self, backup_path, only_files=None):
+        """Restore files from a backup archive (project code + config).
+
+        Args:
+            backup_path: Path to the .tar.gz backup.
+            only_files: If provided, only restore these specific file paths
+                        (relative to PROJECT_DIR).  This prevents wiping
+                        unrelated changes made by other evolutions or the user.
+                        Pass None for a full restore (supervisor crash recovery).
+        """
         bp = Path(backup_path)
         if not bp.exists():
             return False, f"Backup not found: {backup_path}"
 
         config_file = GHOST_HOME / "config.json"
-        with tarfile.open(str(bp), "r:gz") as tar:
-            config_member = None
-            for member in tar.getmembers():
-                if member.name == ".ghost_config_backup.json":
-                    config_member = member
-                    break
-            tar.extractall(path=str(PROJECT_DIR))
-            if config_member:
-                extracted = PROJECT_DIR / ".ghost_config_backup.json"
-                if extracted.exists():
-                    shutil.copy2(str(extracted), str(config_file))
-                    extracted.unlink()
-        return True, "Backup restored (code + config)"
+        try:
+            with tarfile.open(str(bp), "r:gz") as tar:
+                if only_files:
+                    targets = set(only_files)
+                    for member in tar.getmembers():
+                        if member.name == ".ghost_config_backup.json":
+                            continue
+                        if member.name in targets:
+                            tar.extract(member, path=str(PROJECT_DIR))
+                else:
+                    tar.extractall(path=str(PROJECT_DIR))
+
+                config_member = None
+                for member in tar.getmembers():
+                    if member.name == ".ghost_config_backup.json":
+                        config_member = member
+                        break
+                if config_member:
+                    tar.extract(config_member, path=str(PROJECT_DIR))
+                    extracted = PROJECT_DIR / ".ghost_config_backup.json"
+                    if extracted.exists():
+                        shutil.copy2(str(extracted), str(config_file))
+                        extracted.unlink()
+        except Exception as e:
+            return False, f"Restore failed: {e}"
+
+        mode = "selective" if only_files else "full"
+        return True, f"Backup restored ({mode})"
 
     def plan(self, description, files, cfg):
         """Create an evolution plan. Returns (evolution_id, info_dict)."""
@@ -802,8 +825,11 @@ class EvolutionEngine:
                 continue
 
             registered_tools = []
+            registered_pages = []
+            registered_routes = []
             try:
-                registered_tools, _, _ = self._mock_register_extension(ext_dir, ext_name)
+                registered_tools, _, registered_pages, registered_routes = (
+                    self._mock_register_extension(ext_dir, ext_name))
             except Exception as e:
                 warnings.append(
                     f"Extension '{ext_name}': mock registration failed ({e}); "
@@ -843,6 +869,26 @@ class EvolutionEngine:
                         "but never calls api.get_setting() in extension.py"
                     )
 
+            if registered_pages and not registered_routes:
+                issues.append(
+                    f"Extension '{ext_name}': registers dashboard page(s) "
+                    f"({[p.get('id') for p in registered_pages]}) but no API routes. "
+                    "The page's JS will fail to load data (404). "
+                    "Call api.register_route(blueprint) with a Flask Blueprint "
+                    "that exposes the required endpoints."
+                )
+
+            for page_def in registered_pages:
+                js_path = page_def.get("js_path", "")
+                if js_path:
+                    js_file = ext_dir / "static" / js_path
+                    if not js_file.exists():
+                        issues.append(
+                            f"Extension '{ext_name}': page '{page_def.get('id')}' "
+                            f"references JS file '{js_path}' but "
+                            f"{js_file} does not exist."
+                        )
+
         for w in warnings:
             log.warning("[evolve-validate] %s", w)
         return issues
@@ -850,7 +896,7 @@ class EvolutionEngine:
     @staticmethod
     def _mock_register_extension(ext_dir, ext_name):
         """Run register(api) with a recording mock to discover what gets registered."""
-        tools, hooks, pages = [], [], []
+        tools, hooks, pages, routes = [], [], [], []
 
         class _MockAPI:
             id = ext_name
@@ -869,7 +915,7 @@ class EvolutionEngine:
                 pages.append(page_def)
 
             def register_route(self, bp):
-                pass
+                routes.append(bp)
 
             def register_cron(self, name, callback, schedule, description=""):
                 pass
@@ -931,7 +977,7 @@ class EvolutionEngine:
         if hasattr(mod, "register"):
             mod.register(_MockAPI())
 
-        return tools, hooks, pages
+        return tools, hooks, pages, routes
 
     @staticmethod
     def _check_stubs(tree, ext_name, source, warnings):
@@ -1562,13 +1608,25 @@ class EvolutionEngine:
                     time.sleep(2)
                     waited += 2
 
-            # Clean up git feature branch if it exists
+            # Merge evolution changes into main before restarting.
+            # In the PR flow, submit_pr already merged and deleted the branch.
+            # In the direct-deploy flow, changes may still be uncommitted on the
+            # feature branch — commit them, merge to main, then clean up.
             git_branch = evo.get("git_branch")
             if git_branch:
                 try:
                     import ghost_git
                     if ghost_git.current_branch() == git_branch:
-                        ghost_git.stash_and_checkout("main")
+                        r = subprocess.run(
+                            ["git", "status", "--porcelain"],
+                            capture_output=True, text=True, timeout=10,
+                            cwd=str(PROJECT_DIR),
+                        )
+                        if r.stdout.strip():
+                            ghost_git.commit(
+                                f"feat: evolution {evo['id']} — {evo.get('description', '')[:80]}")
+                        ghost_git.checkout("main")
+                        ghost_git.merge(git_branch)
                     ghost_git.delete_branch(git_branch)
                 except Exception:
                     pass
@@ -1919,6 +1977,13 @@ class EvolutionEngine:
         If only_ids is provided, only clean up evolutions with those IDs (scoped to
         the current tool loop run). This prevents accidentally rolling back evolutions
         from other concurrent runs.
+
+        Strategy: git-first, selective-backup-second.
+        1. Switch to main branch (reverts working tree to main's committed state).
+        2. Delete the feature branch.
+        3. Only if git fails, selectively restore ONLY the evolution's changed
+           files from backup — never a full restore that wipes unrelated work.
+
         Returns list of (evo_id, ok, message) tuples.
         """
         results = []
@@ -1930,28 +1995,28 @@ class EvolutionEngine:
                 to_clean.append((evo_id, evo))
 
         for evo_id, evo in to_clean:
-            backup_path = evo.get("backup_path")
-            if backup_path:
-                ok, msg = self._restore_backup(backup_path)
-                self._active_evolutions.pop(evo_id, None)
-                if ok:
-                    results.append((evo_id, True, f"Auto-rolled back incomplete evolution {evo_id}"))
-                else:
-                    results.append((evo_id, False, f"Failed to rollback {evo_id}: {msg}"))
-            else:
-                self._active_evolutions.pop(evo_id, None)
-                results.append((evo_id, False, f"No backup for {evo_id}, removed from active"))
-
-            # Clean up git feature branch
+            git_ok = False
             git_branch = evo.get("git_branch")
+
             if git_branch:
                 try:
                     import ghost_git
                     if ghost_git.current_branch() == git_branch:
                         ghost_git.stash_and_checkout("main")
                     ghost_git.delete_branch(git_branch)
+                    git_ok = True
                 except Exception:
                     pass
+
+            if not git_ok:
+                changed_files = [c["file"] for c in evo.get("changes", []) if c.get("file")]
+                backup_path = evo.get("backup_path")
+                if backup_path and changed_files:
+                    ok, msg = self._restore_backup(backup_path, only_files=changed_files)
+                    if not ok:
+                        results.append((evo_id, False, f"Failed to rollback {evo_id}: {msg}"))
+                        self._active_evolutions.pop(evo_id, None)
+                        continue
 
             for change in evo.get("changes", []):
                 file_path = PROJECT_DIR / change["file"]
@@ -1961,10 +2026,17 @@ class EvolutionEngine:
                     except Exception:
                         pass
 
+            self._active_evolutions.pop(evo_id, None)
+            results.append((evo_id, True, f"Auto-rolled back incomplete evolution {evo_id}"))
+
         return results
 
     def rollback(self, evolution_id=None):
-        """Rollback to a specific evolution's backup, or the most recent."""
+        """Rollback to a specific evolution's backup, or the most recent.
+
+        Uses selective restore when the evolution's changed files are known,
+        falling back to full restore only for legacy/unknown cases.
+        """
         if evolution_id:
             target = None
             for e in reversed(self._history):
@@ -2008,8 +2080,18 @@ class EvolutionEngine:
             except Exception:
                 pass
 
-        ok, msg = self._restore_backup(backup_path)
+        changed_files = [c["file"] for c in target.get("changes", []) if c.get("file")]
+        only = changed_files if changed_files else None
+        ok, msg = self._restore_backup(backup_path, only_files=only)
         if ok:
+            for change in target.get("changes", []):
+                file_path = PROJECT_DIR / change["file"]
+                if file_path.exists() and "(new file)" in change.get("diff", ""):
+                    try:
+                        file_path.unlink()
+                    except Exception:
+                        pass
+
             rollback_entry = {
                 "id": f"rollback_{uuid.uuid4().hex[:8]}",
                 "description": f"Rollback of evolution {target['id']}",
