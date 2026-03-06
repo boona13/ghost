@@ -18,6 +18,8 @@ import re
 import signal
 import subprocess
 import threading
+
+import ghost_platform
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -149,14 +151,13 @@ class MCPClientManager:
                 log.info(f"Starting MCP server \'{server_name}\': {' '.join(cmd_list)}")
 
                 try:
-                    process = subprocess.Popen(
+                    process = ghost_platform.popen_new_session(
                         cmd_list,
                         stdin=subprocess.PIPE,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
                         text=True,
                         env=env,
-                        start_new_session=True,
                     )
                 except FileNotFoundError:
                     future.set_result({"ok": False, "error": f"Command not found: {config.command}"})
@@ -231,17 +232,29 @@ class MCPClientManager:
         start_time = time.time()
 
         try:
+            import queue as _queue
+            line_queue: _queue.Queue = _queue.Queue()
+
+            def _reader():
+                """Read lines from stdout in a background thread (works on all platforms)."""
+                try:
+                    while True:
+                        if conn.process.stdout is None:
+                            break
+                        line = conn.process.stdout.readline()
+                        if not line:
+                            break
+                        line_queue.put(line)
+                except (OSError, ValueError):
+                    pass
+
+            reader_thread = threading.Thread(target=_reader, daemon=True)
+            reader_thread.start()
+
             while time.time() - start_time < timeout:
-                if conn.process.stdout is None:
-                    return {"ok": False, "error": "Server stdout is closed"}
-                import select
-                ready, _, _ = select.select([conn.process.stdout], [], [], 0.5)
-                if not ready:
-                    if not conn.is_alive():
-                        return {"ok": False, "error": "Server process died"}
-                    continue
-                line = conn.process.stdout.readline()
-                if not line:
+                try:
+                    line = line_queue.get(timeout=0.5)
+                except _queue.Empty:
                     if not conn.is_alive():
                         return {"ok": False, "error": "Server process died"}
                     continue
@@ -278,10 +291,7 @@ class MCPClientManager:
                     conn.process.terminate()
                     conn.process.wait(timeout=2.0)
                 except subprocess.TimeoutExpired:
-                    try:
-                        os.killpg(os.getpgid(conn.process.pid), signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
+                    ghost_platform.kill_process_group(conn.process.pid)
                     try:
                         conn.process.kill()
                         conn.process.wait(timeout=1.0)

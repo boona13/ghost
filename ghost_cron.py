@@ -208,7 +208,7 @@ class CronStore:
             mtime = self._path.stat().st_mtime
             if mtime == self._mtime:
                 return
-            data = json.loads(self._path.read_text())
+            data = json.loads(self._path.read_text(encoding="utf-8"))
             self._jobs = data.get("jobs", [])
             self._mtime = mtime
         except Exception:
@@ -218,8 +218,8 @@ class CronStore:
         try:
             tmp = self._path.with_suffix(".tmp")
             data = {"version": 1, "jobs": self._jobs}
-            tmp.write_text(json.dumps(data, indent=2, default=str))
-            tmp.rename(self._path)
+            tmp.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+            tmp.replace(self._path)
             self._mtime = self._path.stat().st_mtime
         except Exception as e:
             print(f"  {RED}[cron] Save error: {e}{RST}")

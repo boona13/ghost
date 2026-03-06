@@ -1,66 +1,130 @@
 """
-Style Transfer Node — apply artistic styles to any image.
+Style Transfer Node — IP-Adapter Plus + SDXL with InstantStyle.
 
-Uses VGG19-based neural style transfer. Supports:
-- Applying style from any reference image
-- Built-in preset styles (configurable)
-- Adjustable style/content balance
+State-of-the-art diffusion-based style transfer using IP-Adapter Plus (ViT-H)
+with the InstantStyle technique. Takes a content image and a style reference
+(painting, artwork, texture) and produces a high-quality stylized result.
+
+Approach:
+  - SDXL img2img preserves the content structure
+  - IP-Adapter Plus (ViT-H encoder) injects style from the reference image
+  - InstantStyle targets only style-specific UNet blocks, preventing
+    content distortion while applying strong, consistent style
+
+Supports CUDA, Apple MPS, and CPU backends.
 """
 
+import io
 import json
 import logging
 import time
-import io
 from pathlib import Path
 
 log = logging.getLogger("ghost.node.style_transfer")
 
-_vgg = None
+_pipe = None
+_device_str = None
+
+STYLE_SCALES = {
+    "style_only": {
+        "up": {"block_0": [0.0, 1.0, 0.0]},
+    },
+    "style_and_layout": {
+        "down": {"block_2": [0.0, 1.0]},
+        "up": {"block_0": [0.0, 1.0, 0.0]},
+    },
+}
 
 
-def _ensure_vgg(api):
-    global _vgg
-    if _vgg is not None:
-        return _vgg
+def _detect_device(api):
+    """Pick the best available device and dtype."""
+    import torch
+
+    device_info = api.resource_manager.device_info
+
+    if device_info.has_cuda:
+        return "cuda", torch.float16
+    if device_info.has_mps:
+        return "mps", torch.float16
+    return "cpu", torch.float32
+
+
+def _load_pipeline(api):
+    """Load SDXL img2img + IP-Adapter Plus ViT-H (lazy, cached)."""
+    global _pipe, _device_str
+
+    if _pipe is not None:
+        api.resource_manager.touch("style-transfer-sdxl")
+        return _pipe
 
     import torch
-    import torchvision.models as models
+    from transformers import CLIPVisionModelWithProjection
+    from diffusers import StableDiffusionXLImg2ImgPipeline
 
-    api.log("Loading VGG19 feature extractor...")
-    device = api.acquire_gpu("vgg19-style", estimated_vram_gb=0.5)
-    _vgg = models.vgg19(weights="IMAGENET1K_V1").features.to(device).eval()
-    for p in _vgg.parameters():
-        p.requires_grad_(False)
-    api.log(f"VGG19 loaded on {device}")
-    return _vgg
+    device, dtype = _detect_device(api)
+    _device_str = device
 
+    api.log("Loading SDXL + IP-Adapter Plus for style transfer (first run downloads ~7 GB)...")
+    gpu_handle = api.acquire_gpu("style-transfer-sdxl", estimated_vram_gb=7.0)
 
-def _gram_matrix(tensor):
-    b, c, h, w = tensor.size()
-    features = tensor.view(b * c, h * w)
-    G = features @ features.T
-    return G / (b * c * h * w)
+    try:
+        cache = str(api.models_dir)
+        hf_token = getattr(api, "hf_token", None)
 
+        image_encoder = CLIPVisionModelWithProjection.from_pretrained(
+            "h94/IP-Adapter",
+            subfolder="models/image_encoder",
+            torch_dtype=dtype,
+            cache_dir=cache,
+        )
 
-def _get_features(model, image, layers=None):
-    if layers is None:
-        layers = {'0': 'conv1_1', '5': 'conv2_1', '10': 'conv3_1',
-                  '19': 'conv4_1', '21': 'conv4_2', '28': 'conv5_1'}
-    features = {}
-    x = image
-    for name, layer in model._modules.items():
-        x = layer(x)
-        if name in layers:
-            features[layers[name]] = x
-    return features
+        pipe = StableDiffusionXLImg2ImgPipeline.from_pretrained(
+            "stabilityai/stable-diffusion-xl-base-1.0",
+            image_encoder=image_encoder,
+            torch_dtype=dtype,
+            cache_dir=cache,
+            token=hf_token,
+        )
+
+        pipe.load_ip_adapter(
+            "h94/IP-Adapter",
+            subfolder="sdxl_models",
+            weight_name="ip-adapter-plus_sdxl_vit-h.safetensors",
+        )
+
+        if device == "cuda":
+            try:
+                pipe.enable_model_cpu_offload()
+            except Exception:
+                pipe.to(device)
+        else:
+            pipe.to(gpu_handle if isinstance(gpu_handle, str) else device)
+
+    except Exception:
+        api.release_gpu("style-transfer-sdxl")
+        raise
+
+    _pipe = pipe
+    api.notify_model_ready("style-transfer-sdxl")
+    api.log(f"Style transfer pipeline ready on {device}")
+    return _pipe
 
 
 def register(api):
 
-    def execute_style_transfer(content_image="", style_image="",
-                                style_weight=1e6, content_weight=1,
-                                steps=300, output_size=512,
-                                filename="", **_kw):
+    def execute_style_transfer(
+        content_image="",
+        style_image="",
+        style_strength=1.0,
+        content_preservation=0.3,
+        prompt="",
+        negative_prompt="",
+        mode="style_only",
+        steps=40,
+        seed=-1,
+        filename="",
+        **_kw,
+    ):
         if not content_image:
             return json.dumps({"status": "error", "error": "content_image is required"})
         if not style_image:
@@ -72,74 +136,64 @@ def register(api):
 
         try:
             import torch
-            import torchvision.transforms as transforms
             from PIL import Image
-            import numpy as np
 
-            vgg = _ensure_vgg(api)
-            device = next(vgg.parameters()).device
-
-            size = min(int(output_size), 1024)
-            transform = transforms.Compose([
-                transforms.Resize((size, size)),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225]),
-            ])
+            pipe = _load_pipeline(api)
 
             content_img = Image.open(content_image).convert("RGB")
             style_img = Image.open(style_image).convert("RGB")
 
-            content_tensor = transform(content_img).unsqueeze(0).to(device)
-            style_tensor = transform(style_img).unsqueeze(0).to(device)
+            w, h = content_img.size
+            max_dim = 1024
+            if max(w, h) > max_dim:
+                ratio = max_dim / max(w, h)
+                w, h = int(w * ratio), int(h * ratio)
+            w = (w // 8) * 8
+            h = (h // 8) * 8
+            content_img = content_img.resize((w, h), Image.LANCZOS)
 
-            target = content_tensor.clone().requires_grad_(True)
-            optimizer = torch.optim.Adam([target], lr=0.003)
+            scale_dict = STYLE_SCALES.get(mode, STYLE_SCALES["style_only"])
+            scaled = {}
+            for block_dir, blocks in scale_dict.items():
+                scaled[block_dir] = {}
+                for block_name, weights in blocks.items():
+                    scaled[block_dir][block_name] = [
+                        v * style_strength for v in weights
+                    ]
+            pipe.set_ip_adapter_scale(scaled)
 
-            content_features = _get_features(vgg, content_tensor)
-            style_features = _get_features(vgg, style_tensor)
+            img2img_strength = max(0.1, min(0.95, 1.0 - content_preservation))
+            steps = max(4, min(steps, 80))
 
-            style_grams = {layer: _gram_matrix(style_features[layer])
-                           for layer in style_features}
+            gen_kwargs = {
+                "prompt": prompt or "masterpiece, best quality, high quality",
+                "image": content_img,
+                "ip_adapter_image": style_img,
+                "strength": img2img_strength,
+                "num_inference_steps": steps,
+                "guidance_scale": 7.5,
+                "negative_prompt": negative_prompt or (
+                    "photo, realistic, text, watermark, lowres, low quality, "
+                    "worst quality, deformed, glitch, noisy, blurry"
+                ),
+            }
 
-            style_layers = {'conv1_1': 1.0, 'conv2_1': 0.75, 'conv3_1': 0.2,
-                            'conv4_1': 0.2, 'conv5_1': 0.2}
+            if seed >= 0:
+                device = _device_str or "cpu"
+                if device == "cuda":
+                    gen_kwargs["generator"] = torch.Generator(device="cuda").manual_seed(seed)
+                else:
+                    gen_kwargs["generator"] = torch.Generator(device="cpu").manual_seed(seed)
 
-            api.log(f"Applying style transfer ({steps} steps)...")
+            api.log(
+                f"Applying style ({mode}, strength={style_strength}, "
+                f"preserve={content_preservation}, steps={steps})..."
+            )
             t0 = time.time()
-
-            for i in range(1, steps + 1):
-                target_features = _get_features(vgg, target)
-
-                content_loss = torch.mean(
-                    (target_features['conv4_2'] - content_features['conv4_2']) ** 2
-                )
-
-                style_loss = 0
-                for layer in style_layers:
-                    target_gram = _gram_matrix(target_features[layer])
-                    style_gram = style_grams[layer]
-                    layer_loss = style_layers[layer] * torch.mean(
-                        (target_gram - style_gram) ** 2
-                    )
-                    style_loss += layer_loss
-
-                total_loss = content_weight * content_loss + style_weight * style_loss
-                optimizer.zero_grad()
-                total_loss.backward()
-                optimizer.step()
-
-                if i % 100 == 0:
-                    api.log(f"Step {i}/{steps}, loss: {total_loss.item():.1f}")
-
+            result = pipe(**gen_kwargs)
             elapsed = time.time() - t0
 
-            result = target.detach().squeeze(0).cpu()
-            mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
-            std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
-            result = result * std + mean
-            result = result.clamp(0, 1)
-            result_img = transforms.ToPILImage()(result)
+            result_img = result.images[0]
 
             buf = io.BytesIO()
             result_img.save(buf, format="PNG")
@@ -147,20 +201,37 @@ def register(api):
 
             ts = time.strftime("%Y%m%d_%H%M%S")
             fname = filename or f"styled_{ts}.png"
+            if not fname.endswith(".png"):
+                fname += ".png"
 
+            gen_params = {
+                "mode": mode,
+                "style_strength": style_strength,
+                "content_preservation": content_preservation,
+                "steps": steps,
+                "seed": seed,
+            }
             path = api.save_media(
-                data=img_bytes, filename=fname, media_type="image",
-                prompt=f"Style transfer: {Path(style_image).stem} -> {Path(content_image).stem}",
-                params={"steps": steps, "style_weight": style_weight},
+                data=img_bytes,
+                filename=fname,
+                media_type="image",
+                prompt=f"Style transfer: {Path(style_image).stem} → {Path(content_image).stem}",
+                params=gen_params,
                 metadata={
                     "content_image": str(content_image),
                     "style_image": str(style_image),
-                    "steps": steps, "elapsed_secs": round(elapsed, 2),
+                    **gen_params,
+                    "elapsed_secs": round(elapsed, 2),
                 },
             )
             return json.dumps({
-                "status": "ok", "path": path,
+                "status": "ok",
+                "path": path,
+                "mode": mode,
+                "style_strength": style_strength,
+                "content_preservation": content_preservation,
                 "steps": steps,
+                "size": f"{w}x{h}",
                 "elapsed_secs": round(elapsed, 2),
             })
 
@@ -171,21 +242,88 @@ def register(api):
     api.register_tool({
         "name": "style_transfer",
         "description": (
-            "Apply the artistic style of one image onto another (local). "
-            "Feed a content photo and a style reference (painting, artwork, texture) "
-            "to create a stylized masterpiece. Uses neural style transfer with VGG19. "
-            "No API key needed."
+            "Apply the artistic style of one image onto another (local, no API key). "
+            "Uses IP-Adapter Plus + SDXL with the InstantStyle technique for "
+            "state-of-the-art style transfer. Feed a content photo and a style "
+            "reference (painting, artwork, texture) to create a stylized result.\n\n"
+            "Two modes:\n"
+            "- style_only (default): transfers colors, textures, brushwork while "
+            "preserving the original composition and layout.\n"
+            "- style_and_layout: transfers both the artistic style AND the spatial "
+            "composition from the reference.\n\n"
+            "Tip: include descriptive words about the style in the prompt for "
+            "stronger results (e.g. 'oil painting, swirling brushstrokes')."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "content_image": {"type": "string", "description": "Path to the content/photo image."},
-                "style_image": {"type": "string", "description": "Path to the style reference image (painting, artwork)."},
-                "style_weight": {"type": "number", "description": "How strongly to apply the style (default: 1000000)."},
-                "content_weight": {"type": "number", "description": "How much to preserve content (default: 1)."},
-                "steps": {"type": "integer", "description": "Optimization steps (more=better, slower). Default: 300."},
-                "output_size": {"type": "integer", "description": "Output image size in pixels (default: 512, max: 1024)."},
-                "filename": {"type": "string", "description": "Output filename (optional)."},
+                "content_image": {
+                    "type": "string",
+                    "description": "Path to the content/photo image to stylize.",
+                },
+                "style_image": {
+                    "type": "string",
+                    "description": (
+                        "Path to the style reference image (painting, artwork, texture)."
+                    ),
+                },
+                "style_strength": {
+                    "type": "number",
+                    "default": 1.0,
+                    "description": (
+                        "How strongly to apply the style (0.0-1.5). "
+                        "Higher = stronger style."
+                    ),
+                },
+                "content_preservation": {
+                    "type": "number",
+                    "default": 0.3,
+                    "description": (
+                        "How much to preserve the original content structure (0.0-0.9). "
+                        "Higher = more faithful to original. "
+                        "Use 0.1-0.2 for heavy stylization, 0.4-0.6 for subtle."
+                    ),
+                },
+                "prompt": {
+                    "type": "string",
+                    "default": "",
+                    "description": (
+                        "Text prompt to guide the stylization. Describe the desired "
+                        "style for best results (e.g. 'van gogh oil painting, "
+                        "swirling brushstrokes, vibrant colors'). Optional."
+                    ),
+                },
+                "negative_prompt": {
+                    "type": "string",
+                    "default": "",
+                    "description": "What to avoid in the output (optional).",
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["style_only", "style_and_layout"],
+                    "default": "style_only",
+                    "description": (
+                        "Transfer mode. 'style_only' preserves layout, "
+                        "'style_and_layout' also transforms composition."
+                    ),
+                },
+                "steps": {
+                    "type": "integer",
+                    "default": 40,
+                    "description": (
+                        "Inference steps (more = better quality, slower). "
+                        "Range: 4-80."
+                    ),
+                },
+                "seed": {
+                    "type": "integer",
+                    "default": -1,
+                    "description": "Random seed for reproducibility (-1 = random).",
+                },
+                "filename": {
+                    "type": "string",
+                    "description": "Output filename (optional).",
+                },
             },
             "required": ["content_image", "style_image"],
         },

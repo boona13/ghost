@@ -17,7 +17,7 @@ def get_feed():
     if not FEED_FILE.exists():
         return jsonify({"entries": []})
     try:
-        entries = json.loads(FEED_FILE.read_text())
+        entries = json.loads(FEED_FILE.read_text(encoding="utf-8"))
         return jsonify({"entries": entries})
     except Exception:
         return jsonify({"entries": []})

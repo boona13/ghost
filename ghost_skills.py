@@ -150,7 +150,7 @@ class Skill:
 def parse_skill_md(path):
     """Parse a SKILL.md file into a Skill object."""
     try:
-        text = path.read_text(errors="replace")
+        text = path.read_text(encoding="utf-8", errors="replace")
     except Exception:
         return None
 

@@ -18,6 +18,9 @@ import logging
 import os
 import re
 import stat
+import sys
+
+import ghost_platform
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -106,7 +109,7 @@ def _check_config_hygiene(cfg: dict) -> list[Finding]:
     config_file = GHOST_HOME / "config.json"
     if config_file.exists():
         try:
-            raw = config_file.read_text()
+            raw = config_file.read_text(encoding="utf-8")
             for pattern, desc in SECRET_PATTERNS:
                 if re.search(pattern, raw):
                     findings.append(Finding(
@@ -223,39 +226,41 @@ def _check_filesystem(cfg: dict) -> list[Finding]:
         GHOST_HOME / "credentials.json",
     ]
 
-    for fpath in sensitive_files:
-        if not fpath.exists():
-            continue
-        try:
-            st = fpath.stat()
-            mode = st.st_mode
-            if mode & stat.S_IROTH:
+    # Unix permission bit checks are meaningless on Windows (NTFS uses ACLs)
+    if not ghost_platform.IS_WIN:
+        for fpath in sensitive_files:
+            if not fpath.exists():
+                continue
+            try:
+                st = fpath.stat()
+                mode = st.st_mode
+                if mode & stat.S_IROTH:
+                    findings.append(Finding(
+                        "filesystem", SEVERITY_CRITICAL,
+                        f"World-readable sensitive file: {fpath.name}",
+                        f"{fpath} is readable by all users (mode: {oct(mode)})",
+                        f"Run: chmod 600 {fpath}",
+                    ))
+                elif mode & stat.S_IRGRP:
+                    findings.append(Finding(
+                        "filesystem", SEVERITY_WARNING,
+                        f"Group-readable sensitive file: {fpath.name}",
+                        f"{fpath} is readable by group (mode: {oct(mode)})",
+                        f"Run: chmod 600 {fpath}",
+                    ))
+            except OSError:
+                pass
+
+        ghost_dir_stat = GHOST_HOME.stat() if GHOST_HOME.exists() else None
+        if ghost_dir_stat:
+            mode = ghost_dir_stat.st_mode
+            if mode & stat.S_IWOTH:
                 findings.append(Finding(
                     "filesystem", SEVERITY_CRITICAL,
-                    f"World-readable sensitive file: {fpath.name}",
-                    f"{fpath} is readable by all users (mode: {oct(mode)})",
-                    f"Run: chmod 600 {fpath}",
+                    "~/.ghost/ directory is world-writable",
+                    f"Directory mode: {oct(mode)}",
+                    "Run: chmod 700 ~/.ghost",
                 ))
-            elif mode & stat.S_IRGRP:
-                findings.append(Finding(
-                    "filesystem", SEVERITY_WARNING,
-                    f"Group-readable sensitive file: {fpath.name}",
-                    f"{fpath} is readable by group (mode: {oct(mode)})",
-                    f"Run: chmod 600 {fpath}",
-                ))
-        except OSError:
-            pass
-
-    ghost_dir_stat = GHOST_HOME.stat() if GHOST_HOME.exists() else None
-    if ghost_dir_stat:
-        mode = ghost_dir_stat.st_mode
-        if mode & stat.S_IWOTH:
-            findings.append(Finding(
-                "filesystem", SEVERITY_CRITICAL,
-                "~/.ghost/ directory is world-writable",
-                f"Directory mode: {oct(mode)}",
-                "Run: chmod 700 ~/.ghost",
-            ))
 
     return findings
 
@@ -267,7 +272,7 @@ def _check_api_key_exposure(cfg: dict) -> list[Finding]:
     log_file = GHOST_HOME / "log.json"
     if log_file.exists():
         try:
-            raw = log_file.read_text()[:100_000]
+            raw = log_file.read_text(encoding="utf-8")[:100_000]
             for pattern, desc in SECRET_PATTERNS:
                 if re.search(pattern, raw):
                     findings.append(Finding(
@@ -283,14 +288,14 @@ def _check_api_key_exposure(cfg: dict) -> list[Finding]:
     debug_log = GHOST_HOME / "logs" / "tool_loop_debug.jsonl"
     if debug_log.exists():
         try:
-            raw = debug_log.read_text()[:100_000]
+            raw = debug_log.read_text(encoding="utf-8")[:100_000]
             for pattern, desc in SECRET_PATTERNS:
                 if re.search(pattern, raw):
                     findings.append(Finding(
                         "api_keys", SEVERITY_WARNING,
                         f"API key found in debug log",
                         f"A {desc} was found in tool_loop_debug.jsonl",
-                        "Purge debug logs: rm ~/.ghost/logs/tool_loop_debug.jsonl",
+                        f"Purge debug logs: delete {GHOST_HOME / 'logs' / 'tool_loop_debug.jsonl'}",
                     ))
                     break
         except Exception:
@@ -315,7 +320,7 @@ def _check_tool_policy(cfg: dict) -> list[Finding]:
         ))
 
     roots = cfg.get("allowed_roots", [])
-    if str(Path("/")) in roots or "/" in roots:
+    if any(ghost_platform.is_root_path(r) for r in roots):
         findings.append(Finding(
             "tools", SEVERITY_CRITICAL,
             "Root filesystem in allowed_roots",
@@ -352,12 +357,12 @@ def _check_dependency_health() -> list[Finding]:
 
     try:
         result = subprocess.run(
-            ["pip", "list", "--outdated", "--format=json"],
+            [sys.executable, "-m", "pip", "list", "--outdated", "--format=json"],
             capture_output=True, text=True, timeout=30,
         )
         if result.returncode == 0:
             outdated = json.loads(result.stdout)
-            req_text = req_file.read_text().lower()
+            req_text = req_file.read_text(encoding="utf-8").lower()
             for pkg in outdated:
                 pkg_name = pkg.get("name", "").lower()
                 if pkg_name in req_text:
@@ -390,7 +395,7 @@ def run_security_audit(cfg: dict = None, categories: list = None) -> dict:
         config_file = GHOST_HOME / "config.json"
         if config_file.exists():
             try:
-                cfg = json.loads(config_file.read_text())
+                cfg = json.loads(config_file.read_text(encoding="utf-8"))
             except Exception:
                 cfg = {}
         else:
@@ -451,7 +456,7 @@ def auto_fix(findings: list) -> list[dict]:
             fpath = GHOST_HOME / fname
             if fpath.exists():
                 try:
-                    fpath.chmod(0o600)
+                    ghost_platform.chmod_safe(fpath, 0o600)
                     actions.append({
                         "action": "chmod",
                         "file": str(fpath),
@@ -466,7 +471,7 @@ def auto_fix(findings: list) -> list[dict]:
 
         if finding.get("category") == "filesystem" and "world-writable" in finding.get("title", ""):
             try:
-                GHOST_HOME.chmod(0o700)
+                ghost_platform.chmod_safe(GHOST_HOME, 0o700)
                 actions.append({
                     "action": "chmod",
                     "file": str(GHOST_HOME),

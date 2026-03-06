@@ -154,7 +154,7 @@ class SkillManager:
     def install_local(self, relative_name: str, content: str, overwrite: bool = False) -> Dict[str, Any]:
         if not isinstance(relative_name, str) or not relative_name.strip():
             raise ValueError("relative_name is required")
-        safe_name = relative_name.strip().strip("/")
+        safe_name = relative_name.strip().strip("/\\")
         if ".." in safe_name:
             raise ValueError("Invalid relative_name")
 
@@ -169,7 +169,7 @@ class SkillManager:
         if not report.get("ok"):
             return {"installed": False, "report": report}
 
-        target_file.write_text(content)
+        target_file.write_text(content, encoding="utf-8")
         return {
             "installed": True,
             "path": str(target_file),

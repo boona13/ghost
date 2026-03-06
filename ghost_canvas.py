@@ -111,7 +111,7 @@ class CanvasEngine:
         with self._lock:
             self._ensure_session()
             p = (CANVAS_ROOT / self._session_id / file_path).resolve()
-            if not str(p).startswith(str(CANVAS_ROOT)):
+            if not p.is_relative_to(CANVAS_ROOT):
                 return "Error: path escapes canvas root"
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(content, encoding="utf-8")
@@ -184,7 +184,7 @@ class CanvasEngine:
             if not self._session_id:
                 return ""
             p = (CANVAS_ROOT / self._session_id / file_path).resolve()
-            if not str(p).startswith(str(CANVAS_ROOT)) or not p.is_file():
+            if not p.is_relative_to(CANVAS_ROOT) or not p.is_file():
                 return ""
             return p.read_text(encoding="utf-8")
 

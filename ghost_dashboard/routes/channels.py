@@ -260,7 +260,7 @@ def inbound_log():
     entries = []
     if INBOUND_LOG_FILE.exists():
         try:
-            entries = json.loads(INBOUND_LOG_FILE.read_text())
+            entries = json.loads(INBOUND_LOG_FILE.read_text(encoding="utf-8"))
         except Exception:
             log.warning("Failed to load inbound log entries", exc_info=True)
     return jsonify({"entries": entries[:limit]})

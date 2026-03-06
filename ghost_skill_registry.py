@@ -115,7 +115,7 @@ class SkillRegistryClient:
         import tempfile
         fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
         try:
-            with os.fdopen(fd, "w") as f:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, default=str)
             os.replace(tmp, str(path))
         except BaseException:
@@ -132,12 +132,12 @@ class SkillRegistryClient:
 
                 # Check metadata for TTL
                 if REGISTRY_META_FILE.exists():
-                    meta = json.loads(REGISTRY_META_FILE.read_text())
+                    meta = json.loads(REGISTRY_META_FILE.read_text(encoding="utf-8"))
                     cached_at = meta.get("cached_at", 0)
                     if time.time() - cached_at > self.cache_ttl:
                         return None
 
-                data = json.loads(REGISTRY_CACHE_FILE.read_text())
+                data = json.loads(REGISTRY_CACHE_FILE.read_text(encoding="utf-8"))
                 return data
             except (json.JSONDecodeError, OSError) as exc:
                 log.warning("Failed to load registry cache: %s", exc)

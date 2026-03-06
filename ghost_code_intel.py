@@ -454,7 +454,7 @@ def make_analyze_code_file():
         except Exception as e:
             return {"error": f"Could not read file: {str(e)}"}
         
-        analyzer = PythonAnalyzer(source, os.path.basename(file_path))
+        analyzer = PythonAnalyzer(source, Path(file_path).name)
         return analyzer.analyze()
     
     return {
@@ -489,7 +489,7 @@ def make_analyze_repository():
         Returns:
             Repository-wide analysis with aggregate metrics and recommendations
         """
-        if not os.path.isdir(repo_path):
+        if not Path(repo_path).is_dir():
             return {"error": f"Not a directory: {repo_path}"}
         
         analyzer = RepositoryAnalyzer(repo_path)

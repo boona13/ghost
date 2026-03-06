@@ -141,7 +141,7 @@ def register(api):
             "type": "object",
             "properties": {
                 "image_path": {"type": "string", "description": "Path to the source image."},
-                "scale": {"type": "integer", "description": "Upscale factor: 2 or 4 (default 4)."},
+                "scale": {"type": "integer", "description": "Upscale factor: 2 or 4 (default 4).", "default": 4},
                 "filename": {"type": "string", "description": "Output filename (optional)."},
             },
             "required": ["image_path"],

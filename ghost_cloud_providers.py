@@ -91,14 +91,19 @@ KNOWN_PROVIDERS = {
         "credits_url": "https://my.runware.ai/",
         "keys_url": "https://my.runware.ai/",
         "models": [
-            "klingai:kling-video@3-pro", "klingai:kling-video@3-standard",
-            "klingai:kling-video@o3-pro", "klingai:kling-video@o3-standard",
-            "runway:1@2", "runway:1@1",
-            "minimax:4@1", "minimax:4@2",
-            "google:3@0", "google:3@2",
+            "klingai:kling-video@3-pro",
+            "klingai:kling-video@3-standard",
+            "klingai:kling-video@o3-pro",
+            "klingai:kling-video@o3-standard",
+            "runway:1@2",
+            "runway:1@1",
+            "minimax:4@1",
+            "minimax:4@2",
+            "google:3@0",
+            "google:3@2",
             "openai:3@2",
         ],
-        "resolutions": ["1920x1080", "1280x720", "960x960", "720x1280", "1080x1920"],
+        "resolutions": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"],
         "durations": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
     },
 }
@@ -389,11 +394,11 @@ class ProviderRegistry:
             try:
                 req = urllib.request.Request(status_url, headers=headers, method="GET")
                 with urllib.request.urlopen(req, timeout=30) as resp:
-                    result = json.loads(resp.read().decode())
+                    result = json.loads(resp.read().decode("utf-8"))
             except urllib.error.HTTPError as e:
                 body = ""
                 try:
-                    body = e.read().decode()[:300]
+                    body = e.read().decode("utf-8", errors="replace")[:300]
                 except Exception:
                     pass
                 raise RuntimeError(f"{log_prefix} API error HTTP {e.code}: {body}")
@@ -445,11 +450,11 @@ class ProviderRegistry:
         req = urllib.request.Request(url, data=body, headers=headers, method="POST")
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return json.loads(resp.read().decode())
+                return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             error_body = ""
             try:
-                error_body = e.read().decode()[:500]
+                error_body = e.read().decode("utf-8", errors="replace")[:500]
             except Exception:
                 pass
             raise RuntimeError(
@@ -473,11 +478,11 @@ class ProviderRegistry:
         req = urllib.request.Request(url, headers=headers, method="GET")
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return json.loads(resp.read().decode())
+                return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             error_body = ""
             try:
-                error_body = e.read().decode()[:500]
+                error_body = e.read().decode("utf-8", errors="replace")[:500]
             except Exception:
                 pass
             raise RuntimeError(
@@ -528,8 +533,32 @@ def test_provider_key(provider_name: str, api_key: str,
     else:
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
+    # Runware validates keys via a POST authentication task
     if provider_name == "runware":
-        return _test_runware_key(api_key, base, info)
+        url = base
+        payload = json.dumps([{"taskType": "authentication", "apiKey": api_key}]).encode()
+        try:
+            req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+            data = result.get("data", [])
+            if data and data[0].get("connectionSessionUUID"):
+                return {"ok": True, "message": "Connected to Runware"}
+            errors = result.get("errors", [])
+            if errors:
+                return {"ok": False, "error": errors[0].get("message", "Authentication failed")}
+            return {"ok": True, "message": "Connected to Runware"}
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                return {"ok": False, "error": "Invalid Runware API key"}
+            body = ""
+            try:
+                body = e.read().decode("utf-8", errors="replace")[:200]
+            except Exception:
+                pass
+            return {"ok": False, "error": f"HTTP {e.code}: {body}"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:200]}
 
     test_endpoints = {
         "kling": "/videos/text2video",
@@ -558,41 +587,7 @@ def test_provider_key(provider_name: str, api_key: str,
             return {"ok": True, "message": f"API key accepted by {info['display_name']}"}
         body = ""
         try:
-            body = e.read().decode()[:200]
-        except Exception:
-            pass
-        return {"ok": False, "error": f"HTTP {e.code}: {body}"}
-    except Exception as e:
-        return {"ok": False, "error": str(e)[:200]}
-
-
-def _test_runware_key(api_key: str, base: str, info: dict) -> dict:
-    """Test Runware API key using their authentication task."""
-    import urllib.request
-    import urllib.error
-
-    payload = json.dumps([{"taskType": "authentication", "apiKey": api_key}]).encode("utf-8")
-    headers = {"Content-Type": "application/json"}
-    try:
-        req = urllib.request.Request(base, data=payload, headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            result = json.loads(resp.read().decode())
-        data = result.get("data", [])
-        if isinstance(data, list) and data:
-            first = data[0]
-            if first.get("connectionSessionUUID") or first.get("taskType") == "authentication":
-                return {"ok": True, "message": f"Connected to {info['display_name']}"}
-        errors = result.get("errors", [])
-        if errors:
-            msg = errors[0].get("message", "Authentication failed")
-            return {"ok": False, "error": msg}
-        return {"ok": True, "message": f"API key accepted by {info['display_name']}"}
-    except urllib.error.HTTPError as e:
-        if e.code == 401:
-            return {"ok": False, "error": "Invalid API key (401 Unauthorized)"}
-        body = ""
-        try:
-            body = e.read().decode()[:200]
+            body = e.read().decode("utf-8", errors="replace")[:200]
         except Exception:
             pass
         return {"ok": False, "error": f"HTTP {e.code}: {body}"}

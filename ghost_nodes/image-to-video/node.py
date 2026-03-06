@@ -58,10 +58,7 @@ def _ensure_pipeline(api, variant="svd"):
     except ImportError:
         raise RuntimeError("Required: pip install torch diffusers transformers imageio imageio-ffmpeg")
 
-    device = api.acquire_gpu(model_id, estimated_vram_gb=6.0)
-    device_str = str(device)
-    if device_str == "mlx":
-        device_str = "mps"
+    device_str = api.acquire_gpu(model_id, estimated_vram_gb=6.0)
     dtype = torch.float16 if "cuda" in device_str else torch.float32
     is_mps = "mps" in device_str
 
@@ -179,11 +176,12 @@ def register(api):
                 "variant": {
                     "type": "string", "enum": ["svd", "svd-xt"],
                     "description": "SVD (14 frames, faster) or SVD-XT (25 frames, smoother). Default: svd.",
+                    "default": "svd",
                 },
-                "fps": {"type": "integer", "description": "Frames per second (default: 7)."},
-                "motion_bucket_id": {"type": "integer", "description": "Motion intensity 1-255 (higher=more motion, default: 127)."},
-                "noise_aug_strength": {"type": "number", "description": "Noise augmentation 0-1 (default: 0.02)."},
-                "steps": {"type": "integer", "description": "Inference steps (default: 25, max: 50)."},
+                "fps": {"type": "integer", "description": "Frames per second (default: 7).", "default": 7},
+                "motion_bucket_id": {"type": "integer", "description": "Motion intensity 1-255 (higher=more motion, default: 127).", "default": 127},
+                "noise_aug_strength": {"type": "number", "description": "Noise augmentation 0-1 (default: 0.02).", "default": 0.02},
+                "steps": {"type": "integer", "description": "Inference steps (default: 25, max: 50).", "default": 25},
                 "filename": {"type": "string", "description": "Output filename (optional)."},
             },
             "required": ["image_path"],

@@ -143,7 +143,7 @@ def get_skill(name):
     if not skill:
         return jsonify({"error": f"Skill '{name}' not found"}), 404
     try:
-        content = Path(skill.path).read_text()
+        content = Path(skill.path).read_text(encoding="utf-8")
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -166,7 +166,7 @@ def update_skill(name):
 
     if "content" in data:
         try:
-            Path(skill.path).write_text(data["content"])
+            Path(skill.path).write_text(data["content"], encoding="utf-8")
             loader.reload()
         except Exception as e:
             return jsonify({"error": str(e)}), 500

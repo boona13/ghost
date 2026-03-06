@@ -94,10 +94,12 @@ def register(api):
                     "type": "string",
                     "enum": ["u2net", "u2net_human_seg", "isnet-general-use"],
                     "description": "Segmentation model. u2net_human_seg is optimized for people.",
+                    "default": "u2net",
                 },
                 "alpha_matting": {
                     "type": "boolean",
                     "description": "Enable alpha matting for smoother edges (slower).",
+                    "default": False,
                 },
                 "filename": {"type": "string", "description": "Output filename (optional)."},
             },

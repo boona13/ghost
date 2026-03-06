@@ -67,7 +67,7 @@ def _now_ts() -> float:
 def _load_json(path: Path) -> dict:
     if path.exists():
         try:
-            return json.loads(path.read_text())
+            return json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             pass
     return {}
@@ -76,7 +76,7 @@ def _load_json(path: Path) -> dict:
 def _save_json(path: Path, data: dict):
     _ensure_dir()
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2, default=str))
+    tmp.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
     tmp.replace(path)
 
 

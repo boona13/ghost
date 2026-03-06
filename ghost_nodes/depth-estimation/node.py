@@ -154,10 +154,12 @@ def register(api):
                 "model_size": {
                     "type": "string", "enum": ["small", "base", "large"],
                     "description": "Model size: small (fast), base (balanced), large (best quality). Default: small.",
+                    "default": "small",
                 },
                 "colorize": {
                     "type": "boolean",
                     "description": "Colorize the depth map (blue=near, red=far). Default: true.",
+                    "default": True,
                 },
                 "filename": {"type": "string", "description": "Output filename (optional)."},
             },

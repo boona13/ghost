@@ -4,7 +4,10 @@ import logging
 import os
 import sys
 import threading
+from pathlib import Path
 from flask import Blueprint, jsonify, request
+
+import ghost_platform
 
 from ghost_dashboard.rate_limiter import rate_limit
 
@@ -100,11 +103,10 @@ def _schedule_restart():
     def _spawn_and_exit():
         import time
         time.sleep(1.5)
-        cmd = [sys.executable, os.path.join(project_dir, "ghost.py")]
+        cmd = [sys.executable, str(Path(project_dir) / "ghost.py")]
         if api_key:
             cmd += ["--api-key", api_key]
-        subprocess.Popen(cmd, cwd=project_dir, start_new_session=True,
-                         stdout=open(os.devnull, "w"), stderr=open(os.devnull, "w"))
+        ghost_platform.popen_detached(cmd, cwd=project_dir)
         time.sleep(1)
         os._exit(0)
 

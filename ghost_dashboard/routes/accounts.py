@@ -12,7 +12,7 @@ CREDENTIALS_FILE = Path.home() / ".ghost" / "credentials.json"
 def _load():
     if CREDENTIALS_FILE.exists():
         try:
-            return json.loads(CREDENTIALS_FILE.read_text())
+            return json.loads(CREDENTIALS_FILE.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return []
     return []
@@ -20,7 +20,7 @@ def _load():
 
 def _save(creds):
     CREDENTIALS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    CREDENTIALS_FILE.write_text(json.dumps(creds, indent=2))
+    CREDENTIALS_FILE.write_text(json.dumps(creds, indent=2), encoding="utf-8")
 
 
 @bp.route("/api/accounts")

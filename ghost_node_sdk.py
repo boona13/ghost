@@ -257,14 +257,14 @@ def scaffold_node(name: str, description: str = "", category: str = "utility",
         tool_name=tool_name,
         input_type=f'"{input_type}"', output_type=f'"{output_type}"',
         tags=f'"{name}", "{category}"',
-    ))
+    ), encoding="utf-8")
 
     (target / "node.py").write_text(NODE_PY_TEMPLATE.format(
         name=name, name_safe=name_safe, description=description or f"A {category} node",
         tool_name=tool_name,
-    ))
+    ), encoding="utf-8")
 
-    (target / "test_node.py").write_text(TEST_PY_TEMPLATE.format(name=name))
+    (target / "test_node.py").write_text(TEST_PY_TEMPLATE.format(name=name), encoding="utf-8")
 
     (target / "README.md").write_text(README_TEMPLATE.format(
         name=name, description=description or f"A {category} node",
@@ -274,10 +274,11 @@ def scaffold_node(name: str, description: str = "", category: str = "utility",
         gpu_text="GPU recommended" if gpu else "CPU only",
         deps_section="- torch (for GPU)" if gpu else "",
         license="MIT",
-    ))
+    ), encoding="utf-8")
 
     (target / "requirements.txt").write_text(
-        "torch\n" if gpu else "# Add dependencies here\n"
+        "torch\n" if gpu else "# Add dependencies here\n",
+        encoding="utf-8",
     )
 
     return {
@@ -319,7 +320,7 @@ def validate_node(node_dir: str) -> dict:
 
     node_py = path / "node.py"
     if node_py.exists():
-        content = node_py.read_text()
+        content = node_py.read_text(encoding="utf-8")
         if "def register(" not in content:
             errors.append("node.py must export a register(api) function")
 

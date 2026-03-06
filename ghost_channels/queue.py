@@ -81,10 +81,10 @@ def _failed_path(entry_id: str) -> Path:
 
 
 def _write_atomic(path: Path, data: dict):
-    """Write JSON atomically via tmp-file + rename."""
+    """Write JSON atomically via tmp-file + replace (cross-platform)."""
     tmp = path.with_suffix(f".{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(data, indent=2, default=str))
-    tmp.rename(path)
+    tmp.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+    tmp.replace(path)
 
 
 def is_permanent_error(error: str) -> bool:
@@ -133,7 +133,7 @@ def fail(entry_id: str, error: str):
     if not path.exists():
         return
     try:
-        entry = json.loads(path.read_text())
+        entry = json.loads(path.read_text(encoding="utf-8"))
         entry["retry_count"] = entry.get("retry_count", 0) + 1
         entry["last_error"] = error
         _write_atomic(path, entry)
@@ -148,7 +148,7 @@ def move_to_failed(entry_id: str):
     dest = _failed_path(entry_id)
     try:
         if src.exists():
-            src.rename(dest)
+            src.replace(dest)
     except Exception as exc:
         log.debug("move_to_failed failed for %s: %s", entry_id, exc)
 
@@ -162,7 +162,7 @@ def load_pending() -> List[QueuedDelivery]:
         if not f.suffix == ".json" or not f.is_file():
             continue
         try:
-            data = json.loads(f.read_text())
+            data = json.loads(f.read_text(encoding="utf-8"))
             entries.append(QueuedDelivery(**{
                 k: data[k] for k in QueuedDelivery.__dataclass_fields__
                 if k in data
@@ -182,7 +182,7 @@ def load_failed() -> List[QueuedDelivery]:
         if not f.suffix == ".json" or not f.is_file():
             continue
         try:
-            data = json.loads(f.read_text())
+            data = json.loads(f.read_text(encoding="utf-8"))
             entries.append(QueuedDelivery(**{
                 k: data[k] for k in QueuedDelivery.__dataclass_fields__
                 if k in data

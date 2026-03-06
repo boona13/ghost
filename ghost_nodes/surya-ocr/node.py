@@ -143,6 +143,7 @@ def register(api):
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Language codes (e.g. ['en', 'ar']). Default: ['en'].",
+                    "default": ["en"],
                 },
             },
             "required": ["image_path"],

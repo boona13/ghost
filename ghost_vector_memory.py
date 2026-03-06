@@ -9,6 +9,7 @@ import os
 import json
 import sqlite3
 import hashlib
+from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime
 from dataclasses import dataclass, asdict
@@ -108,8 +109,9 @@ class VectorMemoryStore:
     """SQLite-backed vector memory store."""
     
     def __init__(self, db_path: Optional[str] = None):
-        self.db_path = db_path or os.path.expanduser("~/.ghost/vector_memory.db")
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        _default = str(Path.home() / ".ghost" / "vector_memory.db")
+        self.db_path = str(db_path) if db_path else _default
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self.embedder = SimpleEmbedding()
         self._init_db()
     

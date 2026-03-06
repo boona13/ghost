@@ -73,6 +73,17 @@ FEATURE_CATEGORIES = [
 ]
 
 
+def _classify_implementation_type(category: str) -> str:
+    """Determine whether a feature should be built as an extension or a core fix.
+
+    Bug fixes and security fixes modify core Ghost code via the evolve pipeline.
+    New features, improvements, and refactors are built as self-contained extensions.
+    """
+    if category in (CATEGORY_BUGFIX, CATEGORY_SECURITY):
+        return "core"
+    return "extension"
+
+
 class FutureFeaturesStore:
     """CRUD for future feature backlog."""
 
@@ -82,13 +93,13 @@ class FutureFeaturesStore:
     def _load(self) -> List[Dict]:
         if FUTURE_FEATURES_FILE.exists():
             try:
-                return json.loads(FUTURE_FEATURES_FILE.read_text())
+                return json.loads(FUTURE_FEATURES_FILE.read_text(encoding="utf-8"))
             except Exception:
                 pass
         return []
 
     def _save(self, items: List[Dict]):
-        FUTURE_FEATURES_FILE.write_text(json.dumps(items, indent=2))
+        FUTURE_FEATURES_FILE.write_text(json.dumps(items, indent=2), encoding="utf-8")
 
     def add(self, title: str, description: str, priority: str = "P2",
             source: str = SOURCE_MANUAL, dependencies: List[str] = None,
@@ -141,6 +152,8 @@ class FutureFeaturesStore:
         if not auto_implement and priority != "P0":
             status = STATUS_APPROVAL_REQUIRED
         
+        impl_type = _classify_implementation_type(category)
+
         feature = {
             "id": uuid.uuid4().hex[:10],
             "title": title,
@@ -148,6 +161,7 @@ class FutureFeaturesStore:
             "priority": priority,
             "priority_score": PRIORITY_LEVELS.get(priority, 50),
             "category": category,
+            "implementation_type": impl_type,
             "source": source,
             "source_detail": source_detail,
             "affected_files": affected_files,
@@ -306,7 +320,7 @@ class FutureFeaturesStore:
         try:
             evolve_history = GHOST_HOME / "evolve" / "history.json"
             if evolve_history.exists():
-                history = json.loads(evolve_history.read_text())
+                history = json.loads(evolve_history.read_text(encoding="utf-8"))
                 for entry in history:
                     if entry.get("status") == "deployed" and entry.get("deployed_at"):
                         try:
@@ -606,14 +620,14 @@ class FeatureChangelog:
     def _load(self) -> List[Dict]:
         if FEATURE_CHANGELOG_FILE.exists():
             try:
-                return json.loads(FEATURE_CHANGELOG_FILE.read_text())
+                return json.loads(FEATURE_CHANGELOG_FILE.read_text(encoding="utf-8"))
             except Exception:
                 pass
         return []
 
     def _save(self, entries: List[Dict]):
         entries = entries[:500]  # Keep last 500
-        FEATURE_CHANGELOG_FILE.write_text(json.dumps(entries, indent=2))
+        FEATURE_CHANGELOG_FILE.write_text(json.dumps(entries, indent=2), encoding="utf-8")
 
     def add(self, feature: Dict, implementation_summary: str = ""):
         """Add a completed feature to the changelog."""
@@ -766,6 +780,8 @@ def build_future_features_tools(cfg, on_queue_change=None):
             dep_str = f" [deps: {','.join(deps)}]" if deps else ""
             cat = f.get("category", "")
             cat_str = f" ({cat})" if cat else ""
+            impl_type = f.get("implementation_type", "extension")
+            impl_str = f" [{impl_type}]"
             audited_str = " [AUDITED]" if f.get("audited_at") else ""
             cooldown_str = ""
             if f.get("retry_after"):
@@ -774,7 +790,7 @@ def build_future_features_tools(cfg, on_queue_change=None):
                         cooldown_str = " ⏳cooldown"
                 except (ValueError, TypeError):
                     pass
-            lines.append(f"  {status_emoji} [{f['id']}] {f['title']} [{f.get('priority', '?')}]{cat_str}{dep_str}{audited_str}{cooldown_str}")
+            lines.append(f"  {status_emoji} [{f['id']}] {f['title']} [{f.get('priority', '?')}]{cat_str}{impl_str}{dep_str}{audited_str}{cooldown_str}")
         return "\n".join(lines)
 
     def _get_future_feature(feature_id: str):
@@ -782,11 +798,13 @@ def build_future_features_tools(cfg, on_queue_change=None):
         f = store.get_by_id(feature_id)
         if not f:
             return f"Feature not found: {feature_id}"
+        impl_type = f.get("implementation_type", "extension")
         lines = [
             f"Feature: {f['title']}",
             f"ID: {f['id']}",
             f"Priority: {f.get('priority', 'unknown')}",
             f"Category: {f.get('category', 'feature')}",
+            f"Implementation Type: {impl_type}",
             f"Status: {f.get('status', 'unknown')}",
             f"Source: {f.get('source', 'unknown')}",
             f"Effort: {f.get('estimated_effort', 'unknown')}",
@@ -990,23 +1008,30 @@ def build_future_features_tools(cfg, on_queue_change=None):
         {
             "name": "add_future_feature",
             "description": (
-                "Queue a change to GHOST'S OWN codebase for the serial Evolution Runner. "
-                "ONLY for modifications to Ghost itself (ghost.py, ghost_*.py, ghost_dashboard/*, "
-                "skills/*, etc.). Do NOT use this for user-requested projects like 'build me a "
-                "website' or 'write a script' — do those directly with file_write/shell_exec. "
+                "Queue a change for the serial Evolution Runner. "
+                "Do NOT use this for user-requested projects like 'build me a website' — "
+                "do those directly with file_write/shell_exec.\n"
+                "ROUTING RULE: New features/improvements/integrations MUST be designed as "
+                "EXTENSIONS (self-contained plugins in ghost_extensions/<name>/). "
+                "Bug fixes and security fixes modify core Ghost files directly.\n"
+                "For EXTENSIONS: set category='feature' or 'improvement'. In proposed_approach, "
+                "describe the extension structure: what tools it registers, what hooks it uses, "
+                "what dashboard pages it adds. Set affected_files='ghost_extensions/<name>/EXTENSION.yaml, "
+                "ghost_extensions/<name>/extension.py' (plus static/ if it has UI).\n"
+                "For BUG/SECURITY FIXES: set category='bugfix' or 'security'. List the actual "
+                "core files that need patching. Be specific about root causes and line numbers.\n"
                 "P0/P1 items trigger the Evolution Runner immediately. "
                 "Write an implementation-ready brief — the Evolution Runner will "
                 "act on your description, affected_files, and proposed_approach WITHOUT "
-                "re-doing your investigation. Be specific about root causes, file paths, "
-                "line numbers, and exact changes needed."
+                "re-doing your investigation."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "title": {"type": "string", "description": "Short title (e.g. 'Bug fix: crash in chat handler', 'Feature: dark mode toggle')"},
                     "description": {"type": "string", "description": "What and why: describe the problem/opportunity. For bugs: include the error message, traceback snippet, and root cause. For features: what it does and why it matters."},
-                    "affected_files": {"type": "string", "description": "Comma-separated file paths that need changes (e.g. 'ghost_dashboard/routes/chat.py, ghost_tools.py'). The Evolution Runner uses this for evolve_plan."},
-                    "proposed_approach": {"type": "string", "description": "Step-by-step implementation plan. For bugs: the exact fix (which function, what to change). For features: architecture decisions, which patterns to follow, which existing code to reference."},
+                    "affected_files": {"type": "string", "description": "Comma-separated file paths. For extensions: 'ghost_extensions/<name>/EXTENSION.yaml, ghost_extensions/<name>/extension.py'. For bugs: the core files to patch (e.g. 'ghost_tools.py, ghost_dashboard/routes/chat.py'). The Evolution Runner uses this for evolve_plan."},
+                    "proposed_approach": {"type": "string", "description": "Step-by-step implementation plan. For extensions: what tools/hooks/pages/cron to register via ExtensionAPI, what the register(api) function does. For bugs: the exact fix (which function, what to change)."},
                     "priority": {"type": "string", "enum": ["P0", "P1", "P2", "P3"], "default": "P2", "description": "P0=user-requested(needs approval), P1=urgent(auto), P2=normal(auto), P3=low(manual)"},
                     "source": {"type": "string", "enum": FEATURE_SOURCES, "default": SOURCE_MANUAL, "description": "Where this request came from"},
                     "category": {"type": "string", "enum": FEATURE_CATEGORIES, "default": CATEGORY_FEATURE, "description": "Type: feature/bugfix/security/refactor/improvement/soul_update"},

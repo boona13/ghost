@@ -15,12 +15,14 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import ghost_platform
+
 PROJECT_DIR = Path(__file__).resolve().parent
 GHOST_DIR = Path.home() / ".ghost"
 SANDBOX_DIR = GHOST_DIR / "sandbox"
 REGISTRY_FILE = SANDBOX_DIR / "containers.json"
 
-BLOCKED_HOST_PATHS = {"/etc", "/proc", "/sys", "/dev", "/root", "/run/docker.sock"}
+BLOCKED_HOST_PATHS = ghost_platform.blocked_host_paths()
 BLOCKED_NETWORK_MODES = {"host"}
 HOT_CONTAINER_GRACE_SEC = 300
 PRUNE_MIN_INTERVAL_SEC = 300
@@ -230,14 +232,14 @@ class SandboxRegistry:
         if not self._path.exists():
             return []
         try:
-            data = json.loads(self._path.read_text())
+            data = json.loads(self._path.read_text(encoding="utf-8"))
             return data if isinstance(data, list) else []
         except (json.JSONDecodeError, OSError):
             return []
 
     def _write_raw(self, entries: list[dict]):
         tmp = self._path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(entries, indent=2))
+        tmp.write_text(json.dumps(entries, indent=2), encoding="utf-8")
         tmp.replace(self._path)
 
     def read(self) -> list[dict]:

@@ -134,10 +134,12 @@ def register(api):
                 "voice_preset": {
                     "type": "string",
                     "description": "Voice preset (e.g. v2/en_speaker_6). Default: v2/en_speaker_6.",
+                    "default": "v2/en_speaker_6",
                 },
                 "small_model": {
                     "type": "boolean",
                     "description": "Use smaller/faster model (lower quality). Default: false.",
+                    "default": False,
                 },
                 "filename": {"type": "string", "description": "Output filename (optional)."},
             },

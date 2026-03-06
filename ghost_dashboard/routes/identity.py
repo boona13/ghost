@@ -14,7 +14,7 @@ bp = Blueprint("identity", __name__)
 
 @bp.route("/api/soul")
 def get_soul():
-    content = SOUL_FILE.read_text() if SOUL_FILE.exists() else ""
+    content = SOUL_FILE.read_text(encoding="utf-8") if SOUL_FILE.exists() else ""
     return jsonify({"content": content, "path": str(SOUL_FILE)})
 
 
@@ -22,19 +22,19 @@ def get_soul():
 def put_soul():
     data = request.get_json(silent=True) or {}
     content = data.get("content", "")
-    SOUL_FILE.write_text(content)
+    SOUL_FILE.write_text(content, encoding="utf-8")
     return jsonify({"ok": True, "chars": len(content)})
 
 
 @bp.route("/api/soul/reset", methods=["POST"])
 def reset_soul():
-    SOUL_FILE.write_text(DEFAULT_SOUL)
+    SOUL_FILE.write_text(DEFAULT_SOUL, encoding="utf-8")
     return jsonify({"ok": True, "content": DEFAULT_SOUL})
 
 
 @bp.route("/api/user")
 def get_user():
-    content = USER_FILE.read_text() if USER_FILE.exists() else ""
+    content = USER_FILE.read_text(encoding="utf-8") if USER_FILE.exists() else ""
     return jsonify({"content": content, "path": str(USER_FILE)})
 
 
@@ -42,12 +42,12 @@ def get_user():
 def put_user():
     data = request.get_json(silent=True) or {}
     content = data.get("content", "")
-    USER_FILE.write_text(content)
+    USER_FILE.write_text(content, encoding="utf-8")
     return jsonify({"ok": True, "chars": len(content)})
 
 
 @bp.route("/api/user/reset", methods=["POST"])
 def reset_user():
     content = DEFAULT_USER % {"os": platform.system()}
-    USER_FILE.write_text(content)
+    USER_FILE.write_text(content, encoding="utf-8")
     return jsonify({"ok": True, "content": content})

@@ -49,10 +49,17 @@ def _normalize_file_path(file_path: str) -> Path:
         proj_rel = str(PROJECT_DIR.relative_to(Path.home()))
     except ValueError:
         proj_rel = ""
-    if proj_rel and rel_str.startswith(proj_rel + "/"):
-        rel_str = rel_str[len(proj_rel) + 1:]
-    elif rel_str.startswith(proj_name + "/"):
-        rel_str = rel_str[len(proj_name) + 1:]
+    rel_path = Path(rel_str)
+    if proj_rel:
+        try:
+            rel_str = str(rel_path.relative_to(proj_rel))
+            rel_path = Path(rel_str)
+        except ValueError:
+            pass
+    try:
+        rel_str = str(rel_path.relative_to(proj_name))
+    except ValueError:
+        pass
     return (PROJECT_DIR / rel_str).resolve()
 
 EVOLVE_DIR.mkdir(parents=True, exist_ok=True)
@@ -96,6 +103,7 @@ class EvolutionEngine:
         self._active_evolutions = {}
         self._history = self._load_history()
         self._active_jobs_fn = None  # Set by GhostDaemon to check cron status
+        self.extension_event_bus = None  # Set by GhostDaemon for hook emission
         self._cleanup_orphaned_pending()
 
     def _cleanup_orphaned_pending(self):
@@ -126,7 +134,7 @@ class EvolutionEngine:
     def _load_history(self):
         if HISTORY_FILE.exists():
             try:
-                return json.loads(HISTORY_FILE.read_text())
+                return json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
             except Exception:
                 pass
         return []
@@ -158,7 +166,9 @@ class EvolutionEngine:
             basename = Path(f_str).name
             if basename in PROTECTED_FILES:
                 return 99
-            if f_str.startswith("skills/") or f_str.endswith("SKILL.md"):
+            if f_str.startswith("ghost_extensions/"):
+                level = max(level, 2)
+            elif f_str.startswith("skills/") or f_str.endswith("SKILL.md"):
                 level = max(level, 1)
             elif f_str == "SOUL.md" or f_str == "USER.md":
                 level = max(level, 2)
@@ -295,7 +305,7 @@ class EvolutionEngine:
 
             if needs_approval:
                 pending_file = PENDING_DIR / f"{evolution_id}.json"
-                pending_file.write_text(json.dumps(evo, indent=2))
+                pending_file.write_text(json.dumps(evo, indent=2), encoding="utf-8")
 
             return evolution_id, {
                 "evolution_id": evolution_id,
@@ -312,7 +322,7 @@ class EvolutionEngine:
         if not evo:
             pending_file = PENDING_DIR / f"{evolution_id}.json"
             if pending_file.exists():
-                evo = json.loads(pending_file.read_text())
+                evo = json.loads(pending_file.read_text(encoding="utf-8"))
                 self._active_evolutions[evolution_id] = evo
             else:
                 return False, "Evolution not found"
@@ -374,7 +384,7 @@ class EvolutionEngine:
         rel_path = file_path
         abs_path = _normalize_file_path(rel_path)
 
-        if not str(abs_path).startswith(str(PROJECT_DIR.resolve())):
+        if not abs_path.is_relative_to(PROJECT_DIR.resolve()):
             return False, (
                 f"Cannot write outside the project directory. "
                 f"Path '{file_path}' resolves to '{abs_path}' which is outside '{PROJECT_DIR}'. "
@@ -388,7 +398,7 @@ class EvolutionEngine:
         old_content = ""
         file_exists = abs_path.exists()
         if file_exists:
-            old_content = abs_path.read_text()
+            old_content = abs_path.read_text(encoding="utf-8")
 
         if not file_exists and patches and content is None:
             return False, (
@@ -477,7 +487,7 @@ class EvolutionEngine:
             )
 
         abs_path.parent.mkdir(parents=True, exist_ok=True)
-        abs_path.write_text(new_content)
+        abs_path.write_text(new_content, encoding="utf-8")
 
         diff = list(difflib.unified_diff(
             old_content.splitlines(keepends=True),
@@ -540,13 +550,13 @@ class EvolutionEngine:
         old_cfg = {}
         if config_file.exists():
             try:
-                old_cfg = json.loads(config_file.read_text())
+                old_cfg = json.loads(config_file.read_text(encoding="utf-8"))
             except Exception:
                 pass
 
         old_values = {k: old_cfg.get(k, "(unset)") for k in updates}
         new_cfg = {**old_cfg, **updates}
-        config_file.write_text(json.dumps(new_cfg, indent=2))
+        config_file.write_text(json.dumps(new_cfg, indent=2), encoding="utf-8")
 
         diff_lines = []
         for k, new_val in updates.items():
@@ -621,7 +631,7 @@ class EvolutionEngine:
             if not abs_path.exists():
                 continue
             try:
-                source = abs_path.read_text()
+                source = abs_path.read_text(encoding="utf-8")
                 ast.parse(source, filename=f)
                 ok, output = True, None
             except SyntaxError as e:
@@ -638,7 +648,7 @@ class EvolutionEngine:
             for f in changed_py:
                 if f in deleted_py:
                     continue
-                module_name = f.replace("/", ".").replace(".py", "")
+                module_name = Path(f).with_suffix("").as_posix().replace("/", ".")
                 try:
                     r = subprocess.run(
                         [sys.executable, "-c", f"import {module_name}"],
@@ -700,10 +710,67 @@ class EvolutionEngine:
             if lint_issues:
                 results["passed"] = False
 
+        if results["passed"]:
+            ext_issues = self._validate_extensions(evo)
+            results["extension_validation"] = ext_issues
+            if ext_issues:
+                results["passed"] = False
+
         evo["test_results"] = results
         evo["status"] = "tested_pass" if results["passed"] else "tested_fail"
 
         return results["passed"], results
+
+    def _validate_extensions(self, evo):
+        """Validate extension manifests and entry points for changed extensions."""
+        issues = []
+        ext_dirs = set()
+        for change in evo.get("changes", []):
+            fpath = change["file"]
+            if fpath.startswith("ghost_extensions/"):
+                parts = fpath.split("/")
+                if len(parts) >= 2:
+                    ext_dirs.add(parts[1])
+
+        for ext_name in ext_dirs:
+            ext_dir = PROJECT_DIR / "ghost_extensions" / ext_name
+            if not ext_dir.is_dir():
+                continue
+
+            manifest_path = ext_dir / "EXTENSION.yaml"
+            if not manifest_path.exists():
+                manifest_path = ext_dir / "EXTENSION.yml"
+            if not manifest_path.exists():
+                issues.append(f"Extension '{ext_name}': missing EXTENSION.yaml")
+                continue
+
+            try:
+                from ghost_extension_manager import ExtensionManifest
+                manifest = ExtensionManifest.from_yaml(manifest_path)
+                if not manifest.name:
+                    issues.append(f"Extension '{ext_name}': manifest missing 'name' field")
+            except Exception as e:
+                issues.append(f"Extension '{ext_name}': invalid manifest: {e}")
+                continue
+
+            ext_py = ext_dir / "extension.py"
+            if not ext_py.exists():
+                issues.append(f"Extension '{ext_name}': missing extension.py")
+                continue
+
+            try:
+                source = ext_py.read_text(encoding="utf-8")
+                tree = ast.parse(source, filename=str(ext_py))
+                has_register = any(
+                    isinstance(node, ast.FunctionDef) and node.name == "register"
+                    for node in ast.walk(tree)
+                )
+                if not has_register:
+                    issues.append(f"Extension '{ext_name}': extension.py missing register() function")
+            except SyntaxError as e:
+                issues.append(f"Extension '{ext_name}': syntax error in extension.py line {e.lineno}: {e.msg}")
+
+        return issues
 
     # ── Semantic Lint ─────────────────────────────────────────────
 
@@ -757,7 +824,7 @@ class EvolutionEngine:
             if not abs_path.exists():
                 continue
             try:
-                source = abs_path.read_text()
+                source = abs_path.read_text(encoding="utf-8")
             except Exception:
                 continue
             lines = source.split("\n")
@@ -790,7 +857,7 @@ class EvolutionEngine:
                         _is_callable = False
                         try:
                             if _src_mod.exists():
-                                _src_text = _src_mod.read_text()
+                                _src_text = _src_mod.read_text(encoding="utf-8")
                                 if re.search(rf'^(def|class)\s+{re.escape(name)}\b', _src_text, re.MULTILINE):
                                     _is_callable = True
                         except Exception:
@@ -858,7 +925,7 @@ class EvolutionEngine:
                         cache_key = f"{mod_name}.{cls_real}"
                         if cache_key not in class_methods_cache:
                             try:
-                                src_tree = ast.parse(src_path.read_text(), filename=str(src_path))
+                                src_tree = ast.parse(src_path.read_text(encoding="utf-8"), filename=str(src_path))
                             except (SyntaxError, OSError):
                                 continue
                             methods = set()
@@ -1323,7 +1390,17 @@ class EvolutionEngine:
                 "backup_path": evo["backup_path"],
                 "timestamp": time.time(),
             }
-            DEPLOY_MARKER.write_text(json.dumps(deploy_info, indent=2))
+            DEPLOY_MARKER.write_text(json.dumps(deploy_info, indent=2), encoding="utf-8")
+
+            if self.extension_event_bus:
+                try:
+                    self.extension_event_bus.emit(
+                        "on_evolve_complete",
+                        evolution_id=evolution_id,
+                        status="deployed",
+                    )
+                except Exception:
+                    pass
 
         return True, (
             f"Evolution {evolution_id} deployed. "
@@ -1344,7 +1421,7 @@ class EvolutionEngine:
         rel_path = file_path
         abs_path = _normalize_file_path(rel_path)
 
-        if not str(abs_path).startswith(str(PROJECT_DIR.resolve())):
+        if not abs_path.is_relative_to(PROJECT_DIR.resolve()):
             return False, (
                 f"Cannot delete outside the project directory. "
                 f"Path '{file_path}' resolves to '{abs_path}' which is outside '{PROJECT_DIR}'."
@@ -1356,7 +1433,7 @@ class EvolutionEngine:
         if not abs_path.exists():
             return False, f"File not found: {rel_path}"
 
-        old_content = abs_path.read_text() if abs_path.is_file() else ""
+        old_content = abs_path.read_text(encoding="utf-8") if abs_path.is_file() else ""
         abs_path.unlink()
 
         evo["changes"].append({
@@ -1388,7 +1465,7 @@ class EvolutionEngine:
         log = []
         if DELETED_FILES_LOG.exists():
             try:
-                log = json.loads(DELETED_FILES_LOG.read_text())
+                log = json.loads(DELETED_FILES_LOG.read_text(encoding="utf-8"))
             except Exception:
                 log = []
         log.append({
@@ -1398,7 +1475,7 @@ class EvolutionEngine:
             "timestamp": time.time(),
             "deleted_at": datetime.now().isoformat(),
         })
-        DELETED_FILES_LOG.write_text(json.dumps(log, indent=2))
+        DELETED_FILES_LOG.write_text(json.dumps(log, indent=2), encoding="utf-8")
 
     def _test_api_routes(self, evo):
         """Smoke-test new/modified API route files + static contract analysis.
@@ -1435,7 +1512,7 @@ class EvolutionEngine:
             if not abs_path.exists():
                 continue
             try:
-                source = abs_path.read_text()
+                source = abs_path.read_text(encoding="utf-8")
             except OSError:
                 continue
 
@@ -1521,7 +1598,7 @@ class EvolutionEngine:
             if not abs_path.exists():
                 continue
             try:
-                py_source = abs_path.read_text()
+                py_source = abs_path.read_text(encoding="utf-8")
             except OSError:
                 continue
 
@@ -1553,7 +1630,7 @@ class EvolutionEngine:
                 if js_dir.is_dir():
                     for js_file in js_dir.glob("*.js"):
                         try:
-                            content = js_file.read_text()
+                            content = js_file.read_text(encoding="utf-8")
                             if endpoint in content:
                                 js_sources.append((js_file.name, content))
                         except OSError:
@@ -1612,7 +1689,7 @@ class EvolutionEngine:
             if py_file.name == Path(deleted_rel_path).name:
                 continue
             try:
-                lines = py_file.read_text().splitlines()
+                lines = py_file.read_text(encoding="utf-8").splitlines()
                 hit_lines = []
                 for i, line in enumerate(lines, 1):
                     stripped = line.strip()
@@ -1625,7 +1702,7 @@ class EvolutionEngine:
                 continue
         for py_file in PROJECT_DIR.rglob("ghost_dashboard/**/*.py"):
             try:
-                lines = py_file.read_text().splitlines()
+                lines = py_file.read_text(encoding="utf-8").splitlines()
                 hit_lines = []
                 for i, line in enumerate(lines, 1):
                     stripped = line.strip()
@@ -1716,7 +1793,7 @@ class EvolutionEngine:
                             "evolution_id": "rollback",
                             "rollback": True,
                             "timestamp": time.time(),
-                        }))
+                        }), encoding="utf-8")
                     return ok, msg
                 return False, "No backups available"
 
@@ -1752,7 +1829,7 @@ class EvolutionEngine:
                 "evolution_id": rollback_entry["id"],
                 "rollback": True,
                 "timestamp": time.time(),
-            }))
+            }), encoding="utf-8")
 
         return ok, msg
 
@@ -1763,7 +1840,7 @@ class EvolutionEngine:
         pending = []
         for f in PENDING_DIR.glob("*.json"):
             try:
-                pending.append(json.loads(f.read_text()))
+                pending.append(json.loads(f.read_text(encoding="utf-8")))
             except Exception:
                 pass
         return pending

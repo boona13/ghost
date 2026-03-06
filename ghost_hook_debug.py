@@ -63,7 +63,7 @@ class HookDebugStore:
     def _read_all(self) -> List[Dict[str, Any]]:
         events: List[Dict[str, Any]] = []
         try:
-            for line in self.path.read_text().splitlines():
+            for line in self.path.read_text(encoding="utf-8").splitlines():
                 line = line.strip()
                 if not line:
                     continue
@@ -79,7 +79,7 @@ class HookDebugStore:
         data = "\n".join(json.dumps(e, ensure_ascii=False) for e in events)
         if data:
             data += "\n"
-        self.path.write_text(data)
+        self.path.write_text(data, encoding="utf-8")
 
     def _append(self, event: Dict[str, Any]) -> None:
         with self.path.open("a", encoding="utf-8") as f:

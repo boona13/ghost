@@ -645,9 +645,9 @@ def _do_browser(action, **kwargs):
                 return {"status": "error", "error": str(e)[:200],
                         "hint": "Try paste_image action as fallback."}
 
-        # ── paste_image (clipboard paste — works on macOS, best for X/Twitter) ──
+        # ── paste_image (clipboard paste — cross-platform, best for X/Twitter) ──
         elif action == "paste_image":
-            import subprocess
+            import subprocess, platform as _plat
             file_path = kwargs.get("file_path", "")
             if not file_path:
                 return {"status": "error", "error": "file_path is required"}
@@ -655,26 +655,45 @@ def _do_browser(action, **kwargs):
             if not fp.exists():
                 return {"status": "error", "error": f"File not found: {file_path}"}
             try:
-                osa_script = (
-                    f'set the clipboard to '
-                    f'(read (POSIX file "{fp}") as «class PNGf»)'
-                )
-                subprocess.run(["osascript", "-e", osa_script],
-                               check=True, capture_output=True, timeout=10)
+                _os = _plat.system()
+                if _os == "Darwin":
+                    osa_script = (
+                        f'set the clipboard to '
+                        f'(read (POSIX file "{fp}") as «class PNGf»)'
+                    )
+                    subprocess.run(["osascript", "-e", osa_script],
+                                   check=True, capture_output=True, timeout=10)
+                elif _os == "Linux":
+                    subprocess.run(
+                        ["xclip", "-selection", "clipboard", "-t", "image/png", "-i", str(fp)],
+                        check=True, capture_output=True, timeout=10,
+                    )
+                elif _os == "Windows":
+                    ps_cmd = (
+                        f'Add-Type -AssemblyName System.Windows.Forms; '
+                        f'[System.Windows.Forms.Clipboard]::SetImage('
+                        f'[System.Drawing.Image]::FromFile("{fp}"))'
+                    )
+                    subprocess.run(["powershell", "-Command", ps_cmd],
+                                   check=True, capture_output=True, timeout=10)
+                else:
+                    return {"status": "error", "error": f"paste_image not supported on {_os}"}
+
+                paste_key = "Control+v" if _os == "Windows" else "Meta+v"
                 ref = kwargs.get("ref")
                 if ref:
                     loc, info = _get_locator(page, ref)
                     if loc:
                         loc.click(timeout=5000)
                         page.wait_for_timeout(300)
-                page.keyboard.press("Meta+v")
+                page.keyboard.press(paste_key)
                 page.wait_for_timeout(3000)
                 return {"status": "ok", "pasted_image": str(fp),
                         "size_kb": round(fp.stat().st_size / 1024, 1),
                         "hint": "Image pasted from clipboard. Take a snapshot to verify it appeared."}
             except subprocess.CalledProcessError as e:
                 return {"status": "error",
-                        "error": f"Clipboard copy failed: {e.stderr.decode()[:200]}",
+                        "error": f"Clipboard copy failed: {e.stderr.decode('utf-8', errors='replace')[:200]}",
                         "hint": "Try upload action instead."}
             except Exception as e:
                 return {"status": "error", "error": str(e)[:200]}

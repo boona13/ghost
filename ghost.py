@@ -24,6 +24,8 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from hashlib import md5
 
+import ghost_platform
+
 from ghost_loop import ToolLoopEngine, ToolRegistry
 from ghost_tools import build_default_tools, make_notify, get_user_projects_dir, DEFAULT_ALLOWED_COMMANDS
 from ghost_usage import UsageTracker, set_usage_tracker
@@ -94,6 +96,12 @@ from ghost_pipeline import PipelineEngine, build_pipeline_tools
 from ghost_node_registry import NodeRegistry, build_node_registry_tools
 from ghost_node_sdk import build_node_sdk_tools
 from ghost_cloud_providers import ProviderRegistry
+from ghost_extension_manager import (
+    ExtensionManager, ExtensionEventBus,
+    build_extension_manager_tools,
+    get_extension_cron_callback,
+)
+from ghost_community_hub import CommunityHub, build_community_hub_tools
 
 # responses capabilities wiring marker: dashboard-managed feature flags loaded via config/routes
 
@@ -211,7 +219,7 @@ def _is_template(path):
     if not path.exists():
         return False
     try:
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         return "- **Name:**\n" in content or "- **Name:** \n" in content
     except Exception as e:
         log.warning("Failed to check template: %s", e)
@@ -226,14 +234,14 @@ def _ensure_identity_files():
     old_user = GHOST_HOME / "USER.md"
     if not SOUL_FILE.exists():
         if old_soul.exists():
-            SOUL_FILE.write_text(old_soul.read_text())
+            SOUL_FILE.write_text(old_soul.read_text(encoding="utf-8"), encoding="utf-8")
         else:
-            SOUL_FILE.write_text(DEFAULT_SOUL)
+            SOUL_FILE.write_text(DEFAULT_SOUL, encoding="utf-8")
     if not USER_FILE.exists() or _is_template(USER_FILE):
         if old_user.exists() and not _is_template(old_user):
-            USER_FILE.write_text(old_user.read_text())
+            USER_FILE.write_text(old_user.read_text(encoding="utf-8"), encoding="utf-8")
         elif not USER_FILE.exists():
-            USER_FILE.write_text(DEFAULT_USER % {"os": platform.system()})
+            USER_FILE.write_text(DEFAULT_USER % {"os": platform.system()}, encoding="utf-8")
 
 
 def _load_identity_file(path, max_chars=BOOTSTRAP_MAX_CHARS):
@@ -241,7 +249,7 @@ def _load_identity_file(path, max_chars=BOOTSTRAP_MAX_CHARS):
     if not path.exists():
         return None
     try:
-        content = path.read_text(errors="replace").strip()
+        content = path.read_text(encoding="utf-8", errors="replace").strip()
         if not content:
             return None
         if len(content) > max_chars:
@@ -325,6 +333,7 @@ DEFAULT_CONFIG = {
     "enable_cron": True,
     "enable_evolve": True,
     "enable_future_features": True,
+    "enable_extensions": True,
     "evolve_auto_approve": False,
     "max_evolutions_per_hour": 25,
     "enable_integrations": True,
@@ -443,7 +452,7 @@ def _hf_login(cfg):
     if not token:
         cached = Path.home() / ".cache" / "huggingface" / "token"
         if cached.exists():
-            token = cached.read_text().strip()
+            token = cached.read_text(encoding="utf-8").strip()
     if not token:
         return
     os.environ["HF_TOKEN"] = token
@@ -461,7 +470,7 @@ def load_config():
     cfg = dict(DEFAULT_CONFIG)
     if CONFIG_FILE.exists():
         try:
-            user_cfg = json.loads(CONFIG_FILE.read_text())
+            user_cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
             for key in _DEEP_MERGE_KEYS:
                 if key in user_cfg and key in cfg and isinstance(cfg[key], dict):
                     merged = dict(cfg[key])
@@ -473,7 +482,7 @@ def load_config():
     return cfg
 
 def save_config(cfg):
-    CONFIG_FILE.write_text(json.dumps(cfg, indent=2))
+    CONFIG_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -487,7 +496,7 @@ def read_feed():
     with _feed_lock:
         if FEED_FILE.exists():
             try:
-                return json.loads(FEED_FILE.read_text())
+                return json.loads(FEED_FILE.read_text(encoding="utf-8"))
             except json.JSONDecodeError as e:
                 log.warning(f"Failed to read feed: {e}")
                 return []
@@ -495,7 +504,7 @@ def read_feed():
 
 def write_feed(entries):
     with _feed_lock:
-        FEED_FILE.write_text(json.dumps(entries, indent=2, ensure_ascii=False))
+        FEED_FILE.write_text(json.dumps(entries, indent=2, ensure_ascii=False), encoding="utf-8")
 
 def append_feed(entry, max_items=50):
     items = read_feed()
@@ -514,7 +523,7 @@ def log_action(action_type, preview, result):
         entries = []
         if LOG_FILE.exists():
             try:
-                entries = json.loads(LOG_FILE.read_text())
+                entries = json.loads(LOG_FILE.read_text(encoding="utf-8"))
             except json.JSONDecodeError as e:
                 log.warning("Failed to read log file: %s", e)
         entries.append({
@@ -527,7 +536,7 @@ def log_action(action_type, preview, result):
         # Atomic write: write to temp file then rename
         temp_file = LOG_FILE.with_suffix(".tmp")
         try:
-            temp_file.write_text(json.dumps(entries, indent=2))
+            temp_file.write_text(json.dumps(entries, indent=2), encoding="utf-8")
             temp_file.replace(LOG_FILE)
         except OSError as e:
             log.warning("Failed to write log file: %s", e)
@@ -574,7 +583,8 @@ def has_non_latin(text):
 def looks_like_path(text):
     t = text.strip()
     return (t.startswith("/") or t.startswith("~/") or t.startswith("./")
-            or re.match(r'^[A-Z]:\\', t)) and "\n" not in t and len(t) < 300
+            or t.startswith(".\\") or t.startswith("~\\")
+            or re.match(r'^[A-Za-z]:[\\/]', t)) and "\n" not in t and len(t) < 300
 
 def looks_like_json(text):
     t = text.strip()
@@ -1125,7 +1135,7 @@ class GhostDaemon:
         try:
             if _last_deploy_file.exists():
                 import json as _json
-                deploy_info = _json.loads(_last_deploy_file.read_text())
+                deploy_info = _json.loads(_last_deploy_file.read_text(encoding="utf-8"))
                 _last_deploy_file.unlink(missing_ok=True)
 
                 deployed_evo_id = deploy_info.get("evolution_id", "")
@@ -1216,7 +1226,6 @@ class GhostDaemon:
         # Wire deploy safety: let EvolutionEngine check active cron jobs before restart
         if self.evolve_engine and self.cron:
             self.evolve_engine.set_active_jobs_fn(self.cron.get_active_count)
-
         # Hybrid Memory tools (FTS5 + vector search, replaces old vector memory)
         if cfg.get("enable_vector_memory", True):
             _api_key = self.auth_store.get_api_key("openrouter") or os.environ.get("OPENROUTER_API_KEY")
@@ -1271,6 +1280,12 @@ class GhostDaemon:
         # ── HuggingFace authentication (needed for gated models like FLUX) ──
         _hf_login(cfg)
 
+        # ── Extension Event Bus (initialized early, used by multiple subsystems) ──
+        self.extension_event_bus = ExtensionEventBus()
+
+        if self.evolve_engine:
+            self.evolve_engine.extension_event_bus = self.extension_event_bus
+
         # ── GhostNodes: AI Plugin Ecosystem ─────────────────────────
         self.resource_manager = None
         self.node_manager = None
@@ -1283,6 +1298,7 @@ class GhostDaemon:
             try:
                 self.resource_manager = ResourceManager(cfg)
                 self.media_store = MediaStore(cfg)
+                self.media_store.extension_event_bus = self.extension_event_bus
                 self.cloud_providers = ProviderRegistry(cfg)
                 self.node_manager = NodeManager(
                     tool_registry=self.tool_registry,
@@ -1339,6 +1355,47 @@ class GhostDaemon:
                     device_str += f" (MLX v{dev_info.mlx_version})"
                 log.info("GhostNodes loaded: %d nodes, %d tools | device=%s",
                          node_count, len(node_tools), device_str)
+
+        # ── Ghost Extensions: Feature Plugin Ecosystem ──────────────
+        self.extension_manager = None
+
+        if cfg.get("enable_extensions", True):
+            try:
+                self.extension_manager = ExtensionManager(
+                    tool_registry=self.tool_registry,
+                    event_bus=self.extension_event_bus,
+                    cron_service=self.cron,
+                    cfg=cfg,
+                    daemon_ref=self,
+                )
+                self.extension_manager.load_all()
+
+                for tool_def in build_extension_manager_tools(self.extension_manager):
+                    self.tool_registry.register(tool_def)
+
+                ext_count = len(self.extension_manager.extensions)
+                ext_tools = self.extension_manager.get_extension_tools()
+                ext_pages = self.extension_manager.get_all_pages()
+                if ext_count:
+                    log.info("Extensions loaded: %d extensions, %d tools, %d pages",
+                             ext_count, len(ext_tools), len(ext_pages))
+            except Exception as e:
+                log.warning("Extension system init error (non-fatal): %s", e, exc_info=True)
+
+        # ── Community Hub: Extension/Node Marketplace ──────────────
+        self.community_hub = None
+        if cfg.get("enable_extensions", True):
+            try:
+                gh_token = cfg.get("github_token", "")
+                self.community_hub = CommunityHub(github_token=gh_token)
+                for tool_def in build_community_hub_tools(
+                    self.community_hub,
+                    ext_manager=self.extension_manager,
+                    node_manager=self.node_manager,
+                ):
+                    self.tool_registry.register(tool_def)
+            except Exception as e:
+                log.warning("Community Hub init error (non-fatal): %s", e, exc_info=True)
 
         # Security Audit tools (self-auditing + auto-fix)
         if cfg.get("enable_security_audit", True):
@@ -1780,8 +1837,6 @@ class GhostDaemon:
                 "Use `grep` for fast regex content search and `glob` for file pattern matching.\n"
                 "These are faster than shell_exec with grep/find. Prefer them for code exploration.\n\n"
                 "## DEVELOPMENT STANDARDS (MANDATORY for all code changes)\n"
-                "- New feature = new file (ghost_<feature>.py). NEVER add unrelated code to existing files.\n"
-                "- One module, one responsibility. Config-driven with enable_<feature> toggles.\n"
                 "- NEVER hardcode secrets. Validate all inputs. Sanitize file paths.\n"
                 "- Whitelist shell commands. Scope API tokens minimally. Never log secrets.\n"
                 "- Protect user data: summaries only, never verbatim content. Pin dependency versions.\n"
@@ -1789,9 +1844,41 @@ class GhostDaemon:
             if self.cfg.get("enable_tool_loop", True) and self.tool_registry.get_all():
                 is_evolution_runner = job.get("name") == _FEATURE_IMPLEMENTER_JOB
                 if is_evolution_runner:
-                    # Curated tool list: evolve tools first (most important),
-                    # then feature queue + code tools. Keeps schema small so
-                    # the model doesn't lose track of evolve_* in 96 tools.
+                    system_prompt += (
+                        "\n## EXTENSION ARCHITECTURE (MANDATORY for new features)\n"
+                        "New features MUST be implemented as Ghost extensions in `ghost_extensions/<name>/`.\n"
+                        "Bug fixes and security fixes modify core files as before.\n"
+                        "Each feature's `implementation_type` field indicates the path:\n"
+                        "- `extension`: Build as `ghost_extensions/<name>/` with EXTENSION.yaml + extension.py\n"
+                        "- `core`: Modify core Ghost files directly (bug/security fixes only)\n\n"
+                        "### Extension structure:\n"
+                        "```\n"
+                        "ghost_extensions/<name>/\n"
+                        "  EXTENSION.yaml    # manifest: name, version, provides (tools/routes/pages)\n"
+                        "  extension.py      # register(api) entry point\n"
+                        "  routes/           # optional Flask blueprints\n"
+                        "  static/           # optional JS/CSS for dashboard pages\n"
+                        "```\n\n"
+                        "### Extension register(api) pattern:\n"
+                        "```python\n"
+                        "def register(api):\n"
+                        "    api.register_tool({...})    # register tools\n"
+                        "    api.register_hook(...)       # subscribe to events\n"
+                        "    api.register_cron(...)       # add cron jobs\n"
+                        "```\n\n"
+                        "### ExtensionAPI full surface:\n"
+                        "- `api.register_tool(tool_def)` — tool_def needs: name, description, parameters, execute\n"
+                        "- `api.register_route(blueprint)` — Flask blueprint for API routes\n"
+                        "- `api.register_page({id, label, icon, js_path})` — SPA dashboard page\n"
+                        "- `api.register_cron(name, callback, schedule, description)` — scheduled task\n"
+                        "- `api.register_hook(event, callback)` — lifecycle events: on_boot, on_chat_message, on_tool_call, on_media_generated, on_evolve_complete, on_shutdown\n"
+                        "- `api.get_setting(key)` / `api.set_setting(key, value)` — persistent settings\n"
+                        "- `api.read_data(filename)` / `api.write_data(filename, content)` — persistent data files\n"
+                        "- `api.save_media(data, filename, media_type)` — save generated media\n"
+                        "- `api.get_daemon_ref()` — access core daemon services\n\n"
+                        "Use evolve_plan/evolve_apply targeting ghost_extensions/<name>/ paths.\n"
+                        "Do NOT modify ghost.py, ghost_dashboard/routes/__init__.py, or other core files for features.\n"
+                    )
                     _IMPLEMENTER_TOOLS = [
                         # Evolve tools (the whole point of this routine)
                         "evolve_plan", "evolve_apply", "evolve_apply_config",
@@ -1802,6 +1889,9 @@ class GhostDaemon:
                         "start_future_feature", "complete_future_feature",
                         "fail_future_feature", "get_feature_stats",
                         "add_future_feature",
+                        # Extension management
+                        "extensions_list", "extensions_install",
+                        "extensions_enable", "extensions_disable", "extensions_uninstall",
                         # Code reading & searching
                         "file_read", "file_search", "file_write",
                         "grep", "glob", "find_code_patterns",
@@ -1841,6 +1931,7 @@ class GhostDaemon:
                         on_step=terminal_step,
                         hook_runner=self.hooks,
                         tool_intent_security=self.tool_intent_security,
+                        extension_event_bus=self.extension_event_bus,
                     )
                     result = loop_result.text
                     self._tool_count += len(loop_result.tool_calls)
@@ -1885,12 +1976,7 @@ class GhostDaemon:
                                              priority="normal", title=title)
                 except Exception as e:
                     log.warning("Failed to send channel notification: %s", e)
-            if PLAT == "Darwin":
-                try:
-                    cmd = f'display notification "{message}" with title "{title}" sound name "default"'
-                    subprocess.run(["osascript", "-e", cmd], capture_output=True, timeout=5)
-                except Exception as e:
-                    log.warning("Failed to send OS notification: %s", e)
+            ghost_platform.send_notification(title, message)
             terminal_print("ask", f"[cron notify] {title}", message)
 
         elif ptype == "shell":
@@ -1928,8 +2014,33 @@ class GhostDaemon:
                 log.warning("Session maintenance failed: %s", e)
                 console_bus.emit("error", "cron", job_name, f"Session maintenance failed: {e}")
 
+        elif ptype == "extension_cron":
+            ext_id = payload.get("extension_id", "")
+            cb_name = payload.get("callback_name", "")
+            if not ext_id or not cb_name:
+                log.warning("Extension cron missing ext_id or cb_name in job %s", job_name)
+                return
+            cb = get_extension_cron_callback(ext_id, cb_name)
+            if cb:
+                try:
+                    cb()
+                    console_bus.emit(
+                        "success", "cron", job_name,
+                        f"Extension cron completed ({ext_id}/{cb_name})",
+                    )
+                except Exception as e:
+                    log.warning("Extension cron %s/%s failed: %s", ext_id, cb_name, e)
+                    console_bus.emit("error", "cron", job_name, f"Extension cron failed: {e}")
+            else:
+                log.warning("Extension cron callback not found: %s/%s", ext_id, cb_name)
+
     def stop(self, *_):
         console_bus.emit("warn", "system", "daemon_stop", "Ghost shutting down")
+        if getattr(self, "extension_event_bus", None):
+            try:
+                self.extension_event_bus.emit("on_shutdown")
+            except Exception:
+                pass
         self.running = False
         if self.channel_inbound:
             try:
@@ -2215,6 +2326,7 @@ class GhostDaemon:
                 force_tool=True,
                 tool_intent_security=self.tool_intent_security,
                 model_override=skill_model,
+                extension_event_bus=self.extension_event_bus,
             )
             reply = loop_result.text
             self._tool_count += len(loop_result.tool_calls)
@@ -2334,6 +2446,7 @@ class GhostDaemon:
                 hook_runner=self.hooks,
                 tool_intent_security=self.tool_intent_security,
                 model_override=skill_model,
+                extension_event_bus=self.extension_event_bus,
             )
             result = loop_result.text
             self._tool_count += len(loop_result.tool_calls)
@@ -2446,6 +2559,7 @@ class GhostDaemon:
                 hook_runner=self.hooks,
                 tool_intent_security=self.tool_intent_security,
                 model_override=skill_model,
+                extension_event_bus=self.extension_event_bus,
             )
             result = loop_result.text
             tools_used = [tc["tool"] for tc in loop_result.tool_calls]
@@ -2495,7 +2609,7 @@ class GhostDaemon:
             return
         self._action_mtime = mtime
         try:
-            action = json.loads(ACTION_FILE.read_text())
+            action = json.loads(ACTION_FILE.read_text(encoding="utf-8"))
             ACTION_FILE.unlink(missing_ok=True)
         except json.JSONDecodeError as e:
             log.warning(f"Failed to parse action file: {e}")
@@ -2645,6 +2759,7 @@ class GhostDaemon:
                     on_step=terminal_step,
                     hook_runner=self.hooks,
                     tool_intent_security=self.tool_intent_security,
+                    extension_event_bus=self.extension_event_bus,
                 )
                 result = loop_result.text
                 self._tool_count += len(loop_result.tool_calls)
@@ -2680,6 +2795,7 @@ class GhostDaemon:
                     hook_runner=self.hooks,
                     tool_intent_security=self.tool_intent_security,
                     model_override=None,
+                    extension_event_bus=self.extension_event_bus,
                 )
                 result = loop_result.text
             else:
@@ -2699,27 +2815,19 @@ class GhostDaemon:
         my_pid = os.getpid()
         if PID_FILE.exists():
             try:
-                old_pid = int(PID_FILE.read_text().strip())
+                old_pid = int(PID_FILE.read_text(encoding="utf-8").strip())
                 if old_pid != my_pid:
-                    os.kill(old_pid, signal.SIGTERM)
+                    ghost_platform.kill_process(old_pid)
                     time.sleep(0.5)
             except (ProcessLookupError, ValueError, PermissionError):
                 pass
             PID_FILE.unlink(missing_ok=True)
 
         try:
-            result = subprocess.run(
-                ["pgrep", "-f", "ghost.py start"],
-                capture_output=True, text=True, timeout=3
-            )
-            for line in result.stdout.strip().split("\n"):
-                pid = line.strip()
-                if pid and int(pid) != my_pid:
-                    try:
-                        os.kill(int(pid), signal.SIGTERM)
-                    except (ProcessLookupError, PermissionError, ValueError):
-                        pass
-            if result.stdout.strip():
+            other_pids = ghost_platform.find_ghost_processes(my_pid)
+            for pid in other_pids:
+                ghost_platform.kill_process(pid)
+            if other_pids:
                 time.sleep(0.5)
         except Exception as e:
             log.warning("Failed to kill existing process: %s", e)
@@ -2896,7 +3004,13 @@ class GhostDaemon:
         signal.signal(signal.SIGINT, self.stop)
         signal.signal(signal.SIGTERM, self.stop)
 
-        PID_FILE.write_text(str(os.getpid()))
+        PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
+
+        if self.extension_event_bus:
+            try:
+                self.extension_event_bus.emit("on_boot")
+            except Exception as e:
+                log.warning("Extension on_boot hook error: %s", e)
 
         poll = self.cfg.get("poll_interval", 1.0)
         deploy_marker = Path.home() / ".ghost" / "evolve" / "deploy_pending"
@@ -2908,9 +3022,9 @@ class GhostDaemon:
                     print(f"  {MAG}Deploy marker detected — restarting Ghost...{RST}")
                     try:
                         import json as _json
-                        _deploy_info = _json.loads(deploy_marker.read_text())
+                        _deploy_info = _json.loads(deploy_marker.read_text(encoding="utf-8"))
                         _last_deploy = Path.home() / ".ghost" / "evolve" / "last_deploy.json"
-                        _last_deploy.write_text(_json.dumps(_deploy_info, indent=2))
+                        _last_deploy.write_text(_json.dumps(_deploy_info, indent=2), encoding="utf-8")
                     except Exception:
                         pass
                     try:
@@ -2918,7 +3032,14 @@ class GhostDaemon:
                     except OSError:
                         pass
                     self.stop()
-                    os.execv(sys.executable, [sys.executable] + sys.argv)
+                    if ghost_platform.IS_WIN:
+                        ghost_platform.popen_detached(
+                            [sys.executable] + sys.argv,
+                            cwd=str(Path(__file__).resolve().parent),
+                        )
+                        sys.exit(0)
+                    else:
+                        os.execv(sys.executable, [sys.executable] + sys.argv)
             except Exception as e:
                 print(f"  {RED}Error: {e}{RST}")
             time.sleep(poll)
@@ -2935,7 +3056,7 @@ def cmd_log():
     if not LOG_FILE.exists():
         print(f"  {DIM}No actions yet. Start ghost and copy something.{RST}")
         return
-    entries = json.loads(LOG_FILE.read_text())
+    entries = json.loads(LOG_FILE.read_text(encoding="utf-8"))
     if not entries:
         print(f"  {DIM}No actions yet.{RST}")
         return
@@ -2952,7 +3073,7 @@ def cmd_log():
 def cmd_status():
     print(f"\n  {B}👻 GHOST — Status{RST}\n")
     if PID_FILE.exists():
-        pid = PID_FILE.read_text().strip()
+        pid = PID_FILE.read_text(encoding="utf-8").strip()
         try:
             os.kill(int(pid), 0)
             print(f"  {GRN}{B}RUNNING{RST}  PID {pid}")
@@ -2965,7 +3086,7 @@ def cmd_status():
     entries = []
     if LOG_FILE.exists():
         try:
-            content = LOG_FILE.read_text()
+            content = LOG_FILE.read_text(encoding="utf-8")
             entries = json.loads(content)
         except json.JSONDecodeError as e:
             log.warning("Failed to parse log file: %s", e)
@@ -3051,7 +3172,8 @@ def cmd_soul(sub_args):
             print(f"  {DIM}SOUL.md is empty.{RST}")
 
     elif sub_args[0] == "edit":
-        editor = os.environ.get("EDITOR", "nano")
+        _default_editor = "notepad" if ghost_platform.IS_WIN else "nano"
+        editor = os.environ.get("EDITOR", _default_editor)
         try:
             subprocess.run([editor, str(SOUL_FILE)])
         except Exception as e:
@@ -3059,7 +3181,7 @@ def cmd_soul(sub_args):
             print(f"  Edit manually: {SOUL_FILE}")
 
     elif sub_args[0] == "reset":
-        SOUL_FILE.write_text(DEFAULT_SOUL)
+        SOUL_FILE.write_text(DEFAULT_SOUL, encoding="utf-8")
         print(f"  {GRN}SOUL.md reset to default.{RST}")
 
     elif sub_args[0] == "path":
@@ -3086,7 +3208,8 @@ def cmd_user(sub_args):
             print(f"  {DIM}USER.md is empty.{RST}")
 
     elif sub_args[0] == "edit":
-        editor = os.environ.get("EDITOR", "nano")
+        _default_editor = "notepad" if ghost_platform.IS_WIN else "nano"
+        editor = os.environ.get("EDITOR", _default_editor)
         try:
             subprocess.run([editor, str(USER_FILE)])
         except Exception as e:
@@ -3095,7 +3218,7 @@ def cmd_user(sub_args):
 
     elif sub_args[0] == "reset":
         user_content = DEFAULT_USER % {"os": platform.system()}
-        USER_FILE.write_text(user_content)
+        USER_FILE.write_text(user_content, encoding="utf-8")
         print(f"  {GRN}USER.md reset to default.{RST}")
 
     elif sub_args[0] == "path":
@@ -3104,7 +3227,7 @@ def cmd_user(sub_args):
     elif sub_args[0] == "set" and len(sub_args) >= 3:
         field = sub_args[1].lower()
         value = " ".join(sub_args[2:])
-        content = USER_FILE.read_text()
+        content = USER_FILE.read_text(encoding="utf-8")
         field_map = {
             "name": "**Name:**",
             "call": "**What to call them:**",
@@ -3123,7 +3246,7 @@ def cmd_user(sub_args):
             if marker in line:
                 lines[i] = f"- {marker} {value}"
                 break
-        USER_FILE.write_text("\n".join(lines))
+        USER_FILE.write_text("\n".join(lines), encoding="utf-8")
         print(f"  {GRN}Set {field} = {value}{RST}")
 
     else:
@@ -3297,6 +3420,8 @@ def cmd_cron(sub_args):
 
 
 def main():
+    ghost_platform.enable_ansi_colors()
+    ghost_platform.ensure_utf8_stdio()
     import argparse
     ap = argparse.ArgumentParser(
         description="👻 GHOST — Autonomous AI Agent. Runs locally, evolves itself.",
@@ -3392,6 +3517,7 @@ def main():
             "enable_data_extract": False,
             "enable_code_intel": False,
             "enable_sandbox": False,
+            "enable_extensions": False,
         })
         daemon = GhostDaemon(dummy_key, dry_cfg, dry_run=True)
         print("Dry-run: daemon initialized successfully")

@@ -63,7 +63,7 @@ def serve_media_file(media_id):
 
     file_path = Path(item["path"]).resolve()
     media_root = MEDIA_DIR.resolve()
-    if not str(file_path).startswith(str(media_root)):
+    if not file_path.is_relative_to(media_root):
         log.warning("Path traversal blocked: %s not under %s", file_path, media_root)
         return jsonify({"error": "Access denied"}), 403
     if not file_path.exists():

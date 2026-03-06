@@ -159,10 +159,7 @@ def _get_device_and_dtype(api, model_id, vram_gb):
     """Acquire GPU and determine dtype based on device capabilities."""
     import torch
 
-    device = api.acquire_gpu(model_id, estimated_vram_gb=vram_gb)
-    device_str = str(device)
-    if device_str == "mlx":
-        device_str = "mps"
+    device_str = api.acquire_gpu(model_id, estimated_vram_gb=vram_gb)
 
     is_cuda = "cuda" in device_str
     is_mps = "mps" in device_str
@@ -709,10 +706,10 @@ def register(api):
                         "Options: 'ltx-2-mlx' for MLX Apple Silicon, or a HuggingFace model ID."
                     ),
                 },
-                "num_frames": {"type": "integer", "description": "Number of frames (default 81 = ~5s at 16fps). Aligned to 4k+1 for Wan."},
-                "fps": {"type": "integer", "description": "Frames per second (default 16)."},
-                "width": {"type": "integer", "description": "Video width (default 832 for 480P landscape)."},
-                "height": {"type": "integer", "description": "Video height (default 480 for 480P landscape)."},
+                "num_frames": {"type": "integer", "description": "Number of frames (default 81 = ~5s at 16fps). Aligned to 4k+1 for Wan.", "default": 81},
+                "fps": {"type": "integer", "description": "Frames per second (default 16).", "default": 16},
+                "width": {"type": "integer", "description": "Video width (default 832 for 480P landscape).", "default": 832},
+                "height": {"type": "integer", "description": "Video height (default 480 for 480P landscape).", "default": 480},
                 "steps": {
                     "type": "integer",
                     "description": (
@@ -720,10 +717,12 @@ def register(api):
                         "50 steps for good quality. Minimum 30 for acceptable results. "
                         "Do NOT use less than 30 — the output will be a blurry mess."
                     ),
+                    "default": 0,
                 },
                 "guidance_scale": {
                     "type": "number",
                     "description": "Prompt guidance scale (default 6.0 for 1.3B). Higher follows prompt more closely.",
+                    "default": 0,
                 },
                 "seed": {"type": "integer", "description": "Random seed for reproducibility (optional)."},
                 "filename": {"type": "string", "description": "Output filename (optional)."},
@@ -754,20 +753,22 @@ def register(api):
                         "Options: 'ltx-2-mlx' for MLX Apple Silicon, or a HuggingFace model ID."
                     ),
                 },
-                "num_frames": {"type": "integer", "description": "Number of frames (default 81 = ~5s at 16fps)."},
-                "fps": {"type": "integer", "description": "Frames per second (default 16)."},
-                "width": {"type": "integer", "description": "Video width (default 832)."},
-                "height": {"type": "integer", "description": "Video height (default 480)."},
+                "num_frames": {"type": "integer", "description": "Number of frames (default 81 = ~5s at 16fps).", "default": 81},
+                "fps": {"type": "integer", "description": "Frames per second (default 16).", "default": 16},
+                "width": {"type": "integer", "description": "Video width (default 832).", "default": 832},
+                "height": {"type": "integer", "description": "Video height (default 480).", "default": 480},
                 "steps": {
                     "type": "integer",
                     "description": (
                         "Inference steps (default 50). Needs 50 steps for good quality. "
                         "Do NOT use less than 30."
                     ),
+                    "default": 0,
                 },
                 "guidance_scale": {
                     "type": "number",
                     "description": "Prompt guidance scale (default 6.0).",
+                    "default": 0,
                 },
                 "seed": {"type": "integer", "description": "Random seed for reproducibility (optional)."},
                 "filename": {"type": "string", "description": "Output filename (optional)."},

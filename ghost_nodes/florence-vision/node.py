@@ -203,6 +203,7 @@ def register(api):
                     "type": "string",
                     "enum": list(TASK_PROMPTS.keys()),
                     "description": "Analysis task (default: caption).",
+                    "default": "caption",
                 },
                 "model": {"type": "string", "description": "HuggingFace model ID (optional)."},
                 "text_input": {"type": "string", "description": "Additional text input for grounding tasks."},

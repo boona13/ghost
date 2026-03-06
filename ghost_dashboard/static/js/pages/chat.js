@@ -1111,7 +1111,7 @@ function _tryRenderAudioPlayer(resultStr) {
   try {
     const data = JSON.parse(resultStr);
     if (data.status === 'ok' && data.file) {
-      const filename = data.file.split('/').pop();
+      const filename = data.file.replace(/\\/g,'/').split('/').pop();
       const provider = data.provider || 'tts';
       const voice = data.voice || '';
       return `
@@ -1126,8 +1126,8 @@ function _tryRenderAudioPlayer(resultStr) {
 
 function _audioPathToPlayer(text) {
   return text.replace(
-    /(\/[\w/.-]+\/.ghost\/audio\/(tts_[\w.-]+\.mp3))/g,
-    (match, fullPath, filename) =>
+    /(?:[A-Za-z]:[\\\/])?[\w/\\.-]+[\\\/]\.ghost[\\\/]audio[\\\/](tts_[\w.-]+\.mp3)/g,
+    (match, filename) =>
       `<div class="chat-audio-player"><audio controls src="/api/audio/${encodeURIComponent(filename)}"></audio></div>`
   );
 }

@@ -19,6 +19,7 @@ This replaces running 'python ghost.py start' directly when self-evolution is ac
 import collections
 import json
 import os
+import platform
 import signal
 import subprocess
 import sys
@@ -52,7 +53,7 @@ def log(msg):
     line = f"[{ts}] {msg}"
     print(line, flush=True)
     try:
-        with open(str(SUPERVISOR_LOG), "a") as f:
+        with open(str(SUPERVISOR_LOG), "a", encoding="utf-8") as f:
             f.write(line + "\n")
     except Exception:
         pass
@@ -118,7 +119,7 @@ class GhostSupervisor:
         self._last_deploy_info = None
 
     def start(self):
-        SUPERVISOR_PID_FILE.write_text(str(os.getpid()))
+        SUPERVISOR_PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
         signal.signal(signal.SIGTERM, self._handle_signal)
         signal.signal(signal.SIGINT, self._handle_signal)
 
@@ -127,11 +128,19 @@ class GhostSupervisor:
         log(f"Supervisor started (PID {os.getpid()})")
         log(f"Ghost args: {self.ghost_args}")
 
-        intentional_exit_codes = (
-            0, None,
+        _unix_signal_codes = (
             -signal.SIGTERM, -signal.SIGINT,
             128 + signal.SIGTERM, 128 + signal.SIGINT,
             signal.SIGTERM, signal.SIGINT,
+        )
+        _win_exit_codes = (
+            1,
+            -1,
+            0xC000013A,   # STATUS_CONTROL_C_EXIT (Ctrl+C on Windows)
+            -0x3FFFFFC6,  # signed version of STATUS_CONTROL_C_EXIT
+        )
+        intentional_exit_codes = (0, None) + (
+            _win_exit_codes if platform.system() == "Windows" else _unix_signal_codes
         )
 
         try:
@@ -203,11 +212,13 @@ class GhostSupervisor:
     def _stop_ghost(self):
         if self.process and self.process.poll() is None:
             log(f"Sending SIGTERM to Ghost (PID {self.process.pid})")
+            # On Windows, send_signal(SIGTERM) calls TerminateProcess;
+            # .kill() also maps to TerminateProcess — both are safe cross-platform.
             self.process.send_signal(signal.SIGTERM)
             try:
                 self.process.wait(timeout=10)
             except subprocess.TimeoutExpired:
-                log("Ghost did not stop in time, sending SIGKILL")
+                log("Ghost did not stop in time, force-killing")
                 self.process.kill()
                 self.process.wait(timeout=5)
         if self.stderr_capture:
@@ -223,14 +234,14 @@ class GhostSupervisor:
         """
         deploy_info = {}
         try:
-            deploy_info = json.loads(DEPLOY_MARKER.read_text())
+            deploy_info = json.loads(DEPLOY_MARKER.read_text(encoding="utf-8"))
         except Exception:
             pass
 
         # Persist deploy context for the new Ghost process before deleting the marker.
         try:
             EVOLVE_DIR.mkdir(parents=True, exist_ok=True)
-            LAST_DEPLOY_FILE.write_text(json.dumps(deploy_info, indent=2))
+            LAST_DEPLOY_FILE.write_text(json.dumps(deploy_info, indent=2), encoding="utf-8")
         except Exception as e:
             log(f"Warning: could not write last_deploy.json: {e}")
 
@@ -319,7 +330,7 @@ class GhostSupervisor:
         }
         try:
             GHOST_HOME.mkdir(parents=True, exist_ok=True)
-            CRASH_REPORT_FILE.write_text(json.dumps(report, indent=2))
+            CRASH_REPORT_FILE.write_text(json.dumps(report, indent=2), encoding="utf-8")
             log(f"Crash report written to {CRASH_REPORT_FILE}")
         except Exception as e:
             log(f"Failed to write crash report: {e}")
@@ -343,6 +354,13 @@ class GhostSupervisor:
 
 
 def main():
+    try:
+        import ghost_platform
+        ghost_platform.enable_ansi_colors()
+        ghost_platform.ensure_utf8_stdio()
+    except ImportError:
+        pass
+
     args = sys.argv[1:]
     if not args:
         args = ["start"]

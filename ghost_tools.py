@@ -11,6 +11,7 @@ import re
 import json
 import glob
 import subprocess
+import sys
 import platform
 import requests
 import time
@@ -60,37 +61,33 @@ CORE_COMMANDS = [
     "python3", "python", "pip", "pip3", "git", "node", "npm",
 ]
 
-DEFAULT_ALLOWED_COMMANDS = [
+_BASE_ALLOWED_COMMANDS = [
     # Filesystem
     "ls", "pwd", "cd", "cat", "head", "tail", "wc", "less", "more",
-    "mv", "cp", "mkdir", "rm", "rmdir", "touch", "chmod", "chown",
-    "ln", "open", "stat", "file", "tree", "realpath", "readlink",
+    "mv", "cp", "mkdir", "rm", "rmdir", "touch",
+    "ln", "stat", "file", "tree", "realpath",
     "basename", "dirname",
     # Text processing
     "grep", "awk", "sed", "tr", "cut", "sort", "uniq", "diff", "patch",
     "xargs", "tee", "fmt", "column",
     # Search
-    "find", "which", "whereis", "rg", "fd",
+    "find", "rg", "fd",
     # Compression
     "zip", "unzip", "tar", "gzip", "gunzip", "bzip2", "bunzip2", "xz",
     # System info
     "echo", "date", "whoami", "hostname", "uname", "uptime",
-    "df", "du", "free", "id", "groups", "env", "printenv",
-    "sw_vers", "defaults",
+    "df", "du", "env", "printenv",
     # Process management
-    "ps", "kill", "top", "htop", "lsof", "pgrep", "pkill",
-    "sleep", "timeout", "watch", "nohup",
+    "ps", "kill", "sleep",
     # Networking
     "curl", "wget", "ssh", "scp", "rsync", "sftp",
-    "ping", "dig", "nslookup", "host", "ifconfig", "netstat",
+    "ping", "dig", "nslookup",
     # Crypto / hashing
     "md5", "shasum", "base64", "openssl",
     # Python
     "python3", "python", "pip", "pip3",
     # Node.js
     "node", "npm", "npx",
-    # Package managers
-    "brew",
     # Version control
     "git",
     # Build tools
@@ -101,13 +98,33 @@ DEFAULT_ALLOWED_COMMANDS = [
     "jq",
     # Modern CLI tools
     "bat", "exa", "eza",
-    # macOS specific
-    "pbcopy", "pbpaste", "say",
     # Docker (if available)
     "docker", "docker-compose",
     # Media processing
     "ffmpeg", "ffprobe",
 ]
+
+_PLATFORM_COMMANDS = {
+    "Darwin": [
+        "open", "chmod", "chown", "readlink", "which", "whereis",
+        "free", "id", "groups", "top", "htop", "lsof", "pgrep", "pkill",
+        "timeout", "watch", "nohup", "host", "ifconfig", "netstat",
+        "sw_vers", "defaults", "pbcopy", "pbpaste", "say", "brew",
+    ],
+    "Linux": [
+        "xdg-open", "chmod", "chown", "readlink", "which", "whereis",
+        "free", "id", "groups", "top", "htop", "lsof", "pgrep", "pkill",
+        "timeout", "watch", "nohup", "host", "ifconfig", "netstat",
+        "xclip", "notify-send", "apt", "apt-get", "dnf", "yum",
+    ],
+    "Windows": [
+        "cmd", "powershell", "pwsh", "start", "clip", "type", "dir",
+        "copy", "move", "del", "rd", "findstr", "where", "tasklist",
+        "taskkill", "icacls", "attrib",
+    ],
+}
+
+DEFAULT_ALLOWED_COMMANDS = _BASE_ALLOWED_COMMANDS + _PLATFORM_COMMANDS.get(PLAT, [])
 
 DEFAULT_ALLOWED_ROOTS = [
     str(Path.home()),
@@ -158,14 +175,14 @@ def _check_command_allowed(command, allowed_commands, blocked_commands):
         if blocked in command:
             return False, f"Blocked: command matches dangerous pattern '{blocked}'"
     base_cmd = command.strip().split()[0] if command.strip() else ""
-    base_cmd = base_cmd.split("/")[-1]
+    base_cmd = Path(base_cmd).name
     if base_cmd not in allowed_commands:
         return False, f"Not allowed: '{base_cmd}' not in allowed_commands list"
     return True, ""
 
 
 def _is_dangerous_interpreter(cmd: str) -> bool:
-    base = (cmd or "").split("/")[-1]
+    base = Path(cmd or "").name
     return base in {"python", "python3", "pip", "pip3"}
 
 
@@ -203,17 +220,16 @@ def _check_dangerous_command_policy(command: str, cfg: dict, workspace=None):
     if not command:
         return False, "POLICY_DENY:EMPTY:Empty command"
 
-    # Normalize command for analysis
+    # Normalize command for analysis (posix=False on Windows for cmd.exe quoting)
     try:
-        tokens = shlex.split(command)
+        tokens = shlex.split(command, posix=(os.name != "nt"))
     except ValueError:
-        # Fallback to simple split if shlex fails (e.g., unclosed quotes)
         tokens = command.split()
     
     if not tokens:
         return False, "POLICY_DENY:EMPTY:Empty command"
 
-    base_cmd = tokens[0].split("/")[-1]
+    base_cmd = Path(tokens[0]).name
     if not _is_dangerous_interpreter(base_cmd):
         return True, ""
 
@@ -346,7 +362,7 @@ def _sync_requirements_after_pip(command: str):
                 skip_next = True
             continue
         pkg_name = re.split(r"[><=!~\[]", tok)[0].strip()
-        if pkg_name and not pkg_name.startswith("/") and not pkg_name.startswith("."):
+        if pkg_name and not pkg_name.startswith(("/", "\\", ".")):
             packages.append(pkg_name)
 
     if not packages:
@@ -354,7 +370,7 @@ def _sync_requirements_after_pip(command: str):
 
     existing = ""
     if _REQUIREMENTS_FILE.exists():
-        existing = _REQUIREMENTS_FILE.read_text()
+        existing = _REQUIREMENTS_FILE.read_text(encoding="utf-8")
     existing_lower = {
         re.split(r"[><=!~\[\s]", line)[0].strip().lower()
         for line in existing.splitlines()
@@ -367,7 +383,7 @@ def _sync_requirements_after_pip(command: str):
             continue
         try:
             r = subprocess.run(
-                ["pip", "show", pkg],
+                [sys.executable, "-m", "pip", "show", pkg],
                 capture_output=True, text=True, timeout=10,
             )
             if r.returncode != 0:
@@ -391,7 +407,7 @@ def _sync_requirements_after_pip(command: str):
     lines += "\n# Auto-added by Ghost evolve\n"
     for entry in added:
         lines += f"{entry}\n"
-    _REQUIREMENTS_FILE.write_text(lines)
+    _REQUIREMENTS_FILE.write_text(lines, encoding="utf-8")
 
 
 def make_shell_exec(cfg):
@@ -429,8 +445,9 @@ def make_shell_exec(cfg):
         user_dir = str(get_user_projects_dir(cfg))
 
         import re as _re
+        _sep_pattern = r'[\\/]' if os.sep == '\\' else r'/'
         _redirect_to_codebase = _re.search(
-            r'(?:>\s*|tee\s+(?:-a\s+)?)' + _re.escape(proj_dir) + r'/\S',
+            r'(?:>\s*|tee\s+(?:-a\s+)?)' + _re.escape(proj_dir) + _sep_pattern + r'\S',
             command,
         )
         if _redirect_to_codebase:
@@ -523,7 +540,7 @@ def make_file_read(cfg):
             return f"DENIED: Path '{path}' is outside allowed roots"
         p = Path(path).expanduser()
         if not p.exists():
-            proj_p = PROJECT_DIR / Path(path).expanduser().name if "/" not in path else PROJECT_DIR / path
+            proj_p = PROJECT_DIR / Path(path).expanduser().name if len(Path(path).parts) <= 1 else PROJECT_DIR / path
             if proj_p.exists() and _check_path_allowed(str(proj_p), allowed_roots):
                 p = proj_p
             else:
@@ -534,7 +551,7 @@ def make_file_read(cfg):
             size = p.stat().st_size
             if size > 500_000:
                 return f"File too large ({size} bytes). Use shell_exec with head/tail instead."
-            text = p.read_text(errors="replace")
+            text = p.read_text(encoding="utf-8", errors="replace")
             lines = text.split("\n")
             total = len(lines)
             if offset > 0:
@@ -584,10 +601,10 @@ def make_file_write(cfg):
         try:
             p.parent.mkdir(parents=True, exist_ok=True)
             if append:
-                with open(p, "a") as f:
+                with open(p, "a", encoding="utf-8") as f:
                     f.write(content)
             else:
-                p.write_text(content)
+                p.write_text(content, encoding="utf-8")
             return f"OK: wrote {len(content)} chars to {path}"
         except Exception as e:
             return f"Write error: {e}"
@@ -755,14 +772,12 @@ def make_notify(cfg, channel_router=None):
                 results.append(f"Channel error: {e}")
 
         # Always try local OS notification as well (immediate visual feedback)
-        if PLAT == "Darwin":
-            sound_str = 'sound name "default"' if sound else ""
-            cmd = f'display notification "{message}" with title "{title}" {sound_str}'
-            try:
-                subprocess.run(["osascript", "-e", cmd], capture_output=True, timeout=5)
+        import ghost_platform as _gp
+        try:
+            if _gp.send_notification(title, message, sound=sound):
                 results.append("OS notification sent")
-            except Exception as e:
-                results.append(f"OS notification error: {e}")
+        except Exception as e:
+            results.append(f"OS notification error: {e}")
 
         if not results:
             return "No notification channels available"
@@ -849,7 +864,7 @@ def make_workspace_write(cfg):
             return "Error: 'content' is required"
 
         project = project.strip().replace("..", "").replace("~", "")
-        file_path = file_path.strip().lstrip("/")
+        file_path = file_path.strip().lstrip("/\\")
 
         ws = get_workspace(cfg, project)
         target = ws / file_path
@@ -860,10 +875,10 @@ def make_workspace_write(cfg):
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             if append:
-                with open(target, "a") as f:
+                with open(target, "a", encoding="utf-8") as f:
                     f.write(content)
             else:
-                target.write_text(content)
+                target.write_text(content, encoding="utf-8")
             return f"OK: wrote {len(content)} chars to {target} (workspace: {ws})"
         except Exception as e:
             return f"Write error: {e}"

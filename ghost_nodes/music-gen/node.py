@@ -126,7 +126,7 @@ def register(api):
             "type": "object",
             "properties": {
                 "prompt": {"type": "string", "description": "Description of the music (e.g. 'upbeat electronic dance music with heavy bass')."},
-                "duration_secs": {"type": "integer", "description": "Duration in seconds (1-30, default 10)."},
+                "duration_secs": {"type": "integer", "description": "Duration in seconds (1-30, default 10).", "default": 10},
                 "model": {"type": "string", "description": "Model size: facebook/musicgen-small, medium, or large."},
                 "filename": {"type": "string", "description": "Output filename (optional)."},
             },

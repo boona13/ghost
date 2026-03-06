@@ -90,7 +90,7 @@ class Provider(ChannelProvider):
         """Load persistent state (seen messages, conversations)."""
         if IMESSAGE_STATE_FILE.exists():
             try:
-                data = json.loads(IMESSAGE_STATE_FILE.read_text())
+                data = json.loads(IMESSAGE_STATE_FILE.read_text(encoding="utf-8"))
                 self._seen_message_ids = set(data.get("seen_ids", []))
                 self._last_check_time = data.get("last_check_time", 0.0)
                 conv_data = data.get("conversations", {})
@@ -119,7 +119,7 @@ class Provider(ChannelProvider):
                     for k, v in self._conversations.items()
                 },
             }
-            IMESSAGE_STATE_FILE.write_text(json.dumps(data, indent=2))
+            IMESSAGE_STATE_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except Exception as e:
             log.warning(f"Failed to save iMessage state: {e}")
 

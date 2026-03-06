@@ -50,7 +50,7 @@ def _fetch_openrouter_models():
     try:
         req = urllib.request.Request(OPENROUTER_MODELS_URL, headers={"User-Agent": "Ghost-Dashboard/1.0"})
         with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode())
+            data = json.loads(resp.read().decode("utf-8"))
 
         raw = data.get("data", [])
         models = []

@@ -170,10 +170,6 @@ def _load_torch_pipeline(model_id, api, for_img2img=False):
     vram = preset["vram_gb"]
     device = api.acquire_gpu(model_id, estimated_vram_gb=vram)
 
-    # PyTorch/diffusers doesn't recognize "mlx" — map to "mps" (same Apple GPU)
-    if device == "mlx":
-        device = "mps" if torch.backends.mps.is_available() else "cpu"
-
     if device in ("cuda", "mps"):
         dtype = torch.bfloat16
     else:
@@ -212,14 +208,6 @@ def _load_torch_pipeline(model_id, api, for_img2img=False):
     return ("torch", pipe)
 
 
-_GATED_FALLBACK = {
-    "black-forest-labs/FLUX.2-klein-9B": "black-forest-labs/FLUX.1-schnell",
-    "black-forest-labs/FLUX.2-klein-4B": "black-forest-labs/FLUX.1-schnell",
-    "black-forest-labs/FLUX.2-dev": "black-forest-labs/FLUX.1-schnell",
-    "black-forest-labs/FLUX.1-dev": "black-forest-labs/FLUX.1-schnell",
-}
-
-
 def _get_pipeline(api, model_id=None, for_img2img=False):
     """Load or reuse the diffusion pipeline. Tries MLX first on Apple Silicon."""
     global _pipe, _current_model, _current_backend
@@ -253,22 +241,7 @@ def _get_pipeline(api, model_id=None, for_img2img=False):
             api.log(f"Pipeline ready (MLX native): {model_id}")
             return _pipe, _current_backend, model_id
 
-    try:
-        backend, pipe = _load_torch_pipeline(model_id, api, for_img2img=for_img2img)
-    except Exception as e:
-        is_gated = "gated" in str(e).lower() or "403" in str(e) or "restricted" in str(e).lower()
-        fallback = _GATED_FALLBACK.get(model_id)
-        if is_gated and fallback:
-            api.log(
-                f"Model {model_id} requires access approval on HuggingFace. "
-                f"Falling back to {fallback}"
-            )
-            log.warning("Gated model %s — falling back to %s", model_id, fallback)
-            backend, pipe = _load_torch_pipeline(fallback, api, for_img2img=for_img2img)
-            model_id = fallback
-        else:
-            raise
-
+    backend, pipe = _load_torch_pipeline(model_id, api, for_img2img=for_img2img)
     _current_backend = backend
     _pipe = pipe
     _current_model = model_id
@@ -470,11 +443,11 @@ def register(api):
                         "stabilityai/stable-diffusion-xl-base-1.0"
                     ),
                 },
-                "width": {"type": "integer", "description": "Image width (default 1024, multiple of 8)"},
-                "height": {"type": "integer", "description": "Image height (default 1024, multiple of 8)"},
-                "steps": {"type": "integer", "description": "Inference steps (0 = auto based on model)"},
-                "guidance_scale": {"type": "number", "description": "CFG scale (-1 = auto based on model)"},
-                "seed": {"type": "integer", "description": "Random seed (-1 for random)"},
+                "width": {"type": "integer", "description": "Image width (default 1024, multiple of 8)", "default": 1024},
+                "height": {"type": "integer", "description": "Image height (default 1024, multiple of 8)", "default": 1024},
+                "steps": {"type": "integer", "description": "Inference steps (0 = auto based on model)", "default": 0},
+                "guidance_scale": {"type": "number", "description": "CFG scale (-1 = auto based on model)", "default": -1},
+                "seed": {"type": "integer", "description": "Random seed (-1 for random)", "default": -1},
                 "filename": {"type": "string", "description": "Output filename (optional)"},
             },
             "required": ["prompt"],
@@ -495,9 +468,9 @@ def register(api):
                 "prompt": {"type": "string", "description": "How to transform the image."},
                 "image_path": {"type": "string", "description": "Path to the source image."},
                 "model": {"type": "string", "description": "HuggingFace model ID (empty = auto-select)."},
-                "strength": {"type": "number", "description": "Transformation strength 0-1 (default 0.75)."},
-                "steps": {"type": "integer", "description": "Inference steps (0 = auto)."},
-                "guidance_scale": {"type": "number", "description": "CFG scale (-1 = auto)."},
+                "strength": {"type": "number", "description": "Transformation strength 0-1 (default 0.75).", "default": 0.75},
+                "steps": {"type": "integer", "description": "Inference steps (0 = auto).", "default": 0},
+                "guidance_scale": {"type": "number", "description": "CFG scale (-1 = auto).", "default": -1},
                 "filename": {"type": "string", "description": "Output filename (optional)."},
             },
             "required": ["prompt", "image_path"],

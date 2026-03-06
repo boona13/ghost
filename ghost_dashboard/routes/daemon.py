@@ -21,7 +21,7 @@ def _daemon_running():
     if not PID_FILE.exists():
         return False, None
     try:
-        pid = int(PID_FILE.read_text().strip())
+        pid = int(PID_FILE.read_text(encoding="utf-8").strip())
         os.kill(pid, 0)
         return True, pid
     except (ValueError, ProcessLookupError, PermissionError):
@@ -126,7 +126,7 @@ def pause():
     force = request.args.get("force") == "1" or request.json and request.json.get("force")
     if not force and _is_autonomy_active():
         return jsonify({"ok": False, "error": "Cannot pause while autonomy/cron jobs are active. Use ?force=1 to override."}), 409
-    PAUSE_FILE.write_text("paused")
+    PAUSE_FILE.write_text("paused", encoding="utf-8")
     return jsonify({"ok": True, "paused": True})
 
 
@@ -175,7 +175,7 @@ def restart_ghost():
             "evolution_id": "manual_restart",
             "restart": True,
             "timestamp": time.time(),
-        }))
+        }), encoding="utf-8")
         return jsonify({"ok": True, "method": "supervisor", "message": "Supervisor will restart Ghost"})
 
     # Hot-reload config into the running daemon (Docker-safe, no process restart)
@@ -221,12 +221,13 @@ def shutdown_ghost():
 
     supervised = daemon and getattr(daemon, "supervised", False)
 
-    SHUTDOWN_MARKER.write_text("shutdown")
+    SHUTDOWN_MARKER.write_text("shutdown", encoding="utf-8")
 
     if supervised:
         def _delayed_exit():
             import time as _time
             _time.sleep(2)
+            # os.kill(getpid, SIGTERM) maps to TerminateProcess on Windows — acceptable
             os.kill(os.getpid(), signal.SIGTERM)
 
         threading.Thread(target=_delayed_exit, daemon=True).start()

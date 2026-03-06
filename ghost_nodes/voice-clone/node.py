@@ -172,8 +172,9 @@ def register(api):
                 "language": {
                     "type": "string",
                     "description": "Language for TTS: EN, ES, FR, ZH, JP, KR. Default: EN.",
+                    "default": "EN",
                 },
-                "speed": {"type": "number", "description": "Speech speed multiplier (default: 1.0)."},
+                "speed": {"type": "number", "description": "Speech speed multiplier (default: 1.0).", "default": 1.0},
                 "filename": {"type": "string", "description": "Output filename (optional)."},
             },
             "required": ["text", "reference_audio"],

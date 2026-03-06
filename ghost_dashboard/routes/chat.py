@@ -132,7 +132,7 @@ def _save_restart_state(session, deploy_result=""):
             "timestamp": time.time(),
         }
         GHOST_HOME.mkdir(parents=True, exist_ok=True)
-        RESTART_STATE_FILE.write_text(json.dumps(state, indent=2))
+        RESTART_STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
     except Exception:
         log.warning("Failed to save restart state", exc_info=True)
 
@@ -143,12 +143,12 @@ def _load_restart_recovery():
     if not RESTART_STATE_FILE.exists():
         return
     try:
-        state = json.loads(RESTART_STATE_FILE.read_text())
+        state = json.loads(RESTART_STATE_FILE.read_text(encoding="utf-8"))
         _restart_recovery = state
 
         FEED_FILE = GHOST_HOME / "feed.json"
         if FEED_FILE.exists():
-            feed = json.loads(FEED_FILE.read_text())
+            feed = json.loads(FEED_FILE.read_text(encoding="utf-8"))
         else:
             feed = []
 
@@ -173,7 +173,7 @@ def _load_restart_recovery():
                 "result": state.get("result_hint", "Ghost restarted after deploying changes."),
                 "status": "complete",
             })
-        FEED_FILE.write_text(json.dumps(feed, indent=2))
+        FEED_FILE.write_text(json.dumps(feed, indent=2), encoding="utf-8")
     except Exception:
         log.warning("Failed to load restart recovery state", exc_info=True)
     finally:
@@ -211,7 +211,7 @@ def _build_chat_history(daemon, max_turns=10):
         FEED_FILE = Path.home() / ".ghost" / "feed.json"
         if not FEED_FILE.exists():
             return []
-        items = json.loads(FEED_FILE.read_text())
+        items = json.loads(FEED_FILE.read_text(encoding="utf-8"))
         boundary = _get_session_boundary()
         chat_items = [
             i for i in items
@@ -302,7 +302,7 @@ def _trigger_chat_repair(daemon, phase: str, error: Exception, traceback_str: st
         "project_dir": str(PROJECT_DIR),
     }
     try:
-        CHAT_ERROR_REPORT_FILE.write_text(json.dumps(report, indent=2))
+        CHAT_ERROR_REPORT_FILE.write_text(json.dumps(report, indent=2), encoding="utf-8")
     except Exception:
         log.warning("Failed to write chat error report", exc_info=True)
 
@@ -650,6 +650,7 @@ def _process_message(session, daemon):
                 cancel_check=lambda: session.cancelled,
                 images=image_attachments if image_attachments else None,
                 enable_reasoning=enable_reasoning,
+                extension_event_bus=getattr(daemon, "extension_event_bus", None),
             )
             session.result = loop_result.text
             session.tools_used = [tc["tool"] for tc in loop_result.tool_calls]
@@ -1019,7 +1020,7 @@ def _get_session_boundary():
     """Read the session boundary timestamp. Returns ISO string or None."""
     try:
         if SESSION_BOUNDARY_FILE.exists():
-            data = json.loads(SESSION_BOUNDARY_FILE.read_text())
+            data = json.loads(SESSION_BOUNDARY_FILE.read_text(encoding="utf-8"))
             return data.get("cleared_at")
     except Exception:
         log.warning("Failed to get session boundary", exc_info=True)
@@ -1031,7 +1032,7 @@ def chat_clear():
     """Set a session boundary — LLM history will only include entries after this point."""
     boundary = datetime.now().isoformat()
     SESSION_BOUNDARY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    SESSION_BOUNDARY_FILE.write_text(json.dumps({"cleared_at": boundary}))
+    SESSION_BOUNDARY_FILE.write_text(json.dumps({"cleared_at": boundary}), encoding="utf-8")
     return jsonify({"ok": True, "cleared_at": boundary})
 
 
@@ -1045,7 +1046,7 @@ def chat_history():
     if not FEED_FILE.exists():
         return jsonify({"messages": []})
     try:
-        items = json.loads(FEED_FILE.read_text())
+        items = json.loads(FEED_FILE.read_text(encoding="utf-8"))
         boundary = _get_session_boundary()
         chat_items = [
             i for i in items

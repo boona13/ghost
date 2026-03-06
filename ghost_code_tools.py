@@ -104,7 +104,7 @@ def _grep_python(pattern: str, search_path: Path, include: str = "") -> List[Dic
 
             fpath = Path(root) / fname
             try:
-                text = fpath.read_text(errors="replace")
+                text = fpath.read_text(encoding="utf-8", errors="replace")
             except (OSError, UnicodeDecodeError):
                 continue
 

@@ -1,10 +1,10 @@
 name: runware-video
 version: 1.0.0
 description: >
-  Unified cloud video generation via Runware.ai middleware.
-  Single API key gives access to Kling V3/O3, Runway Gen4.5, Minimax Hailuo,
-  Google Veo 3, OpenAI Sora 2 and more. Text-to-video and image-to-video.
-  Alternative to configuring each provider's API key individually.
+  Unified cloud video generation via Runware.ai middleware API.
+  Access 40+ models from Kling, Runway, Minimax, Google Veo, and OpenAI Sora
+  with a single API key. Text-to-video and image-to-video workflows.
+  Async task-based processing with automatic polling.
 author: ghost-ai
 category: video
 license: MIT
@@ -27,9 +27,12 @@ tags:
   - video
   - cloud
   - runware
+  - unified
   - kling
   - runway
   - minimax
   - veo
   - sora
-  - unified
+  - text2video
+  - image2video
+  - paid

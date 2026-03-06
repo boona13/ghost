@@ -324,7 +324,7 @@ def load_channels_config() -> Dict[str, Any]:
     with _config_lock:
         if CHANNELS_CONFIG_FILE.exists():
             try:
-                return json.loads(CHANNELS_CONFIG_FILE.read_text())
+                return json.loads(CHANNELS_CONFIG_FILE.read_text(encoding="utf-8"))
             except Exception:
                 pass
     return {}
@@ -333,13 +333,13 @@ def load_channels_config() -> Dict[str, Any]:
 def save_channels_config(cfg: Dict[str, Any]):
     with _config_lock:
         GHOST_HOME.mkdir(parents=True, exist_ok=True)
-        CHANNELS_CONFIG_FILE.write_text(json.dumps(cfg, indent=2))
+        CHANNELS_CONFIG_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
 
 def _load_state() -> Dict[str, Any]:
     if CHANNEL_STATE_FILE.exists():
         try:
-            return json.loads(CHANNEL_STATE_FILE.read_text())
+            return json.loads(CHANNEL_STATE_FILE.read_text(encoding="utf-8"))
         except Exception:
             pass
     return {}
@@ -347,7 +347,7 @@ def _load_state() -> Dict[str, Any]:
 
 def _save_state(state: Dict[str, Any]):
     GHOST_HOME.mkdir(parents=True, exist_ok=True)
-    CHANNEL_STATE_FILE.write_text(json.dumps(state, indent=2))
+    CHANNEL_STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
 
 def _mask_secret(val: str) -> str:
@@ -385,7 +385,7 @@ def _append_inbound_log(msg: InboundMessage):
         entries: list = []
         if INBOUND_LOG_FILE.exists():
             try:
-                entries = json.loads(INBOUND_LOG_FILE.read_text())
+                entries = json.loads(INBOUND_LOG_FILE.read_text(encoding="utf-8"))
             except Exception:
                 entries = []
         entries.insert(0, {
@@ -397,7 +397,7 @@ def _append_inbound_log(msg: InboundMessage):
         })
         entries = entries[:MAX_INBOUND_LOG]
         GHOST_HOME.mkdir(parents=True, exist_ok=True)
-        INBOUND_LOG_FILE.write_text(json.dumps(entries, indent=2))
+        INBOUND_LOG_FILE.write_text(json.dumps(entries, indent=2), encoding="utf-8")
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -27,7 +27,7 @@ def _daemon_running():
     if not PID_FILE.exists():
         return False, None
     try:
-        pid = int(PID_FILE.read_text().strip())
+        pid = int(PID_FILE.read_text(encoding="utf-8").strip())
         os.kill(pid, 0)
         return True, pid
     except (ValueError, ProcessLookupError, PermissionError):
@@ -64,7 +64,7 @@ def get_status():
         entries = []
         if LOG_FILE.exists():
             try:
-                entries = json.loads(LOG_FILE.read_text())
+                entries = json.loads(LOG_FILE.read_text(encoding="utf-8"))
             except Exception:
                 log.warning("Failed to load log entries", exc_info=True)
 
@@ -113,7 +113,7 @@ def get_status():
     entries = []
     if LOG_FILE.exists():
         try:
-            entries = json.loads(LOG_FILE.read_text())
+            entries = json.loads(LOG_FILE.read_text(encoding="utf-8"))
         except Exception:
             log.warning("Failed to load log entries (standalone)", exc_info=True)
 

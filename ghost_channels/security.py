@@ -79,13 +79,13 @@ def _log_security_event(event: SecurityEvent):
         entries = []
         if SECURITY_LOG_FILE.exists():
             try:
-                entries = json.loads(SECURITY_LOG_FILE.read_text())
+                entries = json.loads(SECURITY_LOG_FILE.read_text(encoding="utf-8"))
             except Exception:
                 entries = []
         entries.insert(0, event.to_dict())
         entries = entries[:MAX_SECURITY_LOG]
         GHOST_HOME.mkdir(parents=True, exist_ok=True)
-        SECURITY_LOG_FILE.write_text(json.dumps(entries, indent=2))
+        SECURITY_LOG_FILE.write_text(json.dumps(entries, indent=2), encoding="utf-8")
 
 
 def load_security_log(limit: int = 50) -> List[Dict[str, Any]]:
@@ -93,7 +93,7 @@ def load_security_log(limit: int = 50) -> List[Dict[str, Any]]:
     if not SECURITY_LOG_FILE.exists():
         return []
     try:
-        entries = json.loads(SECURITY_LOG_FILE.read_text())
+        entries = json.loads(SECURITY_LOG_FILE.read_text(encoding="utf-8"))
         return entries[:limit]
     except Exception:
         return []

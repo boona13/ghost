@@ -10,6 +10,7 @@ import json
 import time
 import threading
 import logging
+from pathlib import Path
 from typing import Dict, Any, List, Callable, Optional
 
 import requests
@@ -92,7 +93,7 @@ class Provider(ChannelProvider):
             return OutboundResult(ok=False, error="No ntfy topic configured",
                                  channel_id=self.meta.id)
         url = f"{self.server}/{topic}"
-        headers: Dict[str, str] = {"Filename": media_path.split("/")[-1]}
+        headers: Dict[str, str] = {"Filename": Path(media_path).name}
         if caption:
             headers["Message"] = caption
         if self.token:

@@ -84,9 +84,9 @@ def init_repo() -> Tuple[bool, str]:
         gitignore_path = PROJECT_DIR / ".gitignore"
         existing = ""
         if gitignore_path.exists():
-            existing = gitignore_path.read_text()
+            existing = gitignore_path.read_text(encoding="utf-8")
         if ".venv/" not in existing:
-            gitignore_path.write_text(existing.rstrip("\n") + "\n" + _GITIGNORE_CONTENT)
+            gitignore_path.write_text(existing.rstrip("\n") + "\n" + _GITIGNORE_CONTENT, encoding="utf-8")
 
         _run(["add", "."])
 

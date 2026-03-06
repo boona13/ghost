@@ -38,7 +38,7 @@ class AuthProfileStore:
     def _load(self) -> dict:
         if self._path.exists():
             try:
-                data = json.loads(self._path.read_text())
+                data = json.loads(self._path.read_text(encoding="utf-8"))
                 if isinstance(data, dict) and "profiles" in data:
                     return data
             except (json.JSONDecodeError, OSError) as e:
@@ -46,7 +46,7 @@ class AuthProfileStore:
         return dict(_EMPTY_STORE)
 
     def _save(self):
-        self._path.write_text(json.dumps(self._store, indent=2))
+        self._path.write_text(json.dumps(self._store, indent=2), encoding="utf-8")
 
     @property
     def profiles(self) -> dict:
@@ -190,7 +190,7 @@ class AuthProfileStore:
         if not CODEX_AUTH_FILE.exists():
             return False
         try:
-            data = json.loads(CODEX_AUTH_FILE.read_text())
+            data = json.loads(CODEX_AUTH_FILE.read_text(encoding="utf-8"))
             access = data.get("access_token") or data.get("token", "")
             refresh = data.get("refresh_token", "")
             expires = data.get("expires_at", 0)

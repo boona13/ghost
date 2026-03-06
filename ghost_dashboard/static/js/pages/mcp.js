@@ -72,7 +72,7 @@ export async function render(container) {
   "mcp_servers": {
     "filesystem": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "~/Documents"],
       "enabled": true
     }
   }
@@ -472,7 +472,7 @@ function _showAddServerModal(pageContainer, api, u) {
         </div>
         <div>
           <label class="block text-[11px] text-zinc-400 mb-1">${t('mcp.arguments')}</label>
-          <input id="mcp-add-args" type="text" placeholder="e.g. -y @modelcontextprotocol/server-filesystem /tmp"
+          <input id="mcp-add-args" type="text" placeholder="e.g. -y @modelcontextprotocol/server-filesystem ~/Documents"
             class="w-full bg-surface-700 border border-surface-600 rounded px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 font-mono" />
           <div class="text-[10px] text-zinc-600 mt-0.5">${t('mcp.argsDescription')}</div>
         </div>
@@ -500,9 +500,9 @@ function _showAddServerModal(pageContainer, api, u) {
         <div class="text-[10px] text-zinc-500 mb-2">${t('mcp.popularServers')}</div>
         <div class="flex flex-wrap gap-1.5">
           ${[
-            { label: 'Filesystem', cmd: 'npx', args: '-y @modelcontextprotocol/server-filesystem /tmp' },
+            { label: 'Filesystem', cmd: 'npx', args: '-y @modelcontextprotocol/server-filesystem ~/Documents' },
             { label: 'GitHub', cmd: 'npx', args: '-y @modelcontextprotocol/server-github', env: '{"GITHUB_PERSONAL_ACCESS_TOKEN":""}' },
-            { label: 'SQLite', cmd: 'npx', args: '-y @modelcontextprotocol/server-sqlite /tmp/test.db' },
+            { label: 'SQLite', cmd: 'npx', args: '-y @modelcontextprotocol/server-sqlite ~/test.db' },
             { label: 'Brave Search', cmd: 'npx', args: '-y @modelcontextprotocol/server-brave-search', env: '{"BRAVE_API_KEY":""}' },
             { label: 'MarkItDown', cmd: 'uvx', args: 'markitdown-mcp' },
           ].map(p => `<button class="mcp-preset text-[9px] px-2 py-1 rounded bg-ghost-500/15 text-ghost-400 hover:bg-ghost-500/25"

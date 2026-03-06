@@ -558,7 +558,7 @@ class ResourceManager:
         if not _STATS_FILE.exists():
             return
         try:
-            raw = _json.loads(_STATS_FILE.read_text())
+            raw = _json.loads(_STATS_FILE.read_text(encoding="utf-8"))
             for entry in raw:
                 mid = entry.get("model_id", "")
                 if not mid:
@@ -583,7 +583,7 @@ class ResourceManager:
             with self._stats_lock:
                 data = [st.to_dict() for st in self._stats.values()]
             _STATS_FILE.parent.mkdir(parents=True, exist_ok=True)
-            _STATS_FILE.write_text(_json.dumps(data, indent=2, default=str))
+            _STATS_FILE.write_text(_json.dumps(data, indent=2, default=str), encoding="utf-8")
         except Exception as e:
             log.debug("Failed to persist model stats: %s", e)
 

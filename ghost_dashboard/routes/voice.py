@@ -178,12 +178,12 @@ def voice_config_set():
             from pathlib import Path
             cfg_path = Path.home() / ".ghost" / "config.json"
             if cfg_path.exists():
-                current = json.loads(cfg_path.read_text())
+                current = json.loads(cfg_path.read_text(encoding="utf-8"))
             else:
                 current = {}
             for k in updated:
                 current[k] = daemon.cfg[k]
-            cfg_path.write_text(json.dumps(current, indent=2))
+            cfg_path.write_text(json.dumps(current, indent=2), encoding="utf-8")
         except Exception:
             log.warning("Failed to save voice config", exc_info=True)
 

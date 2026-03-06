@@ -1,5 +1,7 @@
 /** GhostNodes management page — browse, install, enable/disable AI nodes + GPU status */
 
+import { isModelExt, renderPreview as render3DPreview, openFullscreen as open3DViewer } from '../three-viewer.js';
+
 const t = (key, params) => window.GhostI18n?.t(key, params) ?? key;
 
 const CATEGORY_ICONS = {
@@ -107,59 +109,8 @@ export async function render(container) {
       ` : nodes.map(n => renderNodeCard(n, u)).join('')}
     </div>
 
-    <!-- ComfyUI Workflow Import -->
-    <div class="mt-8 stat-card" id="comfyui-section">
-      <div class="flex items-center justify-between mb-3">
-        <h2 class="text-sm font-semibold text-white">${t('nodes.comfyTitle')}</h2>
-        <span class="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-400">ComfyUI</span>
-      </div>
-      <p class="text-xs text-zinc-400 mb-4">${t('nodes.comfyDesc')}</p>
-
-      <div class="border-2 border-dashed border-surface-600 rounded-lg p-6 text-center hover:border-ghost-500/40 transition-colors cursor-pointer" id="comfy-dropzone">
-        <div class="text-2xl mb-2">📂</div>
-        <div class="text-sm text-zinc-300 mb-1">${t('nodes.comfyDrop')}</div>
-        <div class="text-xs text-zinc-500">${t('nodes.comfyDropHint')}</div>
-        <input type="file" id="comfy-file-input" accept=".json" class="hidden">
-      </div>
-
-      <div id="comfy-analysis" class="hidden mt-4">
-        <div class="bg-surface-800 rounded-lg p-4">
-          <div class="flex items-center justify-between mb-3">
-            <span class="text-sm font-semibold text-white" id="comfy-wf-name">${t('nodes.comfyAnalysis')}</span>
-            <span id="comfy-native-badge" class="text-[10px] px-2 py-0.5 rounded-full"></span>
-          </div>
-          <div class="grid grid-cols-2 gap-3 text-xs mb-3">
-            <div><span class="text-zinc-500">${t('nodes.comfyNodes')}:</span> <span id="comfy-node-count" class="text-zinc-300"></span></div>
-            <div><span class="text-zinc-500">${t('nodes.comfyModels')}:</span> <span id="comfy-model-count" class="text-zinc-300"></span></div>
-            <div><span class="text-zinc-500">${t('nodes.comfyInputs')}:</span> <span id="comfy-input-count" class="text-zinc-300"></span></div>
-            <div><span class="text-zinc-500">${t('nodes.comfyOutputs')}:</span> <span id="comfy-output-count" class="text-zinc-300"></span></div>
-          </div>
-          <div id="comfy-models-list" class="mb-3 hidden">
-            <div class="text-xs text-zinc-500 mb-1">${t('nodes.comfyRequiredModels')}:</div>
-            <div id="comfy-models-items" class="flex flex-wrap gap-1"></div>
-          </div>
-          <div id="comfy-missing" class="mb-3 hidden">
-            <div class="text-xs text-amber-400 mb-1">${t('nodes.comfyMissing')}:</div>
-            <div id="comfy-missing-items" class="text-xs text-zinc-400"></div>
-          </div>
-          <div class="flex gap-3 items-end mt-4">
-            <div class="flex-1">
-              <label class="text-xs text-zinc-400 mb-1 block">${t('nodes.comfyNodeName')}</label>
-              <input id="comfy-node-name" type="text" class="form-input w-full" placeholder="my-workflow">
-            </div>
-            <div class="flex-1">
-              <label class="text-xs text-zinc-400 mb-1 block">${t('common.description')}</label>
-              <input id="comfy-node-desc" type="text" class="form-input w-full" placeholder="${t('nodes.comfyDescPlaceholder')}">
-            </div>
-            <button id="comfy-import-btn" class="btn btn-primary btn-sm whitespace-nowrap">${t('nodes.comfyImport')}</button>
-          </div>
-          <div id="comfy-import-status" class="mt-2 text-xs hidden"></div>
-        </div>
-      </div>
-    </div>
-
     <!-- Install Section -->
-    <div class="mt-6 stat-card">
+    <div class="mt-8 stat-card">
       <h2 class="text-sm font-semibold text-white mb-3">${t('nodes.installNode')}</h2>
       <div class="flex gap-3">
         <input id="install-source" type="text" class="form-input flex-1" placeholder="${t('nodes.installPlaceholder')}" aria-label="${t('nodes.installPlaceholder')}">
@@ -228,120 +179,6 @@ export async function render(container) {
     });
   });
 
-  // ── ComfyUI workflow import handlers ───────────────────────────
-  const dropzone = container.querySelector('#comfy-dropzone');
-  const fileInput = container.querySelector('#comfy-file-input');
-  const analysisPanel = container.querySelector('#comfy-analysis');
-  let _pendingWorkflow = null;
-
-  if (dropzone && fileInput) {
-    dropzone.addEventListener('click', () => fileInput.click());
-    dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('border-ghost-500/60'); });
-    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('border-ghost-500/60'));
-    dropzone.addEventListener('drop', e => {
-      e.preventDefault();
-      dropzone.classList.remove('border-ghost-500/60');
-      const file = e.dataTransfer?.files?.[0];
-      if (file) handleComfyFile(file);
-    });
-    fileInput.addEventListener('change', () => {
-      if (fileInput.files?.[0]) handleComfyFile(fileInput.files[0]);
-    });
-  }
-
-  async function handleComfyFile(file) {
-    try {
-      const text = await file.text();
-      const workflow = JSON.parse(text);
-      const resp = await api.post('/api/comfyui/analyze', { workflow });
-      if (!resp.ok) { u.toast(resp.error || t('common.error'), 'error'); return; }
-      _pendingWorkflow = workflow;
-      showAnalysis(resp.analysis, file.name);
-    } catch (e) {
-      u.toast(e.message || t('nodes.comfyInvalidJson'), 'error');
-    }
-  }
-
-  function showAnalysis(a, filename) {
-    if (!analysisPanel) return;
-    analysisPanel.classList.remove('hidden');
-    container.querySelector('#comfy-wf-name').textContent = filename;
-    container.querySelector('#comfy-node-count').textContent = a.node_count;
-    container.querySelector('#comfy-model-count').textContent = a.models_needed?.length || 0;
-    container.querySelector('#comfy-input-count').textContent = a.input_nodes?.length || 0;
-    container.querySelector('#comfy-output-count').textContent = a.output_nodes?.length || 0;
-
-    const badge = container.querySelector('#comfy-native-badge');
-    if (a.native_coverage) {
-      badge.textContent = t('nodes.comfyNative');
-      badge.className = 'text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400';
-    } else {
-      badge.textContent = t('nodes.comfyNeedsComfy');
-      badge.className = 'text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400';
-    }
-
-    const modelsList = container.querySelector('#comfy-models-list');
-    const modelsItems = container.querySelector('#comfy-models-items');
-    if (a.models_needed?.length) {
-      modelsList.classList.remove('hidden');
-      modelsItems.innerHTML = a.models_needed.map(m =>
-        `<span class="text-[10px] px-2 py-0.5 bg-surface-700 text-zinc-300 rounded font-mono">${u.escapeHtml(m.filename)}</span>`
-      ).join('');
-    } else {
-      modelsList.classList.add('hidden');
-    }
-
-    const missingEl = container.querySelector('#comfy-missing');
-    const missingItems = container.querySelector('#comfy-missing-items');
-    if (a.missing_native?.length) {
-      missingEl.classList.remove('hidden');
-      missingItems.textContent = a.missing_native.join(', ');
-    } else {
-      missingEl.classList.add('hidden');
-    }
-
-    const nameInput = container.querySelector('#comfy-node-name');
-    if (nameInput && !nameInput.value) {
-      nameInput.value = filename.replace(/\.json$/i, '').replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();
-    }
-  }
-
-  const importBtn = container.querySelector('#comfy-import-btn');
-  const importStatus = container.querySelector('#comfy-import-status');
-  if (importBtn) {
-    importBtn.addEventListener('click', async () => {
-      const nodeName = container.querySelector('#comfy-node-name')?.value?.trim();
-      const nodeDesc = container.querySelector('#comfy-node-desc')?.value?.trim();
-      if (!_pendingWorkflow) { u.toast(t('nodes.comfyUploadFirst'), 'error'); return; }
-      if (!nodeName) { u.toast(t('nodes.comfyNameRequired'), 'error'); return; }
-
-      importBtn.disabled = true;
-      importBtn.textContent = t('nodes.comfyImporting');
-      if (importStatus) { importStatus.classList.remove('hidden'); importStatus.textContent = t('nodes.comfyImporting'); importStatus.className = 'mt-2 text-xs text-zinc-400'; }
-
-      try {
-        const resp = await api.post('/api/comfyui/import', {
-          workflow: _pendingWorkflow,
-          node_name: nodeName,
-          description: nodeDesc || '',
-        });
-        if (resp.ok) {
-          u.toast(t('nodes.comfyImportSuccess', { name: nodeName }), 'success');
-          if (importStatus) { importStatus.textContent = t('nodes.comfyImportSuccess', { name: nodeName }); importStatus.className = 'mt-2 text-xs text-emerald-400'; }
-          setTimeout(() => render(container), 1500);
-        } else {
-          u.toast(resp.error || t('common.error'), 'error');
-          if (importStatus) { importStatus.textContent = resp.error; importStatus.className = 'mt-2 text-xs text-red-400'; }
-        }
-      } catch (e) {
-        u.toast(e.message, 'error');
-        if (importStatus) { importStatus.textContent = e.message; importStatus.className = 'mt-2 text-xs text-red-400'; }
-      }
-      importBtn.disabled = false;
-      importBtn.textContent = t('nodes.comfyImport');
-    });
-  }
-
   const installBtn = container.querySelector('#install-btn');
   const installInput = container.querySelector('#install-source');
   const installStatus = container.querySelector('#install-status');
@@ -373,6 +210,601 @@ export async function render(container) {
       if (installStatus) installStatus.classList.add('hidden');
     });
   }
+
+  container.querySelectorAll('.node-run-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const name = btn.dataset.node;
+      btn.disabled = true;
+      try {
+        const data = await api.get(`/api/nodes/${name}/tools`);
+        if (!data.tools?.length) {
+          u.toast(t('nodes.noTools'), 'error');
+          return;
+        }
+        await openRunModal(name, data.tools, api, u);
+      } catch (e) {
+        u.toast(e.message || t('common.error'), 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+/* ── Run Modal ─────────────────────────────────────────────────── */
+
+const FILE_FIELD_PATTERNS = /image|file|path|audio|video|model/i;
+const SKIP_FIELDS = new Set(['filename', 'output_path', 'output_file']);
+
+function isFileField(key, schema) {
+  if (schema.type !== 'string') return false;
+  if (FILE_FIELD_PATTERNS.test(key)) return true;
+  const desc = (schema.description || '').toLowerCase();
+  return /path to|file|image|audio|video/.test(desc);
+}
+
+function resolveDefault(key, schema, saved) {
+  if (saved && saved[key] !== undefined && saved[key] !== '') return saved[key];
+  if (schema.default !== undefined) return schema.default;
+  return undefined;
+}
+
+function buildFieldInput(key, schema, isRequired, u, saved) {
+  if (SKIP_FIELDS.has(key)) return '';
+
+  const desc = u.escapeHtml(schema.description || '');
+  const label = u.escapeHtml(key.replace(/_/g, ' '));
+  const req = isRequired ? ' *' : '';
+  const def = resolveDefault(key, schema, saved);
+
+  if (schema.enum) {
+    const opts = schema.enum.map(v => {
+      const sel = (def !== undefined && String(def) === String(v)) ? ' selected' : '';
+      return `<option value="${u.escapeHtml(v)}"${sel}>${u.escapeHtml(v)}</option>`;
+    }).join('');
+    return `
+      <div class="mb-3">
+        <label class="block text-xs text-zinc-400 mb-1">${label}${req}</label>
+        <select name="${key}" class="form-input w-full text-sm">${opts}</select>
+        ${desc ? `<div class="text-[10px] text-zinc-600 mt-0.5">${desc}</div>` : ''}
+      </div>`;
+  }
+
+  if (schema.type === 'number' || schema.type === 'integer') {
+    const step = schema.type === 'integer' ? '1' : 'any';
+    const val = def !== undefined ? ` value="${def}"` : '';
+    return `
+      <div class="mb-3">
+        <label class="block text-xs text-zinc-400 mb-1">${label}${req}</label>
+        <input type="number" name="${key}" step="${step}" class="form-input w-full text-sm" placeholder="${desc}"${val}>
+        ${desc ? `<div class="text-[10px] text-zinc-600 mt-0.5">${desc}</div>` : ''}
+      </div>`;
+  }
+
+  if (schema.type === 'boolean') {
+    const chk = def ? ' checked' : '';
+    return `
+      <div class="mb-3 flex items-center gap-2">
+        <input type="checkbox" name="${key}" class="rounded bg-surface-700 border-surface-600 text-ghost-500"${chk}>
+        <label class="text-xs text-zinc-400">${label}${req}</label>
+        ${desc ? `<span class="text-[10px] text-zinc-600">${desc}</span>` : ''}
+      </div>`;
+  }
+
+  if (isFileField(key, schema)) {
+    const accept = /image/i.test(key) || /image/i.test(schema.description || '')
+      ? 'image/*'
+      : /audio/i.test(key) || /audio/i.test(schema.description || '')
+        ? 'audio/*'
+        : /video/i.test(key) || /video/i.test(schema.description || '')
+          ? 'video/*' : '';
+    const val = (def !== undefined && def !== '') ? u.escapeHtml(String(def)) : '';
+    return `
+      <div class="mb-3">
+        <label class="block text-xs text-zinc-400 mb-1">${label}${req}</label>
+        <div class="flex gap-2 items-center">
+          <input type="text" name="${key}" class="form-input flex-1 text-sm" placeholder="${desc}" readonly value="${val}">
+          <input type="file" class="file-native-input hidden" data-field="${key}" ${accept ? `accept="${accept}"` : ''}>
+          <button type="button" class="file-browse-btn btn btn-sm text-xs bg-surface-700 text-zinc-300 hover:bg-surface-600 shrink-0" data-field="${key}">${t('nodes.browse')}</button>
+        </div>
+        <div class="file-upload-status text-[10px] text-zinc-600 mt-1 hidden" data-field="${key}"></div>
+      </div>`;
+  }
+
+  const isPrompt = /prompt/i.test(key);
+  if (isPrompt) {
+    const val = (def !== undefined && def !== '') ? u.escapeHtml(String(def)) : '';
+    return `
+      <div class="mb-3">
+        <label class="block text-xs text-zinc-400 mb-1">${label}${req}</label>
+        <textarea name="${key}" rows="3" class="form-input w-full text-sm resize-y" placeholder="${desc}">${val}</textarea>
+      </div>`;
+  }
+
+  const val = (def !== undefined && def !== '') ? ` value="${u.escapeHtml(String(def))}"` : '';
+  return `
+    <div class="mb-3">
+      <label class="block text-xs text-zinc-400 mb-1">${label}${req}</label>
+      <input type="text" name="${key}" class="form-input w-full text-sm" placeholder="${desc}"${val}>
+      ${desc ? `<div class="text-[10px] text-zinc-600 mt-0.5">${desc}</div>` : ''}
+    </div>`;
+}
+
+function buildToolForm(tool, u, saved) {
+  const params = tool.parameters || {};
+  const props = params.properties || {};
+  const required = new Set(params.required || []);
+  const keys = Object.keys(props);
+
+  if (!keys.length) {
+    return `<p class="text-xs text-zinc-500">${t('nodes.noParams')}</p>`;
+  }
+
+  const reqFields = keys.filter(k => required.has(k));
+  const optFields = keys.filter(k => !required.has(k));
+
+  let html = '';
+  for (const k of reqFields) html += buildFieldInput(k, props[k], true, u, saved);
+  if (optFields.length) {
+    html += `
+      <details class="mt-2 mb-2" open>
+        <summary class="text-xs text-zinc-500 cursor-pointer hover:text-zinc-300 select-none">
+          ${t('nodes.advancedOptions')} (${optFields.length})
+        </summary>
+        <div class="mt-2">`;
+    for (const k of optFields) html += buildFieldInput(k, props[k], false, u, saved);
+    html += `</div></details>`;
+  }
+  return html;
+}
+
+async function uploadFileForField(fileInput, textInput, statusEl, u) {
+  const file = fileInput.files[0];
+  if (!file) return;
+
+  statusEl.classList.remove('hidden');
+  statusEl.textContent = `${t('nodes.uploading')} ${file.name}...`;
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const resp = await fetch('/api/nodes/upload-file', { method: 'POST', body: formData });
+    const data = await resp.json();
+    if (data.ok && data.path) {
+      textInput.value = data.path;
+      textInput.dispatchEvent(new Event('change'));
+      statusEl.textContent = `${file.name}`;
+      statusEl.classList.remove('hidden');
+    } else {
+      statusEl.textContent = data.error || t('nodes.uploadError');
+      u.toast(data.error || t('nodes.uploadError'), 'error');
+    }
+  } catch (e) {
+    statusEl.textContent = t('nodes.uploadError');
+    u.toast(t('nodes.uploadError'), 'error');
+  }
+}
+
+function openImageViewer(src, u) {
+  const existing = document.getElementById('image-viewer-overlay');
+  if (existing) existing.remove();
+
+  const viewer = document.createElement('div');
+  viewer.id = 'image-viewer-overlay';
+  viewer.style.cssText = 'position:fixed;inset:0;z-index:120;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;cursor:zoom-out';
+  viewer.innerHTML = `
+    <div style="position:relative;max-width:95vw;max-height:95vh">
+      <img src="${src}" style="max-width:95vw;max-height:90vh;object-fit:contain;border-radius:8px" alt="Result">
+      <div style="position:absolute;bottom:-36px;left:0;right:0;display:flex;justify-content:center;gap:8px">
+        <a href="${src}" download class="text-xs text-zinc-400 hover:text-white bg-black/60 px-3 py-1.5 rounded-full transition-colors">${t('nodes.download')}</a>
+        <button id="iv-close" class="text-xs text-zinc-400 hover:text-white bg-black/60 px-3 py-1.5 rounded-full transition-colors">${t('nodes.close')}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(viewer);
+
+  function closeViewer() { viewer.remove(); document.removeEventListener('keydown', onKey); }
+  function onKey(e) { if (e.key === 'Escape') closeViewer(); }
+  document.addEventListener('keydown', onKey);
+  viewer.addEventListener('click', (e) => { if (e.target === viewer) closeViewer(); });
+  viewer.querySelector('#iv-close')?.addEventListener('click', closeViewer);
+}
+
+async function openRunModal(nodeName, tools, api, u) {
+  const existing = document.getElementById('node-run-overlay');
+  if (existing) existing.remove();
+
+  let selectedIdx = 0;
+  const savedCache = {};
+
+  async function loadSaved(toolName) {
+    if (savedCache[toolName] !== undefined) return savedCache[toolName];
+    try {
+      const resp = await fetch(`/api/nodes/settings/${nodeName}/${toolName}`);
+      const data = await resp.json();
+      savedCache[toolName] = data.settings || {};
+    } catch (e) {
+      savedCache[toolName] = {};
+    }
+    return savedCache[toolName];
+  }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'node-run-overlay';
+  overlay.className = 'modal-overlay';
+  document.body.appendChild(overlay);
+
+  const firstSaved = await loadSaved(tools[0].name);
+  overlay.innerHTML = renderModalContent(nodeName, tools, selectedIdx, u, firstSaved);
+
+  function renderModalContent(nodeName, tools, idx, u, saved) {
+    const tool = tools[idx];
+    return `
+      <div class="modal-panel" style="max-width:600px">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h2 class="text-base font-semibold text-white">${t('nodes.runTool')}</h2>
+            <div class="text-xs text-zinc-500 mt-0.5">${u.escapeHtml(nodeName)}</div>
+          </div>
+          <button id="run-modal-close" class="text-zinc-500 hover:text-white text-lg leading-none" aria-label="${t('nodes.close')}">&times;</button>
+        </div>
+
+        ${tools.length > 1 ? `
+          <div class="flex gap-1 mb-4 flex-wrap">
+            ${tools.map((tt, i) => `
+              <button class="run-tool-tab px-3 py-1 text-xs rounded-full transition-colors ${i === idx ? 'bg-ghost-600 text-white' : 'bg-surface-700 text-zinc-400 hover:bg-surface-600'}" data-idx="${i}">
+                ${u.escapeHtml(tt.name)}
+              </button>
+            `).join('')}
+          </div>
+        ` : ''}
+
+        <div class="text-xs text-zinc-400 mb-4 leading-relaxed">${u.escapeHtml(tool.description || '')}</div>
+
+        <form id="run-tool-form" autocomplete="off">
+          ${buildToolForm(tool, u, saved)}
+          <div class="flex items-center gap-3 mt-4 pt-3 border-t border-surface-700">
+            <button type="submit" id="run-submit-btn" class="btn btn-primary btn-sm text-sm px-6">${t('nodes.run')}</button>
+            <button type="button" id="run-save-btn" class="btn btn-sm text-xs bg-surface-700 text-zinc-400 hover:text-zinc-200 hover:bg-surface-600 transition-colors px-4">${t('nodes.saveSettings')}</button>
+            <span id="save-feedback" class="text-[10px] text-emerald-400" style="display:none">${t('nodes.saved')}</span>
+          </div>
+        </form>
+
+        <div id="run-progress-area" style="display:none" class="mt-4 pt-3 border-t border-surface-700">
+          <div class="flex items-center gap-3 mb-2">
+            <div class="w-4 h-4 border-2 border-ghost-400 border-t-transparent rounded-full animate-spin shrink-0"></div>
+            <span id="run-progress-msg" class="text-xs text-zinc-400">${t('nodes.starting')}</span>
+            <span id="run-elapsed" class="text-xs text-zinc-600 ml-auto tabular-nums">0.0s</span>
+          </div>
+          <div class="w-full h-1.5 bg-surface-700 rounded-full overflow-hidden">
+            <div id="run-progress-bar" class="h-full bg-gradient-to-r from-ghost-500 to-ghost-400 rounded-full transition-all duration-700 ease-out" style="width:2%"></div>
+          </div>
+        </div>
+
+        <div id="run-result-area" style="display:none" class="mt-4 pt-3 border-t border-surface-700"></div>
+      </div>`;
+  }
+
+  function collectFormValues() {
+    const tool = tools[selectedIdx];
+    const form = overlay.querySelector('#run-tool-form');
+    if (!form) return {};
+    const props = (tool.parameters || {}).properties || {};
+    const vals = {};
+    for (const [key, schema] of Object.entries(props)) {
+      if (SKIP_FIELDS.has(key)) continue;
+      const el = form.querySelector(`[name="${key}"]`);
+      if (!el) continue;
+      if (schema.type === 'boolean') { vals[key] = el.checked; continue; }
+      const raw = el.value.trim();
+      if (!raw) continue;
+      if (schema.type === 'number') vals[key] = parseFloat(raw);
+      else if (schema.type === 'integer') vals[key] = parseInt(raw, 10);
+      else vals[key] = raw;
+    }
+    return vals;
+  }
+
+  function bindEvents() {
+    overlay.querySelector('#run-modal-close')?.addEventListener('click', closeModal);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
+
+    overlay.querySelectorAll('.run-tool-tab').forEach(tab => {
+      tab.addEventListener('click', async () => {
+        selectedIdx = parseInt(tab.dataset.idx, 10);
+        const saved = await loadSaved(tools[selectedIdx].name);
+        overlay.innerHTML = renderModalContent(nodeName, tools, selectedIdx, u, saved);
+        bindEvents();
+      });
+    });
+
+    overlay.querySelectorAll('.file-browse-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const fieldName = btn.dataset.field;
+        const fileInput = overlay.querySelector(`.file-native-input[data-field="${fieldName}"]`);
+        if (fileInput) fileInput.click();
+      });
+    });
+
+    overlay.querySelectorAll('.file-native-input').forEach(input => {
+      input.addEventListener('change', () => {
+        const fieldName = input.dataset.field;
+        const textInput = overlay.querySelector(`[name="${fieldName}"]`);
+        const statusEl = overlay.querySelector(`.file-upload-status[data-field="${fieldName}"]`);
+        if (textInput && statusEl) uploadFileForField(input, textInput, statusEl, u);
+      });
+    });
+
+    overlay.querySelector('#run-save-btn')?.addEventListener('click', async () => {
+      const tool = tools[selectedIdx];
+      const vals = collectFormValues();
+      try {
+        await api.post(`/api/nodes/settings/${nodeName}/${tool.name}`, { settings: vals });
+        savedCache[tool.name] = vals;
+        const fb = overlay.querySelector('#save-feedback');
+        if (fb) {
+          fb.style.display = 'inline';
+          setTimeout(() => { fb.style.display = 'none'; }, 2000);
+        }
+        u.toast(t('nodes.settingsSaved'), 'success');
+      } catch (e) {
+        u.toast(t('nodes.settingsSaveError'), 'error');
+      }
+    });
+
+    const form = overlay.querySelector('#run-tool-form');
+    form?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const tool = tools[selectedIdx];
+      const params = tool.parameters || {};
+      const props = params.properties || {};
+      const required = new Set(params.required || []);
+      const args = {};
+
+      for (const [key, schema] of Object.entries(props)) {
+        if (SKIP_FIELDS.has(key)) continue;
+
+        const el = form.querySelector(`[name="${key}"]`);
+        if (!el) continue;
+
+        if (schema.type === 'boolean') {
+          args[key] = el.checked;
+          continue;
+        }
+
+        let val = el.value.trim();
+        if (!val) {
+          if (required.has(key)) {
+            el.classList.add('border-red-500');
+            el.focus();
+            u.toast(`${key.replace(/_/g, ' ')} ${t('nodes.isRequired')}`, 'error');
+            return;
+          }
+          continue;
+        }
+        el.classList.remove('border-red-500');
+
+        if (schema.type === 'number') val = parseFloat(val);
+        else if (schema.type === 'integer') val = parseInt(val, 10);
+
+        if ((schema.type === 'number' || schema.type === 'integer') && isNaN(val)) {
+          el.classList.add('border-red-500');
+          el.focus();
+          u.toast(`${key.replace(/_/g, ' ')} must be a number`, 'error');
+          return;
+        }
+        args[key] = val;
+      }
+
+      const submitBtn = overlay.querySelector('#run-submit-btn');
+      const progressArea = overlay.querySelector('#run-progress-area');
+      const progressMsg = overlay.querySelector('#run-progress-msg');
+      const progressBar = overlay.querySelector('#run-progress-bar');
+      const elapsedEl = overlay.querySelector('#run-elapsed');
+      const resultArea = overlay.querySelector('#run-result-area');
+
+      submitBtn.disabled = true;
+      submitBtn.style.display = 'none';
+      progressArea.style.display = 'block';
+      resultArea.style.display = 'none';
+      resultArea.innerHTML = '';
+
+      let jobId = null;
+      try {
+        const resp = await api.post(`/api/nodes/${nodeName}/run`, { tool: tool.name, args });
+        if (!resp.ok || !resp.job_id) {
+          throw new Error(resp.error || t('nodes.runError'));
+        }
+        jobId = resp.job_id;
+      } catch (err) {
+        progressArea.style.display = 'none';
+        submitBtn.disabled = false;
+        submitBtn.style.display = '';
+        resultArea.style.display = 'block';
+        resultArea.innerHTML = `<div class="text-sm text-red-400">${u.escapeHtml(err.message || t('nodes.runError'))}</div>`;
+        return;
+      }
+
+      const localStart = Date.now();
+      let pollTimer = null;
+      const POLL_MS = 1500;
+
+      function updateLocalElapsed() {
+        const s = ((Date.now() - localStart) / 1000).toFixed(1);
+        if (elapsedEl) elapsedEl.textContent = s + 's';
+      }
+      const tickTimer = setInterval(updateLocalElapsed, 200);
+
+      function estimateProgress(elapsed) {
+        if (elapsed < 3) return 5;
+        if (elapsed < 10) return 15;
+        if (elapsed < 20) return 30;
+        if (elapsed < 40) return 50;
+        if (elapsed < 60) return 70;
+        if (elapsed < 90) return 82;
+        return Math.min(92, 82 + (elapsed - 90) * 0.05);
+      }
+
+      async function poll() {
+        try {
+          const s = await (await fetch(`/api/nodes/run-status/${jobId}`)).json();
+
+          if (s.status === 'running') {
+            if (progressMsg) progressMsg.textContent = s.message || t('nodes.running');
+            const pct = estimateProgress(s.elapsed || 0);
+            if (progressBar) progressBar.style.width = pct + '%';
+            pollTimer = setTimeout(poll, POLL_MS);
+            return;
+          }
+
+          clearInterval(tickTimer);
+
+          if (s.status === 'complete') {
+            if (progressBar) progressBar.style.width = '100%';
+            if (progressMsg) progressMsg.textContent = t('nodes.runSuccess');
+            const totalSec = (s.elapsed || ((Date.now() - localStart) / 1000)).toFixed(1);
+            if (elapsedEl) elapsedEl.textContent = totalSec + 's';
+
+            setTimeout(() => {
+              progressArea.style.display = 'none';
+              showResult(s.result, totalSec);
+            }, 600);
+          } else {
+            progressArea.style.display = 'none';
+            resultArea.style.display = 'block';
+            resultArea.innerHTML = `<div class="text-sm text-red-400">${u.escapeHtml(s.error || t('nodes.runError'))}</div>`;
+            submitBtn.disabled = false;
+            submitBtn.style.display = '';
+          }
+        } catch (err) {
+          clearInterval(tickTimer);
+          progressArea.style.display = 'none';
+          resultArea.style.display = 'block';
+          resultArea.innerHTML = `<div class="text-sm text-red-400">${u.escapeHtml(err.message || t('nodes.runError'))}</div>`;
+          submitBtn.disabled = false;
+          submitBtn.style.display = '';
+        }
+      }
+
+      function showResult(r, totalSec) {
+        resultArea.style.display = 'block';
+        submitBtn.disabled = false;
+        submitBtn.style.display = '';
+
+        if (!r) {
+          resultArea.innerHTML = `<div class="text-sm text-red-400">${t('nodes.runError')}</div>`;
+          return;
+        }
+        if (r.status === 'error') {
+          resultArea.innerHTML = `<div class="text-sm text-red-400">${u.escapeHtml(r.error || t('nodes.runError'))}</div>`;
+          return;
+        }
+
+        let html = `
+          <div class="flex items-center gap-2 mb-3">
+            <div class="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0">
+              <svg class="w-3 h-3 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+            </div>
+            <span class="text-sm text-emerald-400 font-medium">${t('nodes.runSuccess')}</span>
+            <span class="text-[10px] text-zinc-600 ml-auto">${totalSec}s</span>
+          </div>`;
+
+        if (r.path) {
+          const src = `/api/nodes/serve-file?path=${encodeURIComponent(r.path)}`;
+          const ext = (r.path.split('.').pop() || '').toLowerCase();
+          const audioExts = ['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a'];
+          const videoExts = ['mp4', 'webm', 'mov', 'avi', 'mkv'];
+          const modelExts = ['obj', 'glb', 'gltf', 'stl'];
+
+          if (audioExts.includes(ext)) {
+            html += `
+              <div class="mb-3 bg-surface-800 rounded-lg p-3" id="result-audio-wrap">
+                <div class="flex items-center gap-2 mb-2">
+                  <span class="text-lg">🎵</span>
+                  <span class="text-xs text-zinc-300 truncate">${u.escapeHtml(r.path.replace(/\\/g,'/').split('/').pop())}</span>
+                  <a href="${src}" download class="ml-auto text-[10px] text-ghost-400 hover:text-ghost-300 transition-colors">${t('nodes.download')}</a>
+                </div>
+                <audio controls src="${src}" class="w-full" style="height:36px"></audio>
+              </div>`;
+          } else if (videoExts.includes(ext)) {
+            html += `
+              <div class="mb-3" id="result-video-wrap">
+                <video controls src="${src}" class="rounded-lg w-full max-h-[420px] border border-surface-700 bg-black/30"></video>
+                <div class="flex justify-end mt-1">
+                  <a href="${src}" download class="text-[10px] text-ghost-400 hover:text-ghost-300 transition-colors">${t('nodes.download')}</a>
+                </div>
+              </div>`;
+          } else if (modelExts.includes(ext)) {
+            html += `
+              <div class="mb-3 rounded-lg border border-surface-700 overflow-hidden" id="result-3d-wrap">
+                <div id="result-3d-canvas" style="width:100%;height:320px;background:#1a1a2e;position:relative">
+                  <div class="flex items-center justify-center h-full text-zinc-500 text-xs">${t('nodes.3dLoading')}</div>
+                </div>
+                <div class="flex items-center gap-2 p-2 bg-surface-800">
+                  <span class="text-lg">📐</span>
+                  <span class="text-xs text-zinc-300 truncate">${u.escapeHtml(r.path.replace(/\\/g,'/').split('/').pop())}</span>
+                  <button id="result-3d-fullscreen" class="ml-auto text-[10px] text-ghost-400 hover:text-ghost-300 transition-colors cursor-pointer">${t('nodes.3dFullscreen')}</button>
+                  <a href="${src}" download class="text-[10px] text-ghost-400 hover:text-ghost-300 transition-colors">${t('nodes.download')}</a>
+                </div>
+              </div>`;
+          } else {
+            html += `
+              <div class="relative group cursor-pointer mb-3" id="result-image-wrap">
+                <img src="${src}" class="rounded-lg w-full max-h-[420px] object-contain border border-surface-700 bg-black/30" alt="Result">
+                <div class="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors rounded-lg flex items-center justify-center">
+                  <span class="opacity-0 group-hover:opacity-100 transition-opacity text-white text-xs bg-black/60 px-3 py-1.5 rounded-full">${t('nodes.viewFullSize')}</span>
+                </div>
+              </div>`;
+          }
+        }
+
+        const meta = Object.entries(r).filter(([k]) => !['status', 'path', 'raw'].includes(k));
+        if (meta.length) {
+          html += `<div class="text-[11px] text-zinc-500 space-y-0.5 bg-surface-800 rounded-lg p-2.5">`;
+          for (const [k, v] of meta) {
+            html += `<div><span class="text-zinc-600 font-medium">${u.escapeHtml(k)}:</span> ${u.escapeHtml(String(v))}</div>`;
+          }
+          html += `</div>`;
+        }
+
+        resultArea.innerHTML = html;
+
+        const imgWrap = resultArea.querySelector('#result-image-wrap');
+        if (imgWrap) {
+          imgWrap.addEventListener('click', () => {
+            const imgSrc = imgWrap.querySelector('img')?.src;
+            if (!imgSrc) return;
+            openImageViewer(imgSrc, u);
+          });
+        }
+
+        const threeDWrap = resultArea.querySelector('#result-3d-wrap');
+        if (threeDWrap && r.path) {
+          const mSrc = `/api/nodes/serve-file?path=${encodeURIComponent(r.path)}`;
+          const mExt = (r.path.split('.').pop() || '').toLowerCase();
+          const canvasEl = threeDWrap.querySelector('#result-3d-canvas');
+          const sceneHandle = render3DPreview(canvasEl, mSrc, mExt);
+          threeDWrap.querySelector('#result-3d-fullscreen')?.addEventListener('click', () => {
+            open3DViewer(mSrc, mExt);
+          });
+        }
+      }
+
+      pollTimer = setTimeout(poll, POLL_MS);
+    });
+  }
+
+  function closeModal() {
+    overlay.classList.add('modal-closing');
+    setTimeout(() => overlay.remove(), 200);
+  }
+
+  const onEscape = (e) => {
+    if (e.key === 'Escape') { closeModal(); document.removeEventListener('keydown', onEscape); }
+  };
+  document.addEventListener('keydown', onEscape);
+
+  bindEvents();
 }
 
 function renderNodeCard(node, u) {
@@ -421,6 +853,7 @@ function renderNodeCard(node, u) {
           : `<button class="node-toggle-btn btn btn-sm text-xs bg-surface-700 text-zinc-300 hover:bg-emerald-500/20 hover:text-emerald-400 transition-colors" data-node="${u.escapeHtml(node.name)}" data-action="enable">${t('nodes.enable')}</button>`
         }
         ${hasError ? `<button class="node-toggle-btn btn btn-sm text-xs bg-surface-700 text-zinc-300 hover:bg-amber-500/20 hover:text-amber-400 transition-colors" data-node="${u.escapeHtml(node.name)}" data-action="enable">${t('common.retry')}</button>` : ''}
+        ${isLoaded && node.tools?.length ? `<button class="node-run-btn btn btn-sm text-xs bg-ghost-600/20 text-ghost-400 hover:bg-ghost-600/40 transition-colors" data-node="${u.escapeHtml(node.name)}">${t('nodes.run')}</button>` : ''}
       </div>
     </div>
   `;

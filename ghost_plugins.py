@@ -130,14 +130,14 @@ class PluginAPI:
         data_dir = GHOST_HOME / "plugin_data" / self.id
         path = data_dir / filename
         if path.exists():
-            return path.read_text()
+            return path.read_text(encoding="utf-8")
         return None
 
     def write_plugin_data(self, filename, content):
         """Write a file to the plugin's data directory."""
         data_dir = GHOST_HOME / "plugin_data" / self.id
         data_dir.mkdir(parents=True, exist_ok=True)
-        (data_dir / filename).write_text(content)
+        (data_dir / filename).write_text(content, encoding="utf-8")
 
 
 # ═════════════════════════════════════════════════════════════════════

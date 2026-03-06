@@ -1,11 +1,14 @@
 name: style-transfer
-version: "1.0.0"
-description: "Apply artistic styles to any photo — Van Gogh, Monet, Picasso, anime, and more. Uses neural style transfer for stunning artistic transformations."
+version: "2.0.0"
+description: "Apply artistic styles to any photo using IP-Adapter + SDXL with InstantStyle. State-of-the-art diffusion-based style transfer — feed a painting, artwork, or texture as style reference and get stunning results. Supports style-only and style+layout modes."
 author: ghost
 category: image
-tags: [style, art, transfer, painting, artistic]
-estimated_vram_gb: 1.0
+tags: [style, art, transfer, painting, artistic, ip-adapter, sdxl, instantstyle]
+estimated_vram_gb: 7.0
 dependencies:
   - torch
-  - torchvision
+  - diffusers
+  - transformers
+  - accelerate
+  - safetensors
   - Pillow

@@ -211,6 +211,7 @@ def register(api):
                     "type": "string",
                     "enum": list(EFFECTS.keys()),
                     "description": f"Effect to apply. Options: {effects_list}. Default: robot.",
+                    "default": "robot",
                 },
                 "chain": {
                     "type": "string",

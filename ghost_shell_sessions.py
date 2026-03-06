@@ -18,6 +18,8 @@ import os
 import platform
 import signal
 import subprocess
+
+import ghost_platform
 import threading
 import time
 import uuid
@@ -115,7 +117,8 @@ class InteractiveSession:
             self._pending_output.clear()
             self._marker_event.clear()
 
-            full_cmd = f"{command}\necho \"{marker}$?\"\n"
+            echo_cmd = ghost_platform.exit_code_echo_cmd(marker)
+            full_cmd = f"{command}\n{echo_cmd}\n"
             try:
                 self._proc.stdin.write(full_cmd.encode())
                 self._proc.stdin.flush()

@@ -126,9 +126,20 @@ def register(api):
             cloud_tool = tool_map[chosen_provider]
             api.log(f"Routing to cloud: {chosen_provider} ({reason})")
 
-            params = {"prompt": prompt, "duration": duration, "mode": mode}
-            if aspect_ratio:
-                params["aspect_ratio"] = aspect_ratio
+            if chosen_provider == "runware":
+                ratio_to_dims = {
+                    "16:9": (1280, 720), "9:16": (720, 1280), "1:1": (960, 960),
+                }
+                w, h = ratio_to_dims.get(aspect_ratio, (1280, 720))
+                if resolution == "1080p":
+                    w, h = {
+                        "16:9": (1920, 1080), "9:16": (1080, 1920), "1:1": (1080, 1080),
+                    }.get(aspect_ratio, (1920, 1080))
+                params = {"prompt": prompt, "duration": duration, "width": w, "height": h}
+            else:
+                params = {"prompt": prompt, "duration": duration, "mode": mode}
+                if aspect_ratio:
+                    params["aspect_ratio"] = aspect_ratio
             if negative_prompt:
                 params["negative_prompt"] = negative_prompt
             if image_path:
@@ -190,7 +201,8 @@ def register(api):
             "With quality='auto', Ghost picks based on resolution and duration needs. "
             "Supports both text-to-video and image-to-video (set image_path for I2V). "
             "Provider can be set explicitly: 'local', 'kling', 'runway', 'minimax', 'runware', or 'auto'. "
-            "Use 'runware' for unified access to Kling, Runway, Minimax, Veo, Sora via one API key."
+            "Use provider='runware' to access all models (Kling, Runway, Minimax, Veo, Sora) "
+            "via a single Runware.ai API key."
         ),
         "parameters": {
             "type": "object",
@@ -201,26 +213,31 @@ def register(api):
                     "type": "string",
                     "description": "Quality tier: 'draft' (free local), 'standard', 'high' (cloud), or 'auto'. Default: auto.",
                     "enum": ["draft", "standard", "high", "best", "auto"],
+                    "default": "auto",
                 },
                 "provider": {
                     "type": "string",
                     "description": "Force a specific provider: 'local', 'kling', 'runway', 'minimax', 'runware', or 'auto'. Default: auto.",
+                    "default": "auto",
                 },
-                "duration": {"type": "integer", "description": "Duration in seconds (5 or 10 for cloud, ~5 for local). Default: 5."},
+                "duration": {"type": "integer", "description": "Duration in seconds (5 or 10 for cloud, ~5 for local). Default: 5.", "default": 5},
                 "aspect_ratio": {
                     "type": "string",
                     "description": "Aspect ratio (cloud only). Default: 16:9.",
                     "enum": ["16:9", "9:16", "1:1"],
+                    "default": "16:9",
                 },
                 "resolution": {
                     "type": "string",
                     "description": "Target resolution: '480p', '720p', '1080p', or 'auto'. Default: auto.",
                     "enum": ["480p", "720p", "1080p", "auto"],
+                    "default": "auto",
                 },
                 "mode": {
                     "type": "string",
                     "description": "Cloud generation mode: 'standard' (cheaper) or 'pro' (best quality). Default: standard.",
                     "enum": ["standard", "pro"],
+                    "default": "standard",
                 },
                 "negative_prompt": {"type": "string", "description": "Things to avoid in the video (optional)."},
                 "seed": {"type": "integer", "description": "Random seed for reproducibility (local only)."},

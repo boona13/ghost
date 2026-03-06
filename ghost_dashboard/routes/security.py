@@ -124,6 +124,7 @@ def _run_ai_audit(session, daemon):
             force_tool=False,
             on_step=on_step,
             cancel_check=lambda: session.cancelled,
+            extension_event_bus=getattr(daemon, "extension_event_bus", None),
         )
         session.result = loop_result.text
         session.tools_used = [tc["tool"] for tc in loop_result.tool_calls]

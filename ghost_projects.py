@@ -74,6 +74,9 @@ class ProjectRegistry:
         desktop = Path.home() / "Desktop"
         if desktop.exists():
             dirs.append(desktop)
+        documents = Path.home() / "Documents"
+        if documents.exists():
+            dirs.append(documents)
         projects = Path.home() / "Projects"
         dirs.append(projects)
         return dirs
@@ -81,7 +84,7 @@ class ProjectRegistry:
     def _load_registry(self):
         if PROJECTS_FILE.exists():
             try:
-                data = json.loads(PROJECTS_FILE.read_text())
+                data = json.loads(PROJECTS_FILE.read_text(encoding="utf-8"))
                 for pid, pdict in data.get("projects", {}).items():
                     self._projects[pid] = Project(
                         id=pid,
@@ -100,7 +103,7 @@ class ProjectRegistry:
             "projects": {pid: p.to_dict() for pid, p in self._projects.items()},
             "last_scan": time.time(),
         }
-        PROJECTS_FILE.write_text(json.dumps(data, indent=2, default=str))
+        PROJECTS_FILE.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
 
     def _project_id(self, path: Path) -> str:
         import hashlib
@@ -108,7 +111,7 @@ class ProjectRegistry:
 
     def _load_project_config(self, config_path: Path) -> Dict[str, Any]:
         try:
-            data = json.loads(config_path.read_text())
+            data = json.loads(config_path.read_text(encoding="utf-8"))
             config = dict(DEFAULT_PROJECT_CONFIG)
             config.update(data)
             return config
@@ -199,7 +202,7 @@ class ProjectRegistry:
         config["name"] = name
         config["description"] = description
 
-        config_path.write_text(json.dumps(config, indent=2))
+        config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
 
         pid = self._project_id(path)
         project = Project(
@@ -227,7 +230,7 @@ class ProjectRegistry:
         if "name" in updates:
             project.name = updates["name"]
 
-        project.config_path.write_text(json.dumps(project.config, indent=2))
+        project.config_path.write_text(json.dumps(project.config, indent=2), encoding="utf-8")
         project.last_modified = project.config_path.stat().st_mtime
         self._save_registry()
         return project

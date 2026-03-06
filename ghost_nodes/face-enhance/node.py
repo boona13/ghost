@@ -145,7 +145,7 @@ def register(api):
             "type": "object",
             "properties": {
                 "image_path": {"type": "string", "description": "Path to image with face(s) to enhance."},
-                "upscale": {"type": "integer", "description": "Upscale factor 1-4 (default: 2)."},
+                "upscale": {"type": "integer", "description": "Upscale factor 1-4 (default: 2).", "default": 2},
                 "filename": {"type": "string", "description": "Output filename (optional)."},
             },
             "required": ["image_path"],

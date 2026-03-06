@@ -106,6 +106,7 @@ def register(api):
                     "type": "string",
                     "enum": ["tiny", "base", "small", "medium", "large", "large-v3"],
                     "description": "Model size (default: base). Larger = more accurate but slower.",
+                    "default": "base",
                 },
                 "language": {
                     "type": "string",
@@ -115,6 +116,7 @@ def register(api):
                     "type": "string",
                     "enum": ["transcribe", "translate"],
                     "description": "transcribe (keep original language) or translate (to English).",
+                    "default": "transcribe",
                 },
             },
             "required": ["audio_path"],

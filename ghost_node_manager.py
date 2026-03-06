@@ -292,6 +292,27 @@ class NodeAPI:
         if missing:
             raise ValueError(f"Tool definition missing keys: {missing}")
         tool_def.setdefault("_node_id", self.id)
+
+        original_execute = tool_def["execute"]
+        node_api = self
+
+        def _gate_safe_execute(**kwargs):
+            """Wrapper that auto-releases the load gate after tool execution.
+
+            If a node calls acquire_gpu() but crashes or returns without
+            calling notify_model_ready(), the gate stays held until the
+            5-minute watchdog fires — blocking all other model loads.
+            This wrapper ensures the gate is always released promptly.
+            """
+            rm = node_api._resource_manager
+            try:
+                return original_execute(**kwargs)
+            finally:
+                last = getattr(node_api, "_last_acquired_model", "")
+                if last and hasattr(rm, "_gate_holder") and rm._gate_holder == last:
+                    rm.notify_load_complete(last)
+
+        tool_def["execute"] = _gate_safe_execute
         self._tool_registry.register(tool_def)
         self._registered_tools.append(tool_def["name"])
 
@@ -311,6 +332,8 @@ class NodeAPI:
             metadata={"node_id": self.id},
         )
         self._last_acquired_model = model_id
+        if device == "mlx":
+            device = "mps"
         return device
 
     def notify_model_ready(self, model_id: str = ""):
@@ -328,7 +351,10 @@ class NodeAPI:
 
     def get_device(self, estimated_vram_gb: float = 0) -> str:
         """Get best available device for given VRAM requirement."""
-        return self._resource_manager.best_device_for(estimated_vram_gb)
+        device = self._resource_manager.best_device_for(estimated_vram_gb)
+        if device == "mlx":
+            device = "mps"
+        return device
 
     def save_media(self, data: bytes, filename: str, media_type: str = "image",
                    metadata: dict | None = None, prompt: str = "",
@@ -568,7 +594,7 @@ class NodeManager:
         """Save the disabled nodes list to config so it survives restarts."""
         disabled_file = GHOST_HOME / "disabled_nodes.json"
         try:
-            disabled_file.write_text(json.dumps(sorted(self._disabled)))
+            disabled_file.write_text(json.dumps(sorted(self._disabled)), encoding="utf-8")
         except Exception as e:
             log.warning("Failed to persist disabled nodes: %s", e)
 
@@ -578,7 +604,7 @@ class NodeManager:
         disabled_file = GHOST_HOME / "disabled_nodes.json"
         if disabled_file.exists():
             try:
-                disabled.update(json.loads(disabled_file.read_text()))
+                disabled.update(json.loads(disabled_file.read_text(encoding="utf-8")))
             except Exception:
                 pass
         return disabled

@@ -1,5 +1,7 @@
 /** Media Gallery page — browse generated images, audio, video, and 3D assets */
 
+import { renderPreview as render3DPreview, openFullscreen as open3DFullscreen } from '../three-viewer.js';
+
 const t = (key, params) => window.GhostI18n?.t(key, params) ?? key;
 
 const TYPE_ICONS = { image: '🖼', audio: '🎵', video: '🎬', '3d': '📐', other: '📄' };
@@ -134,6 +136,7 @@ export async function render(container) {
     });
   });
 
+
   // --- Delete buttons ---
   container.querySelectorAll('.media-delete-btn').forEach(btn => {
     btn.addEventListener('click', async (e) => {
@@ -180,6 +183,7 @@ export async function render(container) {
               catch (err) { u.toast?.(err.message || t('gallery.deleteFailed'), 'error'); }
             });
           });
+
         }
         if (moreItems.length < PAGE_SIZE) {
           loadMoreBtn.remove();
@@ -223,7 +227,9 @@ function openDetailModal(container, item, u, api) {
   const isImage = item.media_type === 'image';
   const isAudio = item.media_type === 'audio';
   const isVideo = item.media_type === 'video';
+  const is3D = item.media_type === '3d';
   const icon = TYPE_ICONS[item.media_type] || '📄';
+  const fileExt = (item.filename || '').split('.').pop().toLowerCase();
 
   let meta = {};
   try { meta = JSON.parse(item.metadata || '{}'); } catch (e) {}
@@ -237,6 +243,19 @@ function openDetailModal(container, item, u, api) {
     .map(([k, v]) => `<span class="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 bg-surface-700 text-zinc-400 rounded"><b class="text-zinc-300">${u.escapeHtml(k)}:</b> ${u.escapeHtml(String(v).slice(0, 80))}</span>`)
     .join(' ');
 
+  let previewHtml;
+  if (isImage) {
+    previewHtml = `<img src="/api/media/${item.id}/file" alt="${u.escapeHtml(item.filename)}" class="max-w-full max-h-[60vh] object-contain">`;
+  } else if (isVideo) {
+    previewHtml = `<video src="/api/media/${item.id}/file" controls class="max-w-full max-h-[60vh]" autoplay muted></video>`;
+  } else if (isAudio) {
+    previewHtml = `<div class="py-8 text-center"><span class="text-5xl mb-4 block">🎵</span><audio src="/api/media/${item.id}/file" controls class="w-full max-w-md" autoplay></audio></div>`;
+  } else if (is3D) {
+    previewHtml = `<div id="modal-3d-canvas" style="width:100%;height:400px;background:#1a1a2e"><div class="flex items-center justify-center h-full text-zinc-500 text-xs">${t('nodes.3dLoading')}</div></div>`;
+  } else {
+    previewHtml = `<div class="py-8 text-center text-5xl">${icon}</div>`;
+  }
+
   content.innerHTML = `
     <div class="flex items-center justify-between mb-4">
       <h3 class="text-sm font-semibold text-white truncate mr-4">${u.escapeHtml(item.filename)}</h3>
@@ -244,15 +263,10 @@ function openDetailModal(container, item, u, api) {
     </div>
 
     <div class="bg-surface-800 rounded-lg flex items-center justify-center overflow-hidden mb-4" style="max-height: 60vh;">
-      ${isImage
-        ? `<img src="/api/media/${item.id}/file" alt="${u.escapeHtml(item.filename)}" class="max-w-full max-h-[60vh] object-contain">`
-        : isVideo
-          ? `<video src="/api/media/${item.id}/file" controls class="max-w-full max-h-[60vh]" autoplay muted></video>`
-          : isAudio
-            ? `<div class="py-8 text-center"><span class="text-5xl mb-4 block">🎵</span><audio src="/api/media/${item.id}/file" controls class="w-full max-w-md" autoplay></audio></div>`
-            : `<div class="py-8 text-center text-5xl">${icon}</div>`
-      }
+      ${previewHtml}
     </div>
+
+    ${is3D ? `<div class="flex justify-end mb-2"><button id="modal-3d-fullscreen" class="text-[10px] text-ghost-400 hover:text-ghost-300 transition-colors cursor-pointer">${t('nodes.3dFullscreen')}</button></div>` : ''}
 
     ${prompt ? `<div class="mb-3"><div class="text-[10px] text-zinc-500 mb-1">${t('gallery.prompt')}</div><div class="text-xs text-zinc-300 bg-surface-800 p-2 rounded">${u.escapeHtml(prompt)}</div></div>` : ''}
     ${metaEntries ? `<div class="mb-3 flex flex-wrap gap-1">${metaEntries}</div>` : ''}
@@ -274,14 +288,32 @@ function openDetailModal(container, item, u, api) {
 
   modal.classList.remove('hidden');
 
-  content.querySelector('.modal-close-btn')?.addEventListener('click', () => modal.classList.add('hidden'));
-  modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
+  // Initialize 3D viewer in modal
+  let modalSceneHandle = null;
+  if (is3D) {
+    const canvasEl = content.querySelector('#modal-3d-canvas');
+    const fileSrc = `/api/media/${item.id}/file`;
+    if (canvasEl) {
+      modalSceneHandle = render3DPreview(canvasEl, fileSrc, fileExt);
+    }
+    content.querySelector('#modal-3d-fullscreen')?.addEventListener('click', () => {
+      open3DFullscreen(fileSrc, fileExt);
+    });
+  }
+
+  function closeModal() {
+    if (modalSceneHandle) modalSceneHandle.dispose();
+    modal.classList.add('hidden');
+  }
+
+  content.querySelector('.modal-close-btn')?.addEventListener('click', closeModal);
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
 
   content.querySelector('.modal-delete-btn')?.addEventListener('click', async () => {
     if (!confirm(t('gallery.confirmDelete'))) return;
     try {
       await api.del(`/api/media/${item.id}`);
-      modal.classList.add('hidden');
+      closeModal();
       render(container);
     } catch (err) {
       u.toast?.(err.message || t('gallery.deleteFailed'), 'error');
@@ -290,7 +322,7 @@ function openDetailModal(container, item, u, api) {
 
   document.addEventListener('keydown', function escHandler(e) {
     if (e.key === 'Escape') {
-      modal.classList.add('hidden');
+      closeModal();
       document.removeEventListener('keydown', escHandler);
     }
   });
@@ -300,6 +332,7 @@ function renderMediaItem(item, u) {
   const isImage = item.media_type === 'image';
   const isAudio = item.media_type === 'audio';
   const isVideo = item.media_type === 'video';
+  const is3D = item.media_type === '3d';
   const icon = TYPE_ICONS[item.media_type] || '📄';
 
   const sizeMb = ((item.size_bytes || 0) / (1024 * 1024)).toFixed(1);
@@ -319,18 +352,27 @@ function renderMediaItem(item, u) {
     ? `<span class="text-[10px] px-1.5 py-0.5 bg-amber-500/20 text-amber-400 rounded">$${costUsd.toFixed(2)}</span>`
     : '';
 
+  let previewHtml;
+  if (isImage) {
+    previewHtml = `<img src="/api/media/${item.id}/file" alt="${u.escapeHtml(item.filename)}" class="w-full h-full object-cover rounded-lg" loading="lazy">`;
+  } else if (isAudio) {
+    previewHtml = `<div class="text-center"><span class="text-3xl" aria-hidden="true">🎵</span><audio src="/api/media/${item.id}/file" controls preload="none" class="w-full mt-2" style="max-width: 180px"></audio></div>`;
+  } else if (isVideo) {
+    previewHtml = `<video src="/api/media/${item.id}/file" class="w-full h-full object-cover rounded-lg" muted preload="metadata" controls></video>`;
+  } else if (is3D) {
+    previewHtml = `<div class="flex flex-col items-center justify-center h-full gap-2">
+      <span class="text-4xl">📐</span>
+      <span class="text-[10px] text-zinc-500">${t('nodes.3dFullscreen')}</span>
+    </div>`;
+  } else {
+    previewHtml = `<span class="text-4xl" aria-hidden="true">${icon}</span>`;
+  }
+
   return `
     <div class="media-item stat-card hover:border-ghost-500/30 transition-colors cursor-pointer group relative overflow-hidden" data-id="${item.id}" role="button" tabindex="0" aria-label="${u.escapeHtml(item.filename)}">
       <!-- Preview -->
       <div class="aspect-square bg-surface-800 rounded-lg mb-2 flex items-center justify-center overflow-hidden">
-        ${isImage
-          ? `<img src="/api/media/${item.id}/file" alt="${u.escapeHtml(item.filename)}" class="w-full h-full object-cover rounded-lg" loading="lazy">`
-          : isAudio
-            ? `<div class="text-center"><span class="text-3xl" aria-hidden="true">🎵</span><audio src="/api/media/${item.id}/file" controls preload="none" class="w-full mt-2" style="max-width: 180px"></audio></div>`
-            : isVideo
-              ? `<video src="/api/media/${item.id}/file" class="w-full h-full object-cover rounded-lg" muted preload="metadata" controls></video>`
-              : `<span class="text-4xl" aria-hidden="true">${icon}</span>`
-        }
+        ${previewHtml}
       </div>
 
       <!-- Info -->

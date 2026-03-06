@@ -224,7 +224,7 @@ class WebhookRegistry:
     def _load(self):
         if WEBHOOKS_FILE.exists():
             try:
-                data = json.loads(WEBHOOKS_FILE.read_text())
+                data = json.loads(WEBHOOKS_FILE.read_text(encoding="utf-8"))
                 for tid, tdict in data.get("triggers", {}).items():
                     self._triggers[tid] = WebhookTrigger.from_dict(tdict)
             except Exception as e:
@@ -236,7 +236,7 @@ class WebhookRegistry:
                 tid: asdict(t) for tid, t in self._triggers.items()
             },
         }
-        WEBHOOKS_FILE.write_text(json.dumps(data, indent=2, default=str))
+        WEBHOOKS_FILE.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
 
     def create(self, name: str, prompt_template: str,
                event_type: str = "generic",
@@ -337,7 +337,7 @@ class WebhookHistory:
     def _load(self):
         if WEBHOOK_HISTORY_FILE.exists():
             try:
-                data = json.loads(WEBHOOK_HISTORY_FILE.read_text())
+                data = json.loads(WEBHOOK_HISTORY_FILE.read_text(encoding="utf-8"))
                 for evt in data[-_HISTORY_MAX:]:
                     self._events.append(evt)
             except Exception:
@@ -346,7 +346,8 @@ class WebhookHistory:
     def _save(self):
         try:
             WEBHOOK_HISTORY_FILE.write_text(
-                json.dumps(list(self._events), indent=2, default=str)
+                json.dumps(list(self._events), indent=2, default=str),
+                encoding="utf-8",
             )
         except Exception:
             pass
@@ -550,6 +551,7 @@ class WebhookHandler:
                     daemon.tool_intent_security
                     if hasattr(daemon, "tool_intent_security") else None
                 ),
+                extension_event_bus=getattr(daemon, "extension_event_bus", None),
             )
 
             result_text = (loop_result.text or "")[:2000]

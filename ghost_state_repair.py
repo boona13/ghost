@@ -39,7 +39,7 @@ def repair_config(config_path: Path = None) -> dict:
         return report
 
     try:
-        raw = config_path.read_text()
+        raw = config_path.read_text(encoding="utf-8")
         data = json.loads(raw)
         if not isinstance(data, dict):
             raise ValueError("Config root must be a JSON object")
@@ -47,7 +47,7 @@ def repair_config(config_path: Path = None) -> dict:
         report["status"] = "corrupted"
         bak = _backup(config_path)
         report["repairs"].append(f"Backed up corrupted config to {bak}")
-        config_path.write_text("{}")
+        config_path.write_text("{}", encoding="utf-8")
         report["repairs"].append("Reset config to empty object — Ghost will use defaults")
         return report
 
@@ -59,7 +59,7 @@ def repair_config(config_path: Path = None) -> dict:
 
     if report["repairs"]:
         _backup(config_path)
-        config_path.write_text(json.dumps(data, indent=2))
+        config_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         report["status"] = "repaired"
 
     return report
@@ -122,7 +122,7 @@ def repair_jsonl(jsonl_path: Path, label: str = "log") -> dict:
         return report
 
     try:
-        raw_lines = jsonl_path.read_text().splitlines()
+        raw_lines = jsonl_path.read_text(encoding="utf-8").splitlines()
     except Exception as e:
         report["status"] = "unreadable"
         report["repairs"].append(f"Cannot read file: {e}")
@@ -142,7 +142,7 @@ def repair_jsonl(jsonl_path: Path, label: str = "log") -> dict:
 
     if dropped > 0:
         _backup(jsonl_path)
-        jsonl_path.write_text("\n".join(valid_lines) + "\n" if valid_lines else "")
+        jsonl_path.write_text(("\n".join(valid_lines) + "\n") if valid_lines else "", encoding="utf-8")
         report["status"] = "repaired"
         report["repairs"].append(f"Dropped {dropped} malformed line(s) out of {len(raw_lines)}")
 

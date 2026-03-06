@@ -126,13 +126,13 @@ def _append_health_log(entry: Dict[str, Any]):
         entries = []
         if HEALTH_LOG_FILE.exists():
             try:
-                entries = json.loads(HEALTH_LOG_FILE.read_text())
+                entries = json.loads(HEALTH_LOG_FILE.read_text(encoding="utf-8"))
             except Exception:
                 entries = []
         entries.insert(0, entry)
         entries = entries[:MAX_HEALTH_LOG]
         GHOST_HOME.mkdir(parents=True, exist_ok=True)
-        HEALTH_LOG_FILE.write_text(json.dumps(entries, indent=2))
+        HEALTH_LOG_FILE.write_text(json.dumps(entries, indent=2), encoding="utf-8")
 
 
 class HealthMixin:

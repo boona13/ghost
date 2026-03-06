@@ -400,7 +400,7 @@ async function _loadDirectory(api, pathStr) {
       document.getElementById('inp-path').value = data.current;
       document.getElementById('folder-browser').style.display = 'none';
       if (!document.getElementById('inp-name').value) {
-        const name = data.current.split('/').pop() || data.current.split('\\').pop() || '';
+        const name = data.current.replace(/\\/g, '/').split('/').pop() || '';
         document.getElementById('inp-name').value = name;
       }
     });

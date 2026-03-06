@@ -121,7 +121,7 @@ _BRIDGE_SCRIPT = """
 def canvas_content(filepath):
     """Serve static files from a canvas session directory, injecting JS bridge for HTML."""
     full = (CANVAS_ROOT / filepath).resolve()
-    if not str(full).startswith(str(CANVAS_ROOT.resolve())):
+    if not full.is_relative_to(CANVAS_ROOT.resolve()):
         abort(403)
     if not full.is_file():
         abort(404)

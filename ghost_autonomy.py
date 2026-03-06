@@ -53,13 +53,13 @@ class ActionItemStore:
     def _load(self) -> List[Dict]:
         if ACTION_ITEMS_FILE.exists():
             try:
-                return json.loads(ACTION_ITEMS_FILE.read_text())
+                return json.loads(ACTION_ITEMS_FILE.read_text(encoding="utf-8"))
             except Exception:
                 pass
         return []
 
     def _save(self, items: List[Dict]):
-        ACTION_ITEMS_FILE.write_text(json.dumps(items, indent=2))
+        ACTION_ITEMS_FILE.write_text(json.dumps(items, indent=2), encoding="utf-8")
 
     def add(self, title: str, description: str, category: str = "general",
             priority: str = "info") -> Dict:
@@ -124,14 +124,14 @@ class GrowthLogger:
     def _load(self) -> List[Dict]:
         if GROWTH_LOG_FILE.exists():
             try:
-                return json.loads(GROWTH_LOG_FILE.read_text())
+                return json.loads(GROWTH_LOG_FILE.read_text(encoding="utf-8"))
             except Exception:
                 pass
         return []
 
     def _save(self, entries: List[Dict]):
         entries = entries[:200]
-        GROWTH_LOG_FILE.write_text(json.dumps(entries, indent=2))
+        GROWTH_LOG_FILE.write_text(json.dumps(entries, indent=2), encoding="utf-8")
 
     def log(self, routine: str, summary: str, details: str = "",
             category: str = "growth") -> Dict:
@@ -371,7 +371,14 @@ _GHOST_SYSTEM_MAP = (
     "ghost_credentials.py  — Encrypted credential storage\n"
     "ghost_web_search.py   — Multi-provider web search\n"
     "ghost_code_intel.py   — AST-based code analysis\n"
+    "ghost_extension_manager.py — Extension system: ExtensionAPI, ExtensionManager, ExtensionEventBus\n"
+    "ghost_community_hub.py     — Community Hub: discover, install, publish extensions/nodes\n"
     "ghost_supervisor.py   — Process supervisor (PROTECTED — cannot modify)\n\n"
+    "### Extensions (ghost_extensions/<name>/ — NEW FEATURES GO HERE)\n"
+    "Each extension has: EXTENSION.yaml (manifest) + extension.py (register(api) entry point)\n"
+    "Extensions register tools, hooks, cron jobs, dashboard pages via ExtensionAPI.\n"
+    "They auto-load on startup. Users can enable/disable/uninstall via dashboard.\n"
+    "⚠️ New features MUST be extensions. NEVER add new ghost_*.py modules.\n\n"
     "### Dashboard Routes (ghost_dashboard/routes/)\n"
     "chat.py, status.py, config.py, models.py, identity.py, skills.py,\n"
     "cron.py, memory.py, feed.py, daemon.py, evolve.py, integrations.py,\n"
@@ -399,14 +406,18 @@ _GHOST_SYSTEM_MAP = (
     "        ghost-purple #8b5cf6 (primary), #a78bfa (hover)\n"
     "        text #ffffff (headings), #d4d4d8 (body), #a1a1aa (muted)\n"
     "ALWAYS dark theme. NEVER use Tailwind light/dark classes.\n\n"
-    "### Adding a New Dashboard Page (7 steps)\n"
-    "1. ghost_dashboard/routes/<page>.py — Flask blueprint with API endpoints\n"
-    "2. Register blueprint in routes/__init__.py\n"
-    "3. ghost_dashboard/static/js/pages/<page>.js — export render(container)\n"
-    "4. Add route entry in app.js navigate() function\n"
-    "5. Add sidebar link in templates/index.html\n"
-    "6. Add styles to dashboard.css following .<page>-* naming\n"
-    "7. Use patches in evolve_apply for ALL existing files\n\n"
+    "### Adding a Dashboard Page (2 paths)\n"
+    "A) VIA EXTENSION (preferred for new features):\n"
+    "   1. In extension.py: api.register_page({id, label, icon, section, js_path})\n"
+    "   2. Create ghost_extensions/<name>/static/<page>.js — export render(container)\n"
+    "   3. Optionally api.register_route(blueprint) for API endpoints\n"
+    "   The extension system auto-registers routes, nav links, and static serving.\n"
+    "   NO changes to core files needed.\n\n"
+    "B) CORE PAGES ONLY (for bug fixes to existing pages):\n"
+    "   1. ghost_dashboard/routes/<page>.py — Flask blueprint\n"
+    "   2. Register in routes/__init__.py\n"
+    "   3. ghost_dashboard/static/js/pages/<page>.js — export render(container)\n"
+    "   4. Add route in app.js + sidebar link in index.html\n\n"
     "### CORE API REFERENCE (do NOT hallucinate methods — use ONLY these)\n"
     "These are the EXACT public methods on the most-imported classes. If a method\n"
     "is not listed here, it does NOT exist. Always file_read the source to confirm.\n\n"
@@ -439,8 +450,9 @@ _GHOST_SYSTEM_MAP = (
 _PRE_PR_CHECKLIST = (
     "\n\n## PRE-PR SELF-REVIEW (MANDATORY — complete EVERY item before evolve_submit_pr)\n"
     "Run through this checklist mentally. If ANY item fails, fix it FIRST.\n\n"
-    "[ ] FILE COUNT: Count your changed files. New backend module → ghost.py wiring required.\n"
-    "    routes/<x>.py added → pages/<x>.js MUST also exist. No dead code.\n"
+    "[ ] ARCHITECTURE CHECK: Is this a new feature? Files must be under ghost_extensions/<name>/.\n"
+    "    If you modified ghost.py or routes/__init__.py for a new feature, STOP and redo as extension.\n"
+    "    Bug fixes may patch core files. New features NEVER touch core files.\n"
     "[ ] EXCEPTION HANDLING: grep your new code for 'except'. Every handler must\n"
     "    (a) catch a specific type, AND (b) log or re-raise. Zero bare except/silent pass.\n"
     "[ ] THREAD SAFETY: Does your code read+write any file that another thread could touch?\n"
@@ -456,8 +468,8 @@ _PRE_PR_CHECKLIST = (
     "    Optional params have defaults. Required params match schema.\n"
     "[ ] FRONTEND-BACKEND: JS payload shape == Python route's request.get_json() shape.\n"
     "    GET responses match what JS renders. Save→reload shows same data.\n"
-    "[ ] TOOL REGISTRATION: New module imported in ghost.py? build_*_tools() called\n"
-    "    in GhostDaemon.__init__? Tools registered via tool_registry.register()?\n"
+    "[ ] TOOL REGISTRATION: Extensions use api.register_tool() in register(api).\n"
+    "    Bug-fix modules: imported in ghost.py + build_*_tools() + tool_registry.register().\n"
     "[ ] NO DUPLICATE FEATURES: Did you check if a similar tool/module already exists?\n"
     "    grep for the capability before building a new one.\n"
     "[ ] INTERFACE COMPATIBILITY: For every 'from ghost_X import ClassName' in your new code,\n"
@@ -476,34 +488,49 @@ GROWTH_ROUTINES = [
             "You are Ghost running an autonomous TECH SCOUT routine. Your goal:\n"
             "1. Use memory_search to check what you scouted recently — avoid duplicate work.\n"
             "2. Use web_search (preferred) or web_fetch to browse AI/tech news sources. Look for:\n"
-            "   - New AI models or APIs Ghost could use\n"
-            "   - New developer tools that could become Ghost skills\n"
+            "   - New AI models or APIs Ghost could integrate with\n"
+            "   - New developer tools that could become Ghost extensions or skills\n"
             "   - Security patches or best practices relevant to Ghost\n"
             "3. BEFORE calling add_future_feature, you MUST verify Ghost doesn't already have this.\n"
             "   Do NOT rely on memory alone — search the actual codebase:\n"
             "   - grep(key_term, include='*.py') for each key technology/package/feature name\n"
+            "   - Also check ghost_extensions/ and ghost_nodes/ for existing extensions/nodes\n"
             "   - file_read requirements.txt to check if packages are already installed\n"
             "   - If grep finds matches, file_read the matching files to confirm the functionality\n"
             "     is already working code (not just a comment or TODO).\n"
             "   - If the feature/package/tool already exists and is working in Ghost, do NOT add it.\n"
             "     Log via memory_save that you confirmed it was already present and move on.\n\n"
+            "## EXTENSION-FIRST ARCHITECTURE\n"
+            "Ghost uses an EXTENSION system for new features. New capabilities should be\n"
+            "designed as self-contained extensions in ghost_extensions/<name>/, NOT as\n"
+            "modifications to core Ghost files (ghost.py, ghost_loop.py, etc.).\n"
+            "Only bug fixes and security patches modify core files.\n\n"
+            "When you discover a new capability Ghost should have, think:\n"
+            "- What TOOLS would this extension register? (e.g. 'translate_text', 'analyze_sentiment')\n"
+            "- What HOOKS would it subscribe to? (on_chat_message, on_media_generated, etc.)\n"
+            "- Does it need a DASHBOARD PAGE? (for config, monitoring, visualization)\n"
+            "- Does it need CRON JOBS? (periodic sync, cleanup, polling)\n"
+            "- What pip DEPENDENCIES does it need?\n\n"
             "4. If you find something actionable AND confirmed it is NOT already in Ghost,\n"
             "   use this decision tree:\n"
-            "   a. CODE CHANGES (features, improvements, fixes):\n"
+            "   a. NEW FEATURES / IMPROVEMENTS / INTEGRATIONS:\n"
             "      - You MUST call add_future_feature() — do NOT just write a summary.\n"
             "        Provide an IMPLEMENTATION-READY BRIEF:\n"
             "        * description: What you found and why it matters.\n"
-            "        * affected_files: ALL Ghost files that would need changes — use file_search\n"
-            "          to find every file that references similar existing features. Not just the\n"
-            "          primary module — include dashboard routes, JS pages, config, auth, etc.\n"
-            "        * proposed_approach: How to implement it — architecture, patterns, libraries.\n"
-            "          Include changes for EACH affected file.\n"
+            "        * affected_files: 'ghost_extensions/<name>/EXTENSION.yaml, "
+            "ghost_extensions/<name>/extension.py' (add static/<page>.js if it needs UI).\n"
+            "        * proposed_approach: Extension design — what tools/hooks/pages/cron it\n"
+            "          registers via ExtensionAPI. What the register(api) function does.\n"
+            "          What pip packages it needs. Reference existing extensions as examples.\n"
             "      - Set priority: P1 (high), P2 (medium), or P3 (low) based on value/effort.\n"
             "      - Set source='tech_scout', source_detail=news source URL.\n"
-            "      - Set category: 'feature', 'improvement', or 'security' as appropriate.\n"
-            "   b. MISSING DEPENDENCIES (needs pip package):\n"
+            "      - Set category: 'feature' or 'improvement' (NOT 'bugfix').\n"
+            "   b. BUG FIXES / SECURITY:\n"
+            "      - These DO modify core files. Set category='bugfix' or 'security'.\n"
+            "      - List the actual core file paths in affected_files.\n"
+            "   c. MISSING DEPENDENCIES (needs pip package):\n"
             "      - Install yourself with shell_exec: pip install <package> (requirements.txt auto-updates — do NOT edit it manually)\n"
-            "   c. USER INPUT REQUIRED (API keys, hardware, accounts):\n"
+            "   d. USER INPUT REQUIRED (API keys, hardware, accounts):\n"
             "      - Use add_action_item for human-required actions\n"
             "5. You do NOT have access to evolve tools. All code changes go through the\n"
             "   Future Features queue. The Evolution Runner implements them automatically.\n"
@@ -651,6 +678,34 @@ GROWTH_ROUTINES = [
             "- You MUST NOT defer work. There is no next run.\n"
             "- MAXIMUM 1 feature per run. After deploy, Ghost restarts.\n"
             "- NEVER call pause/shutdown/restart endpoints — those are USER-ONLY.\n\n"
+            "## EXTENSION-FIRST ARCHITECTURE (MANDATORY)\n"
+            "Check the feature's `implementation_type` field (shown by get_future_feature):\n"
+            "- `extension` → Build as ghost_extensions/<name>/ (see structure below)\n"
+            "- `core` → Modify core Ghost files directly (bug/security fixes ONLY)\n\n"
+            "For EXTENSIONS, you create files ONLY under ghost_extensions/<name>/:\n"
+            "```\n"
+            "ghost_extensions/<name>/\n"
+            "  EXTENSION.yaml    # manifest: name, version, description, category\n"
+            "                    # requires: {ghost_version, deps: [pip packages]}\n"
+            "                    # provides: {tools: [...], hooks: [...], pages: [...]}\n"
+            "  extension.py      # def register(api): — entry point\n"
+            "  static/           # optional JS/CSS if extension adds dashboard pages\n"
+            "```\n\n"
+            "The register(api) function receives an ExtensionAPI instance with these methods:\n"
+            "  api.register_tool({name, description, parameters, execute})  # add a tool\n"
+            "  api.register_hook(event, callback)     # subscribe to events\n"
+            "  api.register_cron(name, callback, schedule, description)  # add cron job\n"
+            "  api.register_page({id, label, icon, section, js_path})    # add dashboard page\n"
+            "  api.register_route(blueprint)           # add Flask API routes\n"
+            "  api.register_setting({key, type, default, label, description})  # declare setting\n"
+            "  api.get_setting(key, default) / api.set_setting(key, value)    # read/write settings\n"
+            "  api.read_data(filename) / api.write_data(filename, content)    # persistent storage\n"
+            "  api.log(message)                        # extension-scoped logging\n"
+            "  api.id, api.manifest, api.extension_dir, api.data_dir         # read-only properties\n\n"
+            "Events: on_boot, on_shutdown, on_chat_message, on_tool_call, on_media_generated, on_evolve_complete\n\n"
+            "⚠️ CRITICAL: Do NOT modify ghost.py, ghost_dashboard/routes/__init__.py, app.js,\n"
+            "   index.html, or ANY core file for new features. Extensions auto-register.\n"
+            "   If you touch core files for a feature, the PR WILL be rejected.\n\n"
             "## TOOLS\n"
             "grep('pattern', include='*.py') — search file contents.\n"
             "glob('ghost_*.py') — find files by name.\n"
@@ -706,30 +761,28 @@ GROWTH_ROUTINES = [
             "5. EXPLORE — you MUST do ALL of these before writing any code:\n"
             "   a) memory_search(query='<feature keywords>', type_filter='mistake')\n"
             "      — MANDATORY CALL. Check for known pitfalls. Read and apply lessons.\n"
-            "   b) file_read an existing similar ghost_*.py module. Copy its patterns for\n"
-            "      file I/O, error handling, locking, tool defs. Do NOT invent new patterns.\n"
-            "   c) file_read every file you plan to modify — understand full context.\n"
-            "   d) file_read every file you will IMPORT FROM — verify exact class methods\n"
+            "   b) For EXTENSIONS: file_read ghost_extensions/example-extension/extension.py\n"
+            "      and ghost_extensions/example-extension/EXTENSION.yaml to see the patterns.\n"
+            "      Also file_read an existing similar extension if one exists (grep ghost_extensions/).\n"
+            "      For BUG FIXES: file_read the files you plan to patch.\n"
+            "   c) file_read every file you will IMPORT FROM — verify exact class methods\n"
             "      and function signatures. NEVER assume you know a class's API.\n"
-            "      Example: if you import ToolLoopEngine from ghost_loop, file_read ghost_loop.py\n"
-            "      and find the actual method names (run, not run_once; get_all, not list_tools).\n"
-            "   e) grep for related code patterns across the codebase.\n\n"
-            "6. evolve_plan(description, files) — include ghost.py if adding a new module.\n\n"
+            "   d) grep for related code patterns across the codebase.\n"
+            "   e) Check ghost_extensions/ for existing extensions that do something similar.\n\n"
+            "6. evolve_plan(description, files)\n"
+            "   For EXTENSIONS: files=['ghost_extensions/<name>/EXTENSION.yaml', "
+            "'ghost_extensions/<name>/extension.py'] (add static/*.js if it needs UI).\n"
+            "   For BUG FIXES: list the core files to patch.\n"
+            "   ⚠️ NEVER include ghost.py, routes/__init__.py, or app.js for extensions.\n\n"
             "6b. 🔴 MANDATORY STOP — RE-READ DEPENDENCIES BEFORE ANY evolve_apply:\n"
             "    ⚠️ DO NOT call evolve_apply until you complete this step. ⚠️\n"
             "    Your file_read results from step 5 have been COMPACTED from context.\n"
-            "    You MUST re-read EVERY file you will import from RIGHT NOW:\n"
-            "      file_read('ghost_loop.py')   — if importing ToolLoopEngine/ToolRegistry\n"
-            "      file_read('ghost_tools.py')   — if importing tool helpers\n"
-            "      file_read('ghost_skills.py')  — if importing SkillLoader\n"
-            "      file_read('ghost.py', offset=880, limit=200)  — if adding tool registration\n"
-            "    Also re-read any file you will PATCH (not just import from):\n"
-            "      file_read('ghost_dashboard/routes/__init__.py')  — if adding a blueprint\n"
-            "      file_read('ghost_dashboard/static/js/app.js')    — if adding a page route\n"
-            "    This ensures the real API signatures and file contents are in your\n"
-            "    RECENT context (last 20 messages are never trimmed).\n"
-            "    Skipping this is the #1 cause of hallucinated method calls and\n"
-            "    'Patch target not found' errors in evolve_apply.\n\n"
+            "    For EXTENSIONS: file_read ghost_extensions/example-extension/extension.py\n"
+            "      to see the register(api) pattern. Also file_read ghost_extension_manager.py\n"
+            "      class ExtensionAPI to see the available methods.\n"
+            "    For BUG FIXES: re-read EVERY file you will patch RIGHT NOW.\n"
+            "    This ensures real content is in your RECENT context (never trimmed).\n"
+            "    Skipping this is the #1 cause of hallucinated method calls.\n\n"
             "7. evolve_apply — apply changes to EVERY file:\n"
             "   🔴 OUTPUT TOKEN LIMIT: Your max output is ~8K tokens (~150 lines of code).\n"
             "   Any evolve_apply(content=...) over 100 lines WILL truncate and fail with\n"
@@ -742,12 +795,15 @@ GROWTH_ROUTINES = [
             "   After ALL chunks are written: call file_read on the new file to see its\n"
             "   exact content BEFORE using patches on it. The actual whitespace may differ.\n"
             "   - NEVER use shell_exec to read, debug, or inspect file content. Use file_read.\n"
-            "   - NEVER use shell_exec/file_write to write code — not tracked, causes PR rejection.\n"
-            "   - NEW MODULE: Split into 2-4 evolve_apply calls with append=True.\n"
-            "   - WIRING (MANDATORY for new modules): import in ghost.py + register in __init__.\n"
-            "   - ROUTES: ghost_dashboard/routes/<feature>.py + register in routes/__init__.py\n"
-            "   - FRONTEND: ghost_dashboard/static/js/pages/<page>.js (if feature has UI).\n"
-            "   - A module not imported in ghost.py does NOTHING.\n\n"
+            "   - NEVER use shell_exec/file_write to write code — not tracked, causes PR rejection.\n\n"
+            "   FOR EXTENSIONS (implementation_type=extension):\n"
+            "   - Create EXTENSION.yaml with manifest metadata\n"
+            "   - Create extension.py with def register(api): that calls api.register_tool(), etc.\n"
+            "   - Create static/<page>.js if the extension needs a dashboard page\n"
+            "   - Extensions auto-register on load. Do NOT touch ghost.py or routes/__init__.py.\n\n"
+            "   FOR BUG FIXES (implementation_type=core):\n"
+            "   - Patch the specific core files listed in affected_files.\n"
+            "   - Use patches, not full rewrites.\n\n"
             "7b. CROSS-REFERENCE (mandatory after every evolve_apply):\n"
             "    Use delegate_task to verify your code with a fresh context window:\n"
             "    delegate_task(task='Read <new_file>. For every from ghost_X import Y,\n"
@@ -796,16 +852,12 @@ GROWTH_ROUTINES = [
             "## CODING RULES (violating ANY = instant PR rejection)\n"
             "- OUTPUT LIMIT: You can only produce ~150 lines per tool call. NEVER write >100\n"
             "  lines in a single evolve_apply. Use append=True to build files in chunks.\n"
-            "- New feature = new module (ghost_<feature>.py). Never dump unrelated code.\n"
+            "- New feature = NEW EXTENSION (ghost_extensions/<name>/). NEVER a new ghost_*.py module.\n"
+            "  Bug fixes = patch existing core files. This is the ONLY distinction.\n"
+            "- Extensions are self-contained: EXTENSION.yaml + extension.py + optional static/.\n"
+            "  They register tools/hooks/cron/pages via ExtensionAPI. They do NOT import ghost.py.\n"
             "- Dashboard: dark theme only. Classes: stat-card, btn, form-input, badge.\n"
             "- Never hardcode secrets. Validate inputs. Sanitize paths.\n"
-            "- Backend API added = frontend JS MUST call it. Dead endpoints = BLOCKED.\n"
-            "- routes/<x>.py without pages/<x>.js = INCOMPLETE. (Skip for internal-only features.)\n"
-            "- New module MUST be imported in ghost.py + registered in GhostDaemon.__init__.\n"
-            "- Shared files need threading.Lock + atomic writes (tempfile + os.replace).\n"
-            "- Path.mkdir(parents=True, exist_ok=True) BEFORE any write to new paths.\n"
-            "- Never read unbounded files into memory — use limits/slicing.\n"
-            "- NEVER 'from module import mutable_var' — use 'import module; module.var'.\n"
             "- Tool execute functions MUST accept **kwargs. Optional params need defaults.\n"
             "- NEVER bare except. NEVER except Exception: pass. Catch specific types + log.\n"
             "- Keep code SIMPLE. No unnecessary abstractions or over-engineering. One function, one job.\n"
@@ -813,7 +865,7 @@ GROWTH_ROUTINES = [
             "- Use SVG icons in dashboard UI. NEVER use emojis as icons.\n"
             "- API responses MUST return LIVE data from the actual store. NEVER return hardcoded defaults or stale values.\n"
             "- NEVER perform blocking I/O (pip install, network calls, large file reads) at module level or in __init__.\n"
-            "- Before building anything new, grep the codebase to check if a similar tool/module already exists.\n"
+            "- Before building anything new, grep ghost_extensions/ and ghost_nodes/ to check if a similar one already exists.\n"
             + _CODE_PATTERNS
             + _PRE_PR_CHECKLIST
             + _GHOST_SYSTEM_MAP
@@ -986,25 +1038,32 @@ GROWTH_ROUTINES = [
             "      → Only queue if the CONCEPT is something Ghost users would benefit from.\n"
             "   b. Check if Ghost ALREADY HAS this feature — search the actual codebase:\n"
             "      - grep(key_term, include='*.py') for each key technology/package name\n"
+            "      - Also check ghost_extensions/ and ghost_nodes/ for existing extensions/nodes\n"
             "      - file_read requirements.txt to check if packages are already installed\n"
             "      - If grep finds matches, file_read the matching files to confirm it's working code\n"
             "      - If the feature already exists and works in Ghost, SKIP IT. Do NOT add it.\n"
             "   c. Study OpenClaw's implementation using web_fetch on the GitHub repo.\n"
-            "   d. Assess priority: P0 (critical gap), P1 (high demand), P2 (nice-to-have), P3 (low).\n"
+            "   d. Assess priority: P0 (critical gap), P1 (high demand), P2 (nice-to-have), P3 (low).\n\n"
+            "## EXTENSION-FIRST ARCHITECTURE\n"
+            "Ghost uses an EXTENSION system for new features. New capabilities are built as\n"
+            "self-contained extensions in ghost_extensions/<name>/, NOT as modifications to\n"
+            "core Ghost files. Only bug fixes and security patches modify core files.\n\n"
+            "When you find a feature Ghost should have, design it as an extension:\n"
+            "- What TOOLS would it register? (the main capability)\n"
+            "- What HOOKS does it need? (on_chat_message, on_media_generated, etc.)\n"
+            "- Does it need a DASHBOARD PAGE?\n"
+            "- Does it need CRON JOBS?\n\n"
             "5. **MANDATORY: Call add_future_feature() for EVERY actionable finding.**\n"
             "   DO NOT just write a report. DO NOT just summarize findings in task_complete.\n"
             "   If you found a feature Ghost should have, you MUST call add_future_feature().\n"
             "   Writing a finding in your summary WITHOUT calling add_future_feature() is a FAILURE.\n"
             "   For each call, provide an IMPLEMENTATION-READY BRIEF:\n"
             "   - description: What the feature does in OpenClaw and why Ghost needs it.\n"
-            "   - affected_files: ALL Ghost files that need changes — not just the primary module.\n"
-            "     Use file_search to find every file that references similar existing features.\n"
-            "     Example: adding a new provider? Search for 'openrouter' across the codebase to\n"
-            "     find ghost_providers.py, ghost.py, setup.js, models.js, config.js, integrations.py, etc.\n"
-            "     List EVERY file, not just the obvious one.\n"
-            "   - proposed_approach: How to implement in Python using Ghost's patterns.\n"
-            "     Reference existing Ghost code as examples. Be specific about architecture.\n"
-            "     Include changes needed for EACH affected file, not just the primary one.\n"
+            "   - affected_files: 'ghost_extensions/<name>/EXTENSION.yaml, "
+            "ghost_extensions/<name>/extension.py' (add static/<page>.js if it needs UI).\n"
+            "   - proposed_approach: Extension design — what tools/hooks/pages/cron the\n"
+            "     extension registers via ExtensionAPI. What the register(api) function does.\n"
+            "     What pip packages it needs.\n"
             "   - source='competitive_intel', category='feature'\n"
             "   - source_detail: GitHub issue URL, X post URL, or discussion source\n"
             "   - estimated_effort: small/medium/large based on complexity\n"
@@ -1023,7 +1082,7 @@ GROWTH_ROUTINES = [
             "Remember: OpenClaw ships bare — users configure it themselves. Ghost ships batteries-included.\n"
             "Focus on features users repeatedly build manually for OpenClaw — those are Ghost's biggest wins.\n"
             "IMPORTANT: OpenClaw is Node.js/TypeScript, Ghost is Python. Study their CONCEPTS, "
-            "then reimplement in Python using Ghost's patterns (ghost_*.py modules, make_*() tool builders).\n"
+            "then design a Ghost EXTENSION (not core code changes) using ExtensionAPI.\n"
             "NEVER copy TypeScript code or try to use npm packages — translate the idea to Python.\n"
             + _CAPABILITIES
             + _DEV_STANDARDS
@@ -1307,7 +1366,7 @@ def run_self_repair(daemon):
         return False
 
     try:
-        report = json.loads(CRASH_REPORT_FILE.read_text())
+        report = json.loads(CRASH_REPORT_FILE.read_text(encoding="utf-8"))
     except Exception:
         CRASH_REPORT_FILE.unlink(missing_ok=True)
         return False
@@ -1328,7 +1387,7 @@ def run_self_repair(daemon):
     deleted_log_path = GHOST_HOME / "evolve" / "deleted_files.json"
     if deleted_log_path.exists():
         try:
-            deleted_log = json.loads(deleted_log_path.read_text())
+            deleted_log = json.loads(deleted_log_path.read_text(encoding="utf-8"))
             if deleted_log:
                 recently_deleted = [
                     e for e in deleted_log
@@ -1407,6 +1466,7 @@ def run_self_repair(daemon):
                     max_steps=50,
                     max_tokens=4096,
                     force_tool=False,
+                    extension_event_bus=getattr(daemon, "extension_event_bus", None),
                 )
             except Exception as e:
                 repair_error[0] = e

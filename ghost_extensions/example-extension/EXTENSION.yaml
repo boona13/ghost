@@ -1,0 +1,25 @@
+name: example-extension
+version: 0.1.0
+description: "Reference extension demonstrating the Ghost extension architecture"
+author: ghost-ai
+category: utility
+
+requires:
+  ghost_version: ">=2.0"
+  deps: []
+  extensions: []
+
+provides:
+  tools:
+    - example_hello
+  routes: []
+  pages: []
+  cron_jobs: []
+  settings:
+    - key: greeting
+      type: string
+      default: "Hello from the extension system!"
+      label: "Greeting Message"
+
+hooks:
+  - on_boot

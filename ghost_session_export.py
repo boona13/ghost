@@ -149,7 +149,7 @@ def _slugify(text: str, max_len: int = 40) -> str:
 
 def _sanitize_filename(filename: str) -> str:
     """Sanitize a filename to prevent directory traversal."""
-    filename = os.path.basename(filename)
+    filename = Path(filename).name
     filename = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", filename)
     return filename[:200]
 
@@ -608,7 +608,7 @@ def delete_export(identifier: str, **kwargs) -> dict[str, Any]:
         filepath = EXPORTS_DIR / filename
         
         # Ensure file is within exports dir (security check)
-        if not str(filepath.resolve()).startswith(str(EXPORTS_DIR.resolve())):
+        if not filepath.resolve().is_relative_to(EXPORTS_DIR.resolve()):
             return {"ok": False, "error": "Invalid filename"}
         
         if not filepath.exists():

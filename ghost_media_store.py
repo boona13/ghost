@@ -72,6 +72,7 @@ class MediaStore:
         self._db_lock = threading.Lock()
         self._disk_budget_mb = self.cfg.get("media_disk_budget_mb", 5000)
         self._default_ttl = self.cfg.get("media_default_ttl_secs", 0)
+        self.extension_event_bus = None
 
     def _migrate_add_provider_columns(self):
         """Add provider and cost_usd columns if they don't exist (v2 migration)."""
@@ -99,7 +100,8 @@ class MediaStore:
         media_id = uuid.uuid4().hex[:12]
         ts = time.strftime("%Y%m%d_%H%M%S")
 
-        name_base, ext = os.path.splitext(filename)
+        fp = Path(filename)
+        name_base, ext = fp.stem, fp.suffix
         if not ext:
             ext = _guess_extension(media_type)
         safe_name = f"{ts}_{media_id}{ext}"
@@ -128,6 +130,18 @@ class MediaStore:
 
         log.info("Media saved: %s (%s, %d bytes, node=%s, provider=%s)",
                  safe_name, media_type, size_bytes, source_node, provider)
+
+        if self.extension_event_bus:
+            try:
+                self.extension_event_bus.emit(
+                    "on_media_generated",
+                    path=str(out_path),
+                    type=media_type,
+                    metadata={"source_node": source_node, "prompt": prompt},
+                )
+            except Exception:
+                pass
+
         return str(out_path)
 
     def save_file(self, file_path: str, media_type: str = "image",
@@ -160,6 +174,18 @@ class MediaStore:
                  provider or "local", cost_usd or 0.0),
             )
             self._db.commit()
+
+        if self.extension_event_bus:
+            try:
+                self.extension_event_bus.emit(
+                    "on_media_generated",
+                    path=str(p),
+                    type=media_type,
+                    metadata={"source_node": source_node, "prompt": prompt},
+                )
+            except Exception:
+                pass
+
         return str(p)
 
     def get(self, media_id: str) -> Optional[dict]:

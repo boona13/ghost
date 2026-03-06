@@ -299,9 +299,9 @@ def configure_elevenlabs():
     if config_file.exists():
         try:
             import json
-            cfg = json.loads(config_file.read_text())
+            cfg = json.loads(config_file.read_text(encoding="utf-8"))
             cfg["elevenlabs_api_key"] = api_key
-            config_file.write_text(json.dumps(cfg, indent=2))
+            config_file.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
         except Exception:
             log.warning("Failed to save ElevenLabs API key", exc_info=True)
 
@@ -318,9 +318,9 @@ def disconnect_elevenlabs():
     if config_file.exists():
         try:
             import json
-            cfg = json.loads(config_file.read_text())
+            cfg = json.loads(config_file.read_text(encoding="utf-8"))
             cfg.pop("elevenlabs_api_key", None)
-            config_file.write_text(json.dumps(cfg, indent=2))
+            config_file.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
         except Exception:
             log.warning("Failed to remove ElevenLabs API key", exc_info=True)
 

@@ -157,7 +157,7 @@ def save_session(feed_entries: list, engine=None, memory_db=None,
         f"{content}\n"
     )
 
-    filepath.write_text(session_md)
+    filepath.write_text(session_md, encoding="utf-8")
     log.info("Session saved to %s", filepath)
 
     if memory_db:
@@ -474,7 +474,7 @@ def run_maintenance(cfg=None):
             try:
                 config_path = GHOST_HOME / "config.json"
                 if config_path.exists():
-                    cfg = json.loads(config_path.read_text())
+                    cfg = json.loads(config_path.read_text(encoding="utf-8"))
                 else:
                     cfg = {}
             except json.JSONDecodeError as exc:

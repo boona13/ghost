@@ -78,6 +78,8 @@ def _create_simple_mask(image, region="center"):
     elif region == "right":
         draw.rectangle([2 * w // 3, 0, w, h], fill=255)
     else:
+        cx, cy = w // 2, h // 2
+        r = min(w, h) // 4
         draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=255)
 
     return mask
@@ -168,9 +170,9 @@ def register(api):
                     "type": "string", "enum": ["center", "top", "bottom", "left", "right"],
                     "description": "Quick mask region if no mask_path provided.",
                 },
-                "model": {"type": "string", "enum": ["sd15", "sd2"], "description": "Model variant. Default: sd15."},
-                "steps": {"type": "integer", "description": "Inference steps (default: 30)."},
-                "strength": {"type": "number", "description": "Inpainting strength 0-1 (default: 0.8)."},
+                "model": {"type": "string", "enum": ["sd15", "sd2"], "description": "Model variant. Default: sd15.", "default": "sd15"},
+                "steps": {"type": "integer", "description": "Inference steps (default: 30).", "default": 30},
+                "strength": {"type": "number", "description": "Inpainting strength 0-1 (default: 0.8).", "default": 0.8},
                 "filename": {"type": "string", "description": "Output filename (optional)."},
             },
             "required": ["image_path"],

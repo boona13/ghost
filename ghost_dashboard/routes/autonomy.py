@@ -74,7 +74,7 @@ def get_status():
     if crash_file.exists():
         try:
             import json
-            crash_report = json.loads(crash_file.read_text())
+            crash_report = json.loads(crash_file.read_text(encoding="utf-8"))
         except Exception:
             log.warning("Failed to load crash report", exc_info=True)
 

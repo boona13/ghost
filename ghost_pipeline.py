@@ -330,13 +330,13 @@ class PipelineEngine:
     def _save(self, pipeline: Pipeline):
         save_path = PIPELINES_DIR / f"{pipeline.id}.json"
         tmp_path = save_path.with_suffix(".json.tmp")
-        tmp_path.write_text(json.dumps(pipeline.to_dict(), default=str, indent=2))
+        tmp_path.write_text(json.dumps(pipeline.to_dict(), default=str, indent=2), encoding="utf-8")
         tmp_path.replace(save_path)
 
     def _load_saved(self):
         for f in PIPELINES_DIR.glob("*.json"):
             try:
-                data = json.loads(f.read_text())
+                data = json.loads(f.read_text(encoding="utf-8"))
                 steps = [
                     PipelineStep(
                         id=s["id"], tool_name=s["tool_name"],

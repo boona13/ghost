@@ -194,13 +194,13 @@ class PRStore:
         if not path.exists():
             return None
         try:
-            return json.loads(path.read_text())
+            return json.loads(path.read_text(encoding="utf-8"))
         except Exception:
             return None
 
     def _write_pr_unlocked(self, pr: Dict):
         path = PR_DIR / f"{pr['pr_id']}.json"
-        path.write_text(json.dumps(pr, indent=2, default=str))
+        path.write_text(json.dumps(pr, indent=2, default=str), encoding="utf-8")
 
     def create_pr(self, evolution_id: str, feature_id: str, title: str,
                   description: str, branch: str, diff: str,
@@ -239,7 +239,7 @@ class PRStore:
             for f in sorted(PR_DIR.glob("pr-*.json"),
                             key=lambda p: p.stat().st_mtime, reverse=True):
                 try:
-                    pr = json.loads(f.read_text())
+                    pr = json.loads(f.read_text(encoding="utf-8"))
                     if status and pr.get("status") != status:
                         continue
                     if feature_id and pr.get("feature_id") != feature_id:
@@ -462,7 +462,7 @@ class ReviewEngine:
             if not abs_path.exists():
                 return f"File not found: {file}"
             try:
-                all_lines = abs_path.read_text().splitlines()
+                all_lines = abs_path.read_text(encoding="utf-8").splitlines()
                 start = max(0, offset - 1)
                 end = start + limit
                 selected = all_lines[start:end]
@@ -481,19 +481,29 @@ class ReviewEngine:
                 return "Error: pattern parameter is required."
             import subprocess
             try:
-                args = ["grep", "-rn", pattern, f"--include={include}", str(PROJECT_DIR)]
+                args = ["rg", "-n", pattern, f"--glob={include}", str(PROJECT_DIR)]
                 result = subprocess.run(
                     args, capture_output=True, text=True, timeout=10,
                 )
                 output = result.stdout.strip()
-                if not output:
-                    return f"No matches for '{pattern}' in {include}"
-                lines = output.split("\n")
-                if len(lines) > 30:
-                    return "\n".join(lines[:30]) + f"\n\n... ({len(lines)} total matches, showing first 30)"
-                return output
+            except FileNotFoundError:
+                output = ""
+                for fp in PROJECT_DIR.rglob(include):
+                    try:
+                        for i, line in enumerate(fp.read_text(encoding="utf-8", errors="ignore").splitlines(), 1):
+                            if pattern in line:
+                                output += f"{fp}:{i}:{line}\n"
+                    except Exception:
+                        continue
+                output = output.strip()
             except Exception as e:
                 return f"grep error: {e}"
+            if not output:
+                return f"No matches for '{pattern}' in {include}"
+            lines = output.split("\n")
+            if len(lines) > 30:
+                return "\n".join(lines[:30]) + f"\n\n... ({len(lines)} total matches, showing first 30)"
+            return output
 
         def leave_comment(file: str = "", line: int = 0, message: str = "",
                          severity: str = "warning", **kwargs) -> str:
@@ -803,7 +813,7 @@ class ReviewEngine:
         try:
             skill_path = PROJECT_DIR / "skills" / "pr-reviewer" / "SKILL.md"
             if skill_path.exists():
-                raw = skill_path.read_text()
+                raw = skill_path.read_text(encoding="utf-8")
                 if "---" in raw:
                     parts = raw.split("---", 2)
                     if len(parts) >= 3:

@@ -150,13 +150,14 @@ def register(api):
             "type": "object",
             "properties": {
                 "prompt": {"type": "string", "description": "Description of the sound to generate."},
-                "duration_secs": {"type": "integer", "description": "Duration in seconds (1-30, default: 5)."},
+                "duration_secs": {"type": "integer", "description": "Duration in seconds (1-30, default: 5).", "default": 5},
                 "model_variant": {
                     "type": "string", "enum": ["base", "music"],
                     "description": "Use 'base' for sound effects, 'music' for musical sounds. Default: base.",
+                    "default": "base",
                 },
                 "negative_prompt": {"type": "string", "description": "What to avoid (optional)."},
-                "steps": {"type": "integer", "description": "Inference steps (default: 50, max: 100)."},
+                "steps": {"type": "integer", "description": "Inference steps (default: 50, max: 100).", "default": 50},
                 "filename": {"type": "string", "description": "Output filename (optional)."},
             },
             "required": ["prompt"],

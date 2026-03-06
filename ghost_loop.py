@@ -47,12 +47,12 @@ MAX_RETRIES = 2
 RETRY_DELAY = 1.5
 DEFAULT_MAX_TOKENS = 4096
 DEFAULT_TOOL_RESULT_LIMIT = 6000
-DEFAULT_TIMEOUT = 90
-MAX_LLM_WALL_CLOCK = 300  # 5-minute hard deadline per LLM call (handles drip-feed keepalive)
+DEFAULT_TIMEOUT = 30
+MAX_LLM_WALL_CLOCK = 90   # 90s hard deadline per LLM call (fail fast, let fallback handle it)
 DEFAULT_MAX_STEPS = 200
-FALLBACK_COOLDOWN_SEC = 300   # 5 min before probing failed model again
-FALLBACK_PROBE_INTERVAL = 60  # seconds between probes of a cooled-down model
-NETWORK_COOLDOWN_SEC = 15     # short cooldown for DNS/connection errors (transient)
+FALLBACK_COOLDOWN_SEC = 60    # 1 min before probing failed model again
+FALLBACK_PROBE_INTERVAL = 15  # probe every 15s so primary recovers quickly
+NETWORK_COOLDOWN_SEC = 10     # short cooldown for DNS/connection errors (transient)
 JITTER_FACTOR = 0.3           # ±30% randomness on retry delays
 
 GHOST_HOME = Path.home() / ".ghost"
@@ -185,22 +185,24 @@ class ModelFallbackChain:
         self._active = (provider, model)
 
     @staticmethod
-    def _is_network_error(error: str) -> bool:
-        """Detect transient DNS/connection failures vs real model errors."""
-        network_markers = (
+    def _is_transient_error(error: str) -> bool:
+        """Detect transient failures that deserve a short cooldown."""
+        transient_markers = (
             "NameResolutionError", "Failed to resolve", "nodename nor servname",
             "ConnectionRefusedError", "ConnectionResetError", "ConnectionError",
             "Max retries exceeded", "NewConnectionError", "gaierror",
+            "Response ended prematurely", "stream error", "Timeout on",
+            "HTTP 429", "HTTP 502", "HTTP 503", "HTTP 529",
         )
-        return any(m in error for m in network_markers)
+        return any(m in error for m in transient_markers)
 
     def record_failure(self, provider: str, model: str, error: str = ""):
         k = f"{provider}:{model}"
         self._stats.setdefault(k, {"ok": 0, "fail": 0})
         self._stats[k]["fail"] += 1
-        if self._is_network_error(error):
+        if self._is_transient_error(error):
             self._failures[k] = time.time() - (self._cooldown_sec - NETWORK_COOLDOWN_SEC)
-            log.warning("%s:%s network error (%s), short cooldown %ds",
+            log.warning("%s:%s transient error (%s), short cooldown %ds",
                         provider, model, error[:80], NETWORK_COOLDOWN_SEC)
         else:
             self._failures[k] = time.time()
@@ -253,16 +255,15 @@ class ToolLoopDebugLogger:
                     old = DEBUG_LOG_DIR / f"tool_loop_debug.jsonl.{i}"
                     new = DEBUG_LOG_DIR / f"tool_loop_debug.jsonl.{i+1}"
                     if old.exists():
-                        old.rename(new)
-                # Rotate current file to .1
-                DEBUG_LOG_FILE.rename(DEBUG_LOG_DIR / "tool_loop_debug.jsonl.1")
+                        old.replace(new)
+                DEBUG_LOG_FILE.replace(DEBUG_LOG_DIR / "tool_loop_debug.jsonl.1")
         except Exception:
             pass
 
     def _write(self, record: dict):
         try:
             self._rotate_if_needed()
-            with open(str(DEBUG_LOG_FILE), "a") as f:
+            with open(str(DEBUG_LOG_FILE), "a", encoding="utf-8") as f:
                 f.write(json.dumps(record, default=str) + "\n")
         except Exception:
             pass
@@ -417,8 +418,8 @@ class EvolveContextLogger:
         try:
             if EVOLVE_CTX_LOG.exists() and EVOLVE_CTX_LOG.stat().st_size > _MAX_EVOLVE_CTX_LOG:
                 rotated = EVOLVE_CTX_LOG.with_suffix(".jsonl.1")
-                EVOLVE_CTX_LOG.rename(rotated)
-            with open(str(EVOLVE_CTX_LOG), "a") as f:
+                EVOLVE_CTX_LOG.replace(rotated)
+            with open(str(EVOLVE_CTX_LOG), "a", encoding="utf-8") as f:
                 f.write(json.dumps(record, default=str) + "\n")
         except Exception:
             pass
@@ -1682,7 +1683,7 @@ class ToolLoopEngine:
             max_steps=DEFAULT_MAX_STEPS, temperature=0.3, max_tokens=DEFAULT_MAX_TOKENS,
             image_b64=None, images=None, on_step=None, force_tool=False, history=None,
             cancel_check=None, hook_runner=None, tool_intent_security=None, model_override=None,
-            enable_reasoning=False):
+            enable_reasoning=False, extension_event_bus=None):
         """
         Run the autonomous tool loop.
 
@@ -1739,6 +1740,12 @@ class ToolLoopEngine:
             messages.append({"role": "user", "content": content_parts})
         else:
             messages.append({"role": "user", "content": user_message})
+
+        if extension_event_bus:
+            try:
+                extension_event_bus.emit("on_chat_message", role="user", content=user_message)
+            except Exception:
+                pass
 
         # Use model_override if provided, otherwise fall back to default model
         effective_model = model_override if model_override else self.model
@@ -2076,6 +2083,17 @@ class ToolLoopEngine:
                             )
                             if modified_result is not None and isinstance(modified_result, str):
                                 tool_result = modified_result
+
+                        if extension_event_bus:
+                            try:
+                                extension_event_bus.emit(
+                                    "on_tool_call",
+                                    tool_name=fn_name,
+                                    args=exec_args,
+                                    result=tool_result[:500] if tool_result else "",
+                                )
+                            except Exception:
+                                pass
 
                         loop_detector.record_result(call_id, tool_result)
 

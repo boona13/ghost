@@ -42,7 +42,7 @@ def get_ghost_google_credentials() -> tuple[Optional[str], Optional[str]]:
     oauth_file = GHOST_HOME / "google_oauth.json"
     if oauth_file.exists():
         try:
-            config = json.loads(oauth_file.read_text())
+            config = json.loads(oauth_file.read_text(encoding="utf-8"))
             return config.get("client_id"), config.get("client_secret")
         except Exception:
             pass
@@ -57,7 +57,7 @@ def save_ghost_google_credentials(client_id: str, client_secret: Optional[str] =
     config = {"client_id": client_id}
     if client_secret:
         config["client_secret"] = client_secret
-    oauth_file.write_text(json.dumps(config, indent=2))
+    oauth_file.write_text(json.dumps(config, indent=2), encoding="utf-8")
 
 
 def has_ghost_google_credentials() -> bool:
@@ -113,7 +113,7 @@ def load_integrations_config() -> Dict[str, Any]:
     """Load integrations configuration from file."""
     if INTEGRATIONS_FILE.exists():
         try:
-            return json.loads(INTEGRATIONS_FILE.read_text())
+            return json.loads(INTEGRATIONS_FILE.read_text(encoding="utf-8"))
         except Exception:
             pass
     return {}
@@ -122,7 +122,7 @@ def load_integrations_config() -> Dict[str, Any]:
 def save_integrations_config(config: Dict[str, Any]):
     """Save integrations configuration to file."""
     GHOST_HOME.mkdir(parents=True, exist_ok=True)
-    INTEGRATIONS_FILE.write_text(json.dumps(config, indent=2))
+    INTEGRATIONS_FILE.write_text(json.dumps(config, indent=2), encoding="utf-8")
 
 
 def generate_pkce_challenge() -> tuple:
@@ -1323,7 +1323,7 @@ def _resolve_openrouter_key() -> Optional[str]:
     try:
         cfg_file = GHOST_HOME / "config.json"
         if cfg_file.exists():
-            data = json.loads(cfg_file.read_text())
+            data = json.loads(cfg_file.read_text(encoding="utf-8"))
             k = data.get("api_key", "")
             if k and k != "__SETUP_PENDING__":
                 return k

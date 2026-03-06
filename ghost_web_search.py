@@ -122,7 +122,7 @@ def _get_openrouter_key() -> Optional[str]:
     try:
         cfg_file = GHOST_HOME / "config.json"
         if cfg_file.exists():
-            cfg = json.loads(cfg_file.read_text())
+            cfg = json.loads(cfg_file.read_text(encoding="utf-8"))
             k = cfg.get("api_key", "")
             if k and k != "__SETUP_PENDING__":
                 return k
@@ -143,7 +143,7 @@ def _get_grok_key() -> Optional[str]:
     try:
         int_file = GHOST_HOME / "integrations.json"
         if int_file.exists():
-            cfg = json.loads(int_file.read_text())
+            cfg = json.loads(int_file.read_text(encoding="utf-8"))
             return cfg.get("grok", {}).get("api_key") or None
     except Exception:
         pass

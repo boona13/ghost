@@ -496,7 +496,7 @@ class Provider(ChannelProvider):
             web = self._ensure_web_session()
             if not web.connected and not web.linking:
                 db_path = str(WA_DATA_DIR / "session.db")
-                if Path(db_path).exists() and os.path.getsize(db_path) > 0:
+                if Path(db_path).exists() and Path(db_path).stat().st_size > 0:
                     web.start_link()
 
         return self._configured

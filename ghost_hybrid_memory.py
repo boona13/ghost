@@ -535,7 +535,7 @@ class TemporalDecay:
         for r in results:
             updated = r.get("updated_at")
             path = r.get("path", "")
-            if os.path.basename(path) in EVERGREEN_NAMES:
+            if Path(path).name in EVERGREEN_NAMES:
                 continue
             if updated:
                 age_days = (now - updated) / 86400.0
@@ -669,7 +669,7 @@ class HybridMemoryManager:
         embedding_provider: EmbeddingProvider | None = None,
     ):
         self.db_path = str(db_path or DEFAULT_DB_PATH)
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
 
         self._provider = embedding_provider or SimpleEmbeddingProvider()
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -731,7 +731,7 @@ class HybridMemoryManager:
     def index_file(self, path: str, source: str = "memory") -> int:
         """Read a file, chunk it, embed chunks, store everything. Returns chunk count."""
         try:
-            text = Path(path).read_text(errors="replace")
+            text = Path(path).read_text(encoding="utf-8", errors="replace")
         except (OSError, UnicodeDecodeError):
             return 0
 

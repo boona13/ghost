@@ -34,7 +34,7 @@ class NodeRegistry:
     def _load_cache(self):
         if self._cache_file.exists():
             try:
-                data = json.loads(self._cache_file.read_text())
+                data = json.loads(self._cache_file.read_text(encoding="utf-8"))
                 self._cache = data.get("nodes", [])
                 self._last_fetch = data.get("fetched_at", 0)
             except Exception:
@@ -44,7 +44,7 @@ class NodeRegistry:
         self._cache_file.write_text(json.dumps({
             "nodes": self._cache,
             "fetched_at": self._last_fetch,
-        }, indent=2))
+        }, indent=2), encoding="utf-8")
 
     def refresh(self) -> dict:
         """Fetch the latest registry index from GitHub."""

@@ -17,7 +17,7 @@ CREDENTIALS_FILE = GHOST_HOME / "credentials.json"
 def _load_credentials() -> List[Dict[str, Any]]:
     if CREDENTIALS_FILE.exists():
         try:
-            return json.loads(CREDENTIALS_FILE.read_text())
+            return json.loads(CREDENTIALS_FILE.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return []
     return []
@@ -25,7 +25,7 @@ def _load_credentials() -> List[Dict[str, Any]]:
 
 def _save_credentials(creds: List[Dict[str, Any]]):
     GHOST_HOME.mkdir(parents=True, exist_ok=True)
-    CREDENTIALS_FILE.write_text(json.dumps(creds, indent=2))
+    CREDENTIALS_FILE.write_text(json.dumps(creds, indent=2), encoding="utf-8")
 
 
 def build_credential_tools() -> list:

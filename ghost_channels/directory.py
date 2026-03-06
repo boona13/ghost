@@ -57,7 +57,7 @@ def _load_cache() -> Dict[str, Any]:
     with _cache_lock:
         if CONTACTS_CACHE_FILE.exists():
             try:
-                return json.loads(CONTACTS_CACHE_FILE.read_text())
+                return json.loads(CONTACTS_CACHE_FILE.read_text(encoding="utf-8"))
             except Exception:
                 pass
     return {}
@@ -66,7 +66,7 @@ def _load_cache() -> Dict[str, Any]:
 def _save_cache(data: Dict[str, Any]):
     with _cache_lock:
         GHOST_HOME.mkdir(parents=True, exist_ok=True)
-        CONTACTS_CACHE_FILE.write_text(json.dumps(data, indent=2, default=str))
+        CONTACTS_CACHE_FILE.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
 
 
 class DirectoryMixin:

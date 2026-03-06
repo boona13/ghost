@@ -106,13 +106,13 @@ class ChannelSecurityEnforcer:
         path.write_text(json.dumps({
             "timestamp": time.time(), "iso_time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "sender_id": sender_id, "channel_id": channel_id, "risk_score": risk_score, "text": text,
-        }, indent=2))
+        }, indent=2), encoding="utf-8")
         log.warning("Quarantined: %s (risk=%d)", path, risk_score)
         return path
 
     def _append_audit_log(self, entry: Dict[str, Any]):
         try:
-            with open(CHANNEL_AUDIT_LOG, "a") as f:
+            with open(CHANNEL_AUDIT_LOG, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry) + "\n")
         except Exception as e:
             log.error("Audit log write failed: %s", e)
@@ -121,7 +121,7 @@ class ChannelSecurityEnforcer:
         result = []
         for f in sorted(self._quarantine_dir.glob("quarantine_*.json")):
             try:
-                data = json.loads(f.read_text())
+                data = json.loads(f.read_text(encoding="utf-8"))
                 data["_quarantine_path"] = str(f)
                 result.append(data)
             except (json.JSONDecodeError, OSError) as e:
@@ -146,7 +146,7 @@ def build_channel_security_tools(config: Dict[str, Any]) -> List[Dict[str, Any]]
         entries = []
         if CHANNEL_AUDIT_LOG.exists():
             try:
-                with open(CHANNEL_AUDIT_LOG) as f:
+                with open(CHANNEL_AUDIT_LOG, encoding="utf-8") as f:
                     lines = f.readlines()
                 for line in reversed(lines[-limit:]):
                     try:

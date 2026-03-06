@@ -3,7 +3,8 @@ version: 1.0.0
 description: >
   Smart video generation router that picks the best backend (local or cloud)
   based on quality, budget, and availability. Single entry point for all video
-  generation — delegates to local Wan2.1, Kling, Runway, or Minimax as appropriate.
+  generation — delegates to local Wan2.1, Kling, Runway, Minimax, or Runware
+  (unified multi-model API) as appropriate.
 author: ghost-ai
 category: video
 license: MIT

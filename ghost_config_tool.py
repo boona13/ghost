@@ -278,14 +278,14 @@ def get_tool_model(key: str, cfg: dict | None = None) -> str:
 def _load_config() -> dict:
     if CONFIG_FILE.exists():
         try:
-            return json.loads(CONFIG_FILE.read_text())
+            return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
         except Exception:
             pass
     return {}
 
 
 def _save_config(cfg: dict):
-    CONFIG_FILE.write_text(json.dumps(cfg, indent=2))
+    CONFIG_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
 
 def _sanitize_for_display(cfg: dict) -> dict:
