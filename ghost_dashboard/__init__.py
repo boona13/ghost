@@ -5,10 +5,19 @@ Can run standalone:     run_dashboard(port=3333)
 Or embedded in daemon:  start_with_daemon(daemon, port=3333)
 """
 
-import os, webbrowser, threading, logging, socket
+import os, webbrowser, threading, logging, socket, secrets
 from werkzeug.serving import make_server
-from flask import Flask
+from flask import Flask, request, jsonify
 from pathlib import Path
+
+# CSRF protection (optional - gracefully degrades if not installed)
+try:
+    from flask_wtf.csrf import CSRFProtect, generate_csrf
+    _csrf_available = True
+except ImportError:
+    _csrf_available = False
+    CSRFProtect = None
+    generate_csrf = None
 
 
 def _is_port_available(host: str, port: int) -> bool:
@@ -49,6 +58,18 @@ def create_app():
 
     from .routes import register_routes
     register_routes(app)
+
+    # Initialize CSRF protection (if available)
+    if _csrf_available:
+        app.config["SECRET_KEY"] = os.environ.get("GHOST_SECRET_KEY", secrets.token_hex(32))
+        app.config["WTF_CSRF_TIME_LIMIT"] = 3600  # 1 hour token validity
+        csrf = CSRFProtect(app)
+        # Exempt webhook endpoints that use Bearer token auth
+        csrf.exempt("/api/webhooks/trigger")
+    else:
+        logging.getLogger("ghost_dashboard").warning(
+            "CSRF protection not available - install flask-wtf: pip install flask-wtf"
+        )
 
     try:
         from ghost_device_auth import get_pairing_store as _get_pairing_store
@@ -94,6 +115,14 @@ def create_app():
             response.headers["Pragma"] = "no-cache"
             response.headers["Expires"] = "0"
         return response
+
+    @app.route("/api/csrf-token", methods=["GET"])
+    def get_csrf_token():
+        """Return a fresh CSRF token for the frontend."""
+        if _csrf_available and generate_csrf:
+            token = generate_csrf()
+            return jsonify({"csrf_token": token})
+        return jsonify({"csrf_token": ""})
 
     return app
 
@@ -197,5 +226,5 @@ def run_dashboard(port=3333, open_browser=True):
     finally:
         try:
             server.shutdown()
-        except Exception:
-            pass
+        except (OSError, RuntimeError) as exc:
+            logging.getLogger("ghost_dashboard").warning("Server shutdown error: %s", exc)
