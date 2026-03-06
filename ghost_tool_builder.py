@@ -499,15 +499,16 @@ class ToolManager:
 
     def create_tool(self, name: str, description: str, code: str,
                     hooks: list[str] | None = None,
-                    deps: list[str] | None = None) -> dict:
+                    deps: list[str] | None = None,
+                    overwrite: bool = False) -> dict:
         """Create a new tool folder with TOOL.yaml and tool.py."""
         import re
         if not re.match(r"^[a-z][a-z0-9_]{1,48}$", name):
             return {"status": "error", "error": "Invalid tool name. Use lowercase, underscores, 2-50 chars."}
 
         tool_dir = TOOLS_DIR / name
-        if tool_dir.exists():
-            return {"status": "error", "error": f"Tool '{name}' already exists"}
+        if tool_dir.exists() and not overwrite:
+            return {"status": "error", "error": f"Tool '{name}' already exists. Set overwrite=true to replace it."}
 
         try:
             tool_dir.mkdir(parents=True)
@@ -784,10 +785,11 @@ def build_tool_manager_tools(manager: ToolManager) -> list[dict]:
         }, default=str)
 
     def execute_create(name: str = "", description: str = "", code: str = "",
-                       hooks: list | None = None, deps: list | None = None, **_kw):
+                       hooks: list | None = None, deps: list | None = None,
+                       overwrite: bool = False, **_kw):
         if not name or not code:
             return json.dumps({"status": "error", "error": "name and code required"})
-        return json.dumps(manager.create_tool(name, description, code, hooks, deps), default=str)
+        return json.dumps(manager.create_tool(name, description, code, hooks, deps, overwrite=overwrite), default=str)
 
     def execute_install_github(repo_url: str = "", subdir: str = "", **_kw):
         if not repo_url:
@@ -825,7 +827,8 @@ def build_tool_manager_tools(manager: ToolManager) -> list[dict]:
             "name": "tools_create",
             "description": (
                 "Create a new ghost tool. Writes TOOL.yaml and tool.py to ghost_tools/<name>/. "
-                "The code must define a register(api) function that calls api.register_tool()."
+                "The code must define a register(api) function that calls api.register_tool(). "
+                "Set overwrite=true to replace an existing tool."
             ),
             "parameters": {
                 "type": "object",
@@ -835,6 +838,7 @@ def build_tool_manager_tools(manager: ToolManager) -> list[dict]:
                     "code": {"type": "string", "description": "Full Python source for tool.py"},
                     "hooks": {"type": "array", "items": {"type": "string"}, "description": "Lifecycle hooks to subscribe to"},
                     "deps": {"type": "array", "items": {"type": "string"}, "description": "pip dependencies"},
+                    "overwrite": {"type": "boolean", "description": "Replace existing tool if it exists (default false)"},
                 },
                 "required": ["name", "description", "code"],
             },
