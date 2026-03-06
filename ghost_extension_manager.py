@@ -436,6 +436,101 @@ class ExtensionAPI:
         out.write_bytes(data)
         return str(out)
 
+    # ── High-level convenience methods ──────────────────────────────
+
+    def llm_summarize(self, text: str, instruction: str = "Summarize the following text.",
+                      max_tokens: int = 512) -> Optional[str]:
+        """One-shot LLM call for summarization, extraction, or classification.
+
+        Returns the LLM's text response, or None on failure.
+        Use this instead of regex/string-splitting for any intelligent
+        text processing.
+        """
+        daemon = self._daemon_ref
+        if not daemon:
+            log.warning("[ext:%s] llm_summarize: no daemon ref", self.id)
+            return None
+        engine = getattr(daemon, "engine", None)
+        if not engine:
+            log.warning("[ext:%s] llm_summarize: no engine available", self.id)
+            return None
+        try:
+            result = engine.single_shot(
+                system_prompt=instruction,
+                user_message=text[:32000],
+                temperature=0.15,
+                max_tokens=max_tokens,
+            )
+            if hasattr(result, "text"):
+                return result.text
+            return result
+        except Exception as exc:
+            log.warning("[ext:%s] llm_summarize error: %s", self.id, exc)
+            return None
+
+    def memory_save(self, content: str, tags: str = "",
+                    memory_type: str = "note") -> bool:
+        """Save content to Ghost's persistent memory.
+
+        Use this instead of registering a separate memory-save tool
+        (which would conflict with Ghost's core memory_save).
+        """
+        db = self.get_memory_db()
+        if not db:
+            log.warning("[ext:%s] memory_save: memory_db not available", self.id)
+            return False
+        try:
+            db.save(content=content, type=memory_type,
+                    tags=tags, source_preview=content[:120])
+            return True
+        except Exception as exc:
+            log.warning("[ext:%s] memory_save error: %s", self.id, exc)
+            return False
+
+    def memory_search(self, query: str, limit: int = 5) -> list:
+        """Search Ghost's persistent memory. Returns list of result dicts."""
+        db = self.get_memory_db()
+        if not db:
+            return []
+        try:
+            return db.search(query=query, limit=limit)
+        except Exception as exc:
+            log.warning("[ext:%s] memory_search error: %s", self.id, exc)
+            return []
+
+    def channel_send(self, message: str, channel_id: Optional[str] = None) -> bool:
+        """Send a message through Ghost's channel router (Telegram, Slack, etc.).
+
+        If channel_id is None, sends to the default/primary channel.
+        Returns True on success.
+        """
+        daemon = self._daemon_ref
+        router = getattr(daemon, "channel_router", None) if daemon else None
+        if not router:
+            log.warning("[ext:%s] channel_send: no channel_router available", self.id)
+            return False
+        try:
+            result = router.send(text=message, channel=channel_id)
+            return getattr(result, "ok", False)
+        except Exception as exc:
+            log.warning("[ext:%s] channel_send error: %s", self.id, exc)
+            return False
+
+    def get_channels(self) -> list:
+        """Return list of configured channel IDs (e.g. ['telegram', 'ntfy']).
+
+        Useful for checking if a channel is available before sending.
+        """
+        daemon = self._daemon_ref
+        registry = getattr(daemon, "channel_registry", None) if daemon else None
+        if not registry:
+            return []
+        try:
+            return registry.list_configured()
+        except Exception as exc:
+            log.warning("[ext:%s] get_channels error: %s", self.id, exc)
+            return []
+
 
 # ═════════════════════════════════════════════════════════════════════
 #  EXTENSION INFO

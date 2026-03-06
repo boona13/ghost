@@ -1,6 +1,6 @@
 name: example_extension
-version: 0.1.0
-description: "Reference extension demonstrating the Ghost extension architecture"
+version: 0.2.0
+description: "Reference extension demonstrating all Ghost extension patterns: LLM intelligence, memory, data persistence, hooks, and settings"
 author: ghost-ai
 category: utility
 
@@ -11,15 +11,17 @@ requires:
 
 provides:
   tools:
-    - example_hello
+    - example_smart_summarize
   routes: []
   pages: []
   cron_jobs: []
   settings:
-    - key: greeting
-      type: string
-      default: "Hello from the extension system!"
-      label: "Greeting Message"
+    - key: max_summary_length
+      type: integer
+      default: 200
+      label: "Max Summary Length"
+      description: "Maximum word count for generated summaries"
 
 hooks:
   - on_boot
+  - on_chat_message

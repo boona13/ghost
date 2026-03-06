@@ -723,9 +723,29 @@ class EvolutionEngine:
 
         return results["passed"], results
 
+    _CORE_TOOL_NAMES = frozenset({
+        "memory_save", "memory_search", "web_fetch", "web_search",
+        "file_read", "file_write", "file_search", "shell_exec", "notify",
+        "channel_send", "grep", "glob", "app_control", "uptime",
+        "workspace_write", "image_gen", "vision_analyze", "tts_speak",
+        "voice_clone", "canvas_draw", "evolve_plan", "evolve_apply",
+        "evolve_test", "evolve_deploy", "evolve_rollback", "evolve_submit_pr",
+        "evolve_delete", "evolve_resume", "list_future_features",
+        "get_future_feature", "add_future_feature", "reject_future_feature",
+        "start_future_feature", "complete_future_feature",
+        "add_action_item", "log_growth_activity",
+        "task_complete", "get_feature_stats", "mark_feature_audited",
+    })
+
     def _validate_extensions(self, evo):
-        """Validate extension manifests and entry points for changed extensions."""
+        """Validate extension manifests and entry points for changed extensions.
+
+        Checks: manifest exists/valid, extension.py has register(), tool name
+        conflicts, stub detection, manifest-vs-register consistency, and
+        settings usage.
+        """
         issues = []
+        warnings = []
         ext_dirs = set()
         for change in evo.get("changes", []):
             fpath = change["file"]
@@ -746,11 +766,17 @@ class EvolutionEngine:
                 issues.append(f"Extension '{ext_name}': missing EXTENSION.yaml")
                 continue
 
+            manifest = None
+            manifest_tools = []
+            manifest_settings = []
             try:
                 from ghost_extension_manager import ExtensionManifest
                 manifest = ExtensionManifest.from_yaml(manifest_path)
                 if not manifest.name:
                     issues.append(f"Extension '{ext_name}': manifest missing 'name' field")
+                manifest_tools = manifest.provides.get("tools", []) if isinstance(manifest.provides, dict) else []
+                raw_settings = manifest.provides.get("settings", []) if isinstance(manifest.provides, dict) else []
+                manifest_settings = [s.get("key") for s in raw_settings if isinstance(s, dict) and s.get("key")]
             except Exception as e:
                 issues.append(f"Extension '{ext_name}': invalid manifest: {e}")
                 continue
@@ -763,16 +789,178 @@ class EvolutionEngine:
             try:
                 source = ext_py.read_text(encoding="utf-8")
                 tree = ast.parse(source, filename=str(ext_py))
-                has_register = any(
-                    isinstance(node, ast.FunctionDef) and node.name == "register"
-                    for node in ast.walk(tree)
-                )
-                if not has_register:
-                    issues.append(f"Extension '{ext_name}': extension.py missing register() function")
             except SyntaxError as e:
                 issues.append(f"Extension '{ext_name}': syntax error in extension.py line {e.lineno}: {e.msg}")
+                continue
 
+            has_register = any(
+                isinstance(node, ast.FunctionDef) and node.name == "register"
+                for node in ast.walk(tree)
+            )
+            if not has_register:
+                issues.append(f"Extension '{ext_name}': extension.py missing register() function")
+                continue
+
+            registered_tools = []
+            try:
+                registered_tools, _, _ = self._mock_register_extension(ext_dir, ext_name)
+            except Exception as e:
+                warnings.append(
+                    f"Extension '{ext_name}': mock registration failed ({e}); "
+                    "skipping runtime checks"
+                )
+
+            for tool_name in registered_tools:
+                if tool_name in self._CORE_TOOL_NAMES:
+                    issues.append(
+                        f"Extension '{ext_name}': tool '{tool_name}' shadows a core Ghost tool. "
+                        "Rename with an extension-specific prefix."
+                    )
+
+            self._check_stubs(tree, ext_name, source, warnings)
+
+            if registered_tools and manifest_tools:
+                manifest_set = set(manifest_tools)
+                registered_set = set(registered_tools)
+                extra_in_code = registered_set - manifest_set
+                if extra_in_code:
+                    warnings.append(
+                        f"Extension '{ext_name}': tools registered but not in EXTENSION.yaml provides.tools: "
+                        f"{extra_in_code}"
+                    )
+                missing_in_code = manifest_set - registered_set
+                if missing_in_code:
+                    warnings.append(
+                        f"Extension '{ext_name}': tools in EXTENSION.yaml but not registered: "
+                        f"{missing_in_code}"
+                    )
+
+            if manifest_settings:
+                uses_get_setting = "get_setting" in source
+                if not uses_get_setting:
+                    warnings.append(
+                        f"Extension '{ext_name}': declares settings {manifest_settings} in EXTENSION.yaml "
+                        "but never calls api.get_setting() in extension.py"
+                    )
+
+        for w in warnings:
+            log.warning("[evolve-validate] %s", w)
         return issues
+
+    @staticmethod
+    def _mock_register_extension(ext_dir, ext_name):
+        """Run register(api) with a recording mock to discover what gets registered."""
+        tools, hooks, pages = [], [], []
+
+        class _MockAPI:
+            id = ext_name
+            manifest = None
+            extension_dir = ext_dir
+            data_dir = ext_dir
+            _config = {}
+
+            def register_tool(self, tool_def):
+                tools.append(tool_def.get("name", ""))
+
+            def register_hook(self, event, callback):
+                hooks.append(event)
+
+            def register_page(self, page_def):
+                pages.append(page_def)
+
+            def register_route(self, bp):
+                pass
+
+            def register_cron(self, name, callback, schedule, description=""):
+                pass
+
+            def register_setting(self, schema):
+                pass
+
+            def get_setting(self, key, default=None):
+                return default
+
+            def set_setting(self, key, value):
+                pass
+
+            def read_data(self, filename):
+                return None
+
+            def write_data(self, filename, content):
+                pass
+
+            def log(self, msg):
+                pass
+
+            def llm_summarize(self, text, instruction="", max_tokens=512):
+                return None
+
+            def memory_save(self, content, tags="", memory_type="note"):
+                return True
+
+            def memory_search(self, query, limit=5):
+                return []
+
+            def channel_send(self, message, channel_id=None):
+                return False
+
+            def get_channels(self):
+                return []
+
+            def get_daemon_ref(self):
+                return None
+
+            def get_tool_registry(self):
+                return None
+
+            def get_memory_db(self):
+                return None
+
+            def get_media_store(self):
+                return None
+
+            def save_media(self, data, filename, media_type="image", **kw):
+                return ""
+
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            f"ghost_ext_{ext_name}", ext_dir / "extension.py"
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        if hasattr(mod, "register"):
+            mod.register(_MockAPI())
+
+        return tools, hooks, pages
+
+    @staticmethod
+    def _check_stubs(tree, ext_name, source, warnings):
+        """Detect trivially empty tool execute functions via AST."""
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if not node.name.startswith("execute"):
+                continue
+            meaningful = 0
+            for child in ast.walk(node):
+                if isinstance(child, (ast.Call, ast.Assign, ast.AugAssign,
+                                      ast.If, ast.For, ast.While, ast.With,
+                                      ast.Try)):
+                    meaningful += 1
+            if meaningful < 2:
+                warnings.append(
+                    f"Extension '{ext_name}': function '{node.name}' at line {node.lineno} "
+                    "appears to be a stub (fewer than 2 meaningful statements)"
+                )
+            segment = ast.get_source_segment(source, node) if hasattr(ast, "get_source_segment") else ""
+            if segment:
+                lower = segment.lower()
+                for stub_phrase in ("not implemented", "coming soon", "not configured", "todo"):
+                    if stub_phrase in lower:
+                        warnings.append(
+                            f"Extension '{ext_name}': function '{node.name}' at line {node.lineno} "
+                            f"contains stub indicator '{stub_phrase}'"
+                        )
 
     # ── Semantic Lint ─────────────────────────────────────────────
 
