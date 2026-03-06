@@ -672,54 +672,54 @@ def register(api):
     #  HOOKS
     # ═════════════════════════════════════════════════════════════════
     
-    def on_tool_result(**kwargs):
-        """Auto-capture lightweight checkpoint after successful tool calls."""
+    _SIGNIFICANT_TOOLS = {
+        "shell_exec", "file_write", "file_read", "web_fetch",
+        "web_search", "evolve_apply", "evolve_test", "evolve_submit_pr",
+        "browser_navigate", "browser_click", "memory_save",
+    }
+
+    def on_tool_call(**kwargs):
+        """Auto-capture lightweight checkpoint after significant tool calls.
+
+        Receives kwargs from on_tool_call event:
+          tool_name, args, result, session_id, step
+        """
         if not api.get_setting("auto_checkpoint_enabled", True):
             return
-        
+
         tool_name = kwargs.get("tool_name", "")
         result = kwargs.get("result", "")
-        session_context = kwargs.get("session_context", {})
-        
-        session_id = session_context.get("session_id", "")
+        session_id = kwargs.get("session_id", "")
+        step = kwargs.get("step", 0)
+
         if not session_id:
-            return  # Can't auto-capture without session context
-        
-        # Only capture for significant tools (not internal/debug)
-        significant_tools = [
-            "shell_exec", "file_write", "file_read", "web_fetch",
-            "web_search", "evolve_apply", "evolve_test", "evolve_submit_pr",
-            "browser_navigate", "browser_click", "memory_save",
-        ]
-        
-        if tool_name not in significant_tools:
             return
-        
-        # Build lightweight checkpoint
+
+        if tool_name not in _SIGNIFICANT_TOOLS:
+            return
+
         timestamp = datetime.utcnow().isoformat() + "Z"
         journal_id = _generate_journal_id(session_id, timestamp)
-        
-        # Truncate result for storage
         result_preview = str(result)[:500] if result else ""
-        
+
         checkpoint = {
             "journal_id": journal_id,
             "session_id": session_id,
             "timestamp": timestamp,
-            "label": f"Auto: {tool_name} completed",
-            "goal": session_context.get("goal", ""),
-            "completed_steps": session_context.get("completed_steps", []) + [f"{tool_name}: {result_preview[:100]}..."],
-            "pending_steps": session_context.get("pending_steps", []),
-            "artifacts": _redact_sensitive(session_context.get("artifacts", {})),
+            "label": f"Auto: {tool_name} (step {step})",
+            "goal": "",
+            "completed_steps": [f"{tool_name}: {result_preview[:100]}"],
+            "pending_steps": [],
+            "artifacts": {},
             "context": {
                 "auto_captured": True,
                 "trigger_tool": tool_name,
+                "step": step,
                 "result_preview": result_preview,
             },
             "version": "1.0",
         }
-        
-        # Write to session file (fire and forget, don't block)
+
         path = _get_session_path(session_id)
         try:
             with _file_lock:
@@ -728,53 +728,57 @@ def register(api):
             _recent_checkpoints[journal_id] = checkpoint
         except Exception as exc:
             log.debug("Auto-checkpoint failed (non-critical): %s", exc)
-    
-    api.register_hook("on_tool_result", on_tool_result)
-    
-    def on_generation_interrupt(**kwargs):
-        """Capture state when generation is interrupted."""
-        session_context = kwargs.get("session_context", {})
-        session_id = session_context.get("session_id", "")
-        
+
+    api.register_hook("on_tool_call", on_tool_call)
+
+    def on_tool_loop_error(**kwargs):
+        """Capture state when a tool loop fails.
+
+        Receives kwargs from on_tool_loop_error event:
+          session_id, error, step
+        """
+        session_id = kwargs.get("session_id", "")
         if not session_id:
             return
-        
+
+        error_msg = kwargs.get("error", "unknown error")
+        step = kwargs.get("step", 0)
         timestamp = datetime.utcnow().isoformat() + "Z"
         journal_id = _generate_journal_id(session_id, timestamp)
-        
+
         checkpoint = {
             "journal_id": journal_id,
             "session_id": session_id,
             "timestamp": timestamp,
-            "label": "Auto: Generation interrupted",
-            "goal": session_context.get("goal", ""),
-            "completed_steps": session_context.get("completed_steps", []),
-            "pending_steps": session_context.get("pending_steps", []),
-            "artifacts": _redact_sensitive(session_context.get("artifacts", {})),
+            "label": f"Auto: Loop error at step {step}",
+            "goal": "",
+            "completed_steps": [],
+            "pending_steps": [],
+            "artifacts": {},
             "context": {
                 "auto_captured": True,
-                "interrupt_reason": kwargs.get("reason", "unknown"),
-                "interrupt_data": kwargs.get("data", {}),
+                "error": str(error_msg)[:500],
+                "step": step,
             },
             "version": "1.0",
         }
-        
+
         path = _get_session_path(session_id)
         try:
             with _file_lock:
                 with open(path, 'a', encoding='utf-8') as f:
                     f.write(json.dumps(checkpoint, default=str) + '\n')
             _recent_checkpoints[journal_id] = checkpoint
-            
+
             api.memory_save(
-                content=f"[Journal] Auto-captured interrupt checkpoint for session {session_id}",
-                tags="journal,interrupt,automation",
+                content=f"[Journal] Auto-captured error checkpoint for session {session_id}: {error_msg[:100]}",
+                tags="journal,error,automation",
                 memory_type="note"
             )
         except Exception as exc:
-            log.warning("Interrupt checkpoint failed: %s", exc)
-    
-    api.register_hook("on_generation_interrupt", on_generation_interrupt)
+            log.warning("Error checkpoint failed: %s", exc)
+
+    api.register_hook("on_tool_loop_error", on_tool_loop_error)
     
     def on_boot():
         """Prune old checkpoints on startup."""

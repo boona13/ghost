@@ -1,6 +1,6 @@
 name: example_extension
-version: 0.2.0
-description: "Reference extension demonstrating all Ghost extension patterns: LLM intelligence, memory, data persistence, hooks, and settings"
+version: 0.3.0
+description: "Reference extension demonstrating all Ghost extension patterns: tools, dashboard page with API routes, LLM intelligence, memory, data persistence, hooks, and settings"
 author: ghost-ai
 category: utility
 
@@ -12,8 +12,14 @@ requires:
 provides:
   tools:
     - example_smart_summarize
-  routes: []
-  pages: []
+  routes:
+    - example_api
+  pages:
+    - id: example_extension
+      label: Example
+      icon: beaker
+      section: system
+      js_path: example_page.js
   cron_jobs: []
   settings:
     - key: max_summary_length

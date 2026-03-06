@@ -825,10 +825,11 @@ class EvolutionEngine:
                 continue
 
             registered_tools = []
+            registered_hooks = []
             registered_pages = []
             registered_routes = []
             try:
-                registered_tools, _, registered_pages, registered_routes = (
+                registered_tools, registered_hooks, registered_pages, registered_routes = (
                     self._mock_register_extension(ext_dir, ext_name))
             except Exception as e:
                 warnings.append(
@@ -844,6 +845,17 @@ class EvolutionEngine:
                     )
 
             self._check_stubs(tree, ext_name, source, warnings)
+
+            if registered_hooks:
+                from ghost_extension_manager import VALID_EXTENSION_EVENTS
+                for hook_event in registered_hooks:
+                    if hook_event not in VALID_EXTENSION_EVENTS:
+                        issues.append(
+                            f"Extension '{ext_name}': registers hook for unknown event "
+                            f"'{hook_event}'. Valid events: "
+                            f"{', '.join(sorted(VALID_EXTENSION_EVENTS))}. "
+                            "This hook will never fire."
+                        )
 
             if registered_tools and manifest_tools:
                 manifest_set = set(manifest_tools)
@@ -889,9 +901,102 @@ class EvolutionEngine:
                             f"{js_file} does not exist."
                         )
 
+            self._validate_extension_js(
+                ext_name, ext_dir, registered_pages, registered_routes,
+                issues, warnings
+            )
+
         for w in warnings:
             log.warning("[evolve-validate] %s", w)
         return issues
+
+    @staticmethod
+    def _validate_extension_js(ext_name, ext_dir, registered_pages,
+                                registered_routes, issues, warnings):
+        """Validate extension JS files: endpoint patterns and route matching."""
+        import re
+
+        static_dir = ext_dir / "static"
+        if not static_dir.is_dir():
+            return
+
+        bp_route_paths = set()
+        for bp in registered_routes:
+            prefix = getattr(bp, "url_prefix", "") or ""
+            try:
+                for rule_func in getattr(bp, "deferred_functions", []):
+                    pass
+            except Exception:
+                pass
+
+        js_files = list(static_dir.glob("*.js"))
+        for js_file in js_files:
+            try:
+                js_content = js_file.read_text(encoding="utf-8")
+            except Exception:
+                continue
+
+            tool_calls = re.findall(
+                r"""GhostAPI\.(post|get|put|patch|del)\s*\(\s*['"](/tool/[^'"]+)['"]""",
+                js_content
+            )
+            if tool_calls:
+                endpoints = [url for _, url in tool_calls]
+                issues.append(
+                    f"Extension '{ext_name}': {js_file.name} calls tool endpoints "
+                    f"{endpoints} — tools are NOT HTTP endpoints. Use /api/{ext_name}/... "
+                    "routes served by a Flask Blueprint instead."
+                )
+
+            if registered_pages:
+                api_calls = re.findall(
+                    r"""GhostAPI\.(post|get|put|patch|del)\s*\(\s*['"](/api/[^'"]+)['"]""",
+                    js_content
+                )
+                if not api_calls:
+                    has_any_call = re.search(
+                        r"""GhostAPI\.(post|get|put|patch|del)\s*\(""", js_content
+                    )
+                    if has_any_call:
+                        warnings.append(
+                            f"Extension '{ext_name}': {js_file.name} makes API calls "
+                            "but none to /api/... endpoints. Verify endpoints are correct."
+                        )
+
+                if api_calls and registered_routes:
+                    for bp in registered_routes:
+                        prefix = getattr(bp, "url_prefix", "") or ""
+                        try:
+                            for rule in getattr(bp, "_rules", []):
+                                rule_path = prefix + rule.get("rule", "")
+                                bp_route_paths.add(rule_path)
+                        except Exception:
+                            pass
+
+                    if bp_route_paths:
+                        for _, url in api_calls:
+                            clean_url = url.split("?")[0].rstrip("/")
+                            if clean_url not in bp_route_paths:
+                                matched = any(
+                                    clean_url.startswith(rp.rstrip("/"))
+                                    for rp in bp_route_paths
+                                )
+                                if not matched:
+                                    warnings.append(
+                                        f"Extension '{ext_name}': {js_file.name} calls "
+                                        f"'{url}' but no matching route found in Blueprint. "
+                                        "Verify the endpoint exists."
+                                    )
+
+        if registered_routes:
+            for bp in registered_routes:
+                deferred = getattr(bp, "deferred_functions", [])
+                if not deferred:
+                    warnings.append(
+                        f"Extension '{ext_name}': registered Blueprint "
+                        f"'{getattr(bp, 'name', '?')}' has no route handlers. "
+                        "Add @bp.route(...) decorated functions."
+                    )
 
     @staticmethod
     def _mock_register_extension(ext_dir, ext_name):

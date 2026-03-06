@@ -39,6 +39,6 @@ provides:
       description: "Number of days to keep checkpoints before auto-pruning"
 
 hooks:
-  - on_tool_result
-  - on_generation_interrupt
+  - on_tool_call
+  - on_tool_loop_error
   - on_boot

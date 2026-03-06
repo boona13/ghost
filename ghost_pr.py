@@ -131,6 +131,62 @@ api.js  — window.GhostAPI: get/post/put/patch/del wrappers
 Pages in pages/*.js — each exports render(container)
 New pages MUST have: route in app.js, sidebar link in index.html
 
+### Extension Validation (ghost_extensions/*/)
+Extensions live in ghost_extensions/<name>/ with EXTENSION.yaml, extension.py, and optional static/.
+When reviewing PRs that touch ghost_extensions/, enforce ALL of these rules:
+
+1. PAGE → ROUTE RULE: If extension.py calls api.register_page(), it MUST also call
+   api.register_route(blueprint) with a Flask Blueprint. Pages without routes cannot
+   load data — this is the #1 cause of broken extensions. BLOCK if missing.
+
+2. JS ENDPOINT RULE: Extension JS files MUST call /api/<ext_name>/... endpoints
+   (served by the Blueprint). They must NEVER call /tool/... — tools registered via
+   api.register_tool() are NOT HTTP endpoints. If JS contains GhostAPI.post('/tool/
+   or GhostAPI.get('/tool/, BLOCK immediately.
+
+3. JSON RESPONSE RULE: Every Flask route in the extension Blueprint must return
+   jsonify({...}), NOT json.dumps() strings. json.dumps returns a string that Flask
+   wraps as text/html, breaking the JS JSON parser.
+
+4. FORM LAYOUT RULE: Any <input> or <textarea> inside a modal in extension JS must
+   include style="width:100%;box-sizing:border-box" to prevent the cramped-input bug.
+   The form-input CSS class alone does NOT set width.
+
+5. YAML CONSISTENCY: EXTENSION.yaml provides.routes must list the Blueprint name if
+   the extension has routes. provides.pages must list page definitions if
+   api.register_page() is called. Mismatched YAML causes silent load failures.
+
+6. NO STUBS: Each api.register_tool() execute function must contain substantive logic.
+   Stubs returning "not implemented" or "coming soon" MUST be BLOCKED.
+
+7. ENDPOINT MATCHING: If the JS calls /api/<name>/foo, the Blueprint must have a
+   @bp.route("/foo") handler. Use grep_codebase to cross-check JS calls vs Python routes.
+
+8. DASHBOARD PAGE UX: Check who the page is for:
+   - If the extension registers tools Ghost uses AUTONOMOUSLY (automation, journaling,
+     monitoring, etc.), the dashboard page MUST be a read-only VIEWER/MANAGER — show
+     history, browse entries, export data. It must NOT expose raw tool parameters as a
+     manual input form. If the JS has a <form> or modal with fields that match tool
+     parameter names (session_id, completed_steps, pending_steps, artifacts, etc.),
+     REQUEST_CHANGES — the page should be a viewer, not a tool-parameter form.
+   - If the extension is USER-FACING (user triggers the action), forms are acceptable
+     but must be simple (1-2 fields, no internal IDs, no multi-line structured input).
+   - Empty states must have explanatory text, not just "No data" or a blank area.
+
+9. HOOK EVENT VALIDATION: Every api.register_hook(event, callback) must use a valid
+   event name. The ONLY valid events are: on_boot, on_shutdown, on_chat_message,
+   on_tool_call, on_tool_loop_complete, on_tool_loop_error, on_media_generated,
+   on_evolve_complete. If the extension registers a hook for ANY other event name
+   (e.g. on_tool_result, on_chat_started, on_generation_interrupt), BLOCK immediately —
+   these hooks will silently never fire. Also verify the handler reads the correct
+   kwargs for the event:
+     on_chat_message: role, content, session_id
+     on_tool_call: tool_name, args, result, session_id, step
+     on_tool_loop_complete: session_id, tool_count, steps, exit_reason
+     on_tool_loop_error: session_id, error, step
+     on_media_generated: path, type, metadata
+     on_evolve_complete: evolution_id, status
+
 ## CORE API REFERENCE (use this to verify method calls in PRs)
 These are the EXACT public methods on the most-imported classes.
 If the PR calls a method NOT listed here, use grep_codebase to verify

@@ -1744,7 +1744,12 @@ class ToolLoopEngine:
 
         if extension_event_bus:
             try:
-                extension_event_bus.emit("on_chat_message", role="user", content=user_message)
+                extension_event_bus.emit(
+                    "on_chat_message",
+                    role="user",
+                    content=user_message,
+                    session_id=_debug_logger._session_id or "",
+                )
             except Exception:
                 pass
 
@@ -1906,11 +1911,31 @@ class ToolLoopEngine:
                     log.error("Context overflow persists after %d compaction attempts", consecutive_errors)
                     final_text = f"Context overflow — could not reduce context after {consecutive_errors} attempts"
                     exit_reason = "context_overflow"
+                    if extension_event_bus:
+                        try:
+                            extension_event_bus.emit(
+                                "on_tool_loop_error",
+                                session_id=_debug_logger._session_id or "",
+                                error=final_text,
+                                step=step,
+                            )
+                        except Exception:
+                            pass
                     break
 
                 if consecutive_errors >= 3:
                     final_text = error
                     exit_reason = "llm_error"
+                    if extension_event_bus:
+                        try:
+                            extension_event_bus.emit(
+                                "on_tool_loop_error",
+                                session_id=_debug_logger._session_id or "",
+                                error=error[:500],
+                                step=step,
+                            )
+                        except Exception:
+                            pass
                     break
                 messages.append({"role": "assistant", "content": f"(Internal error: {error}. Retrying...)"})
                 time.sleep(1)
@@ -2092,6 +2117,8 @@ class ToolLoopEngine:
                                     tool_name=fn_name,
                                     args=exec_args,
                                     result=tool_result[:500] if tool_result else "",
+                                    session_id=_debug_logger._session_id or "",
+                                    step=step,
                                 )
                             except Exception:
                                 pass
@@ -2371,6 +2398,18 @@ class ToolLoopEngine:
             if _prev_ctx_feature_id:
                 _ctx_logger._feature_id = _prev_ctx_feature_id
                 _ctx_logger._feature_title = _prev_ctx_feature_title
+
+        if extension_event_bus:
+            try:
+                extension_event_bus.emit(
+                    "on_tool_loop_complete",
+                    session_id=_debug_logger._session_id or "",
+                    tool_count=len(tool_calls_log),
+                    steps=steps_used,
+                    exit_reason=exit_reason or "unknown",
+                )
+            except Exception:
+                pass
 
         return ToolLoopResult(
             text=final_text,

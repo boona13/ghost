@@ -203,6 +203,13 @@ class ExtensionManifest:
 #  EXTENSION EVENT BUS
 # ═════════════════════════════════════════════════════════════════════
 
+VALID_EXTENSION_EVENTS = {
+    "on_boot", "on_shutdown", "on_chat_message",
+    "on_tool_call", "on_tool_loop_complete", "on_tool_loop_error",
+    "on_media_generated", "on_evolve_complete",
+}
+
+
 class ExtensionEventBus:
     """Lightweight pub/sub for extension lifecycle hooks."""
 
@@ -211,6 +218,13 @@ class ExtensionEventBus:
         self._lock = threading.Lock()
 
     def subscribe(self, event: str, callback: Callable, extension_id: str):
+        if event not in VALID_EXTENSION_EVENTS:
+            log.warning(
+                "Extension '%s' tried to subscribe to unknown event '%s'. "
+                "Valid events: %s. Hook will NOT be registered.",
+                extension_id, event, ", ".join(sorted(VALID_EXTENSION_EVENTS)),
+            )
+            return
         with self._lock:
             self._handlers[event].append((extension_id, callback))
 
