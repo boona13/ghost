@@ -830,6 +830,74 @@ def register(api):
     api.register_hook("on_boot", on_boot)
     
     # ═════════════════════════════════════════════════════════════════
+    #  DASHBOARD API ROUTES
+    # ═════════════════════════════════════════════════════════════════
+
+    from flask import Blueprint, request as flask_request, jsonify
+
+    bp = Blueprint("journal_api", __name__, url_prefix="/api/journal")
+
+    @bp.route("/list", methods=["POST"])
+    def api_list():
+        data = flask_request.get_json(silent=True) or {}
+        result = json.loads(execute_journal_list(**data))
+        return jsonify(result)
+
+    @bp.route("/checkpoint", methods=["POST"])
+    def api_checkpoint():
+        data = flask_request.get_json(silent=True) or {}
+        result = json.loads(execute_journal_checkpoint(**data))
+        return jsonify(result)
+
+    @bp.route("/resume", methods=["POST"])
+    def api_resume():
+        data = flask_request.get_json(silent=True) or {}
+        result = json.loads(execute_journal_resume(**data))
+        return jsonify(result)
+
+    @bp.route("/export", methods=["POST"])
+    def api_export():
+        data = flask_request.get_json(silent=True) or {}
+        result = json.loads(execute_journal_export(**data))
+        return jsonify(result)
+
+    @bp.route("/detail", methods=["POST"])
+    def api_detail():
+        """Fetch full checkpoint data by journal_id (read-only, no side effects)."""
+        data = flask_request.get_json(silent=True) or {}
+        journal_id = data.get("journal_id", "")
+        if not journal_id:
+            return jsonify({"status": "error", "error": "journal_id is required"})
+
+        checkpoint = _recent_checkpoints.get(journal_id)
+        if not checkpoint:
+            try:
+                for f in journals_dir.glob("*.jsonl"):
+                    with open(f, 'r', encoding='utf-8') as file:
+                        for line in file:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                cp = json.loads(line)
+                                if cp.get("journal_id") == journal_id:
+                                    checkpoint = cp
+                                    break
+                            except json.JSONDecodeError:
+                                continue
+                    if checkpoint:
+                        break
+            except OSError as exc:
+                return jsonify({"status": "error", "error": str(exc)})
+
+        if not checkpoint:
+            return jsonify({"status": "error", "error": "Checkpoint not found"})
+
+        return jsonify({"status": "ok", "checkpoint": checkpoint})
+
+    api.register_route(bp)
+
+    # ═════════════════════════════════════════════════════════════════
     #  DASHBOARD PAGE
     # ═════════════════════════════════════════════════════════════════
     

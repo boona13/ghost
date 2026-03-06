@@ -10,6 +10,7 @@ window.GhostPages.durable_turn_journal = {
   currentSession: null,
   checkpoints: [],
   sessions: [],
+  selectedCheckpoint: null,
 
   render(container) {
     this.container = container;
@@ -66,9 +67,9 @@ window.GhostPages.durable_turn_journal = {
       </div>
       
       <!-- New Checkpoint Modal -->
-      <div id="checkpoint-modal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50">
+      <div id="checkpoint-modal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50" style="display:none">
         <div class="stat-card w-full max-w-lg mx-4">
-          <div class="flex justify-between items-center mb-4">
+          <div class="flex justify-between items-center mb-6">
             <h3 class="text-lg font-medium text-white">Create Checkpoint</h3>
             <button class="text-zinc-400 hover:text-white" id="btn-close-modal">
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -77,28 +78,28 @@ window.GhostPages.durable_turn_journal = {
             </button>
           </div>
           
-          <div class="space-y-4">
+          <form id="checkpoint-form" class="space-y-4" style="width:100%">
             <div>
-              <label class="form-label">Session ID</label>
-              <input type="text" class="form-input" id="input-session-id" placeholder="e.g., task-123">
+              <label class="form-label" for="input-session-id">Session ID</label>
+              <input type="text" class="form-input" id="input-session-id" placeholder="e.g., task-123" style="width:100%;box-sizing:border-box">
             </div>
             <div>
-              <label class="form-label">Label</label>
-              <input type="text" class="form-input" id="input-label" placeholder="Checkpoint description">
+              <label class="form-label" for="input-label">Label</label>
+              <input type="text" class="form-input" id="input-label" placeholder="Checkpoint description" style="width:100%;box-sizing:border-box">
             </div>
             <div>
-              <label class="form-label">Goal</label>
-              <textarea class="form-input" id="input-goal" rows="2" placeholder="Current objective"></textarea>
+              <label class="form-label" for="input-goal">Goal</label>
+              <textarea class="form-input" id="input-goal" rows="2" placeholder="Current objective" style="width:100%;box-sizing:border-box"></textarea>
             </div>
             <div>
-              <label class="form-label">Completed Steps (one per line)</label>
-              <textarea class="form-input" id="input-completed" rows="3"></textarea>
+              <label class="form-label" for="input-completed">Completed Steps (one per line)</label>
+              <textarea class="form-input" id="input-completed" rows="3" style="width:100%;box-sizing:border-box"></textarea>
             </div>
             <div>
-              <label class="form-label">Pending Steps (one per line)</label>
-              <textarea class="form-input" id="input-pending" rows="3"></textarea>
+              <label class="form-label" for="input-pending">Pending Steps (one per line)</label>
+              <textarea class="form-input" id="input-pending" rows="3" style="width:100%;box-sizing:border-box"></textarea>
             </div>
-          </div>
+          </form>
           
           <div class="flex justify-end gap-3 mt-6">
             <button class="btn btn-ghost" id="btn-cancel">Cancel</button>
@@ -108,7 +109,7 @@ window.GhostPages.durable_turn_journal = {
       </div>
       
       <!-- Checkpoint Detail Modal -->
-      <div id="detail-modal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50">
+      <div id="detail-modal" class="fixed inset-0 bg-black/60 hidden items-center justify-center z-50" style="display:none">
         <div class="stat-card w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto">
           <div class="flex justify-between items-center mb-4">
             <h3 class="text-lg font-medium text-white">Checkpoint Details</h3>
@@ -118,7 +119,9 @@ window.GhostPages.durable_turn_journal = {
               </svg>
             </button>
           </div>
-          <div id="detail-content" class="space-y-4"></div>
+          <div id="detail-content" class="space-y-4">
+            <div class="text-zinc-500 text-sm">Loading...</div>
+          </div>
           <div class="flex justify-end gap-3 mt-6">
             <button class="btn btn-secondary" id="btn-export-json">Export JSON</button>
             <button class="btn btn-secondary" id="btn-export-md">Export Markdown</button>
@@ -143,7 +146,6 @@ window.GhostPages.durable_turn_journal = {
     document.getElementById('btn-export-json').addEventListener('click', () => this.exportSession('json'));
     document.getElementById('btn-export-md').addEventListener('click', () => this.exportSession('markdown'));
     
-    // Close modals on backdrop click
     document.getElementById('checkpoint-modal').addEventListener('click', (e) => {
       if (e.target.id === 'checkpoint-modal') this.hideModal();
     });
@@ -152,10 +154,9 @@ window.GhostPages.durable_turn_journal = {
     });
   },
 
-
   async loadSessions() {
     try {
-      const result = await window.GhostAPI.post('/tool/journal_list', {});
+      const result = await window.GhostAPI.post('/api/journal/list', {});
       this.sessions = result.sessions || [];
       this.renderSessions();
       this.updateStats();
@@ -186,11 +187,10 @@ window.GhostPages.durable_turn_journal = {
       </div>
     `).join('');
     
-    // Add click handlers
     container.querySelectorAll('[data-session]').forEach(el => {
       el.addEventListener('click', () => {
         this.currentSession = el.dataset.session;
-        this.renderSessions(); // Re-render to update selection
+        this.renderSessions();
         this.loadCheckpoints(this.currentSession);
       });
     });
@@ -201,7 +201,7 @@ window.GhostPages.durable_turn_journal = {
     container.innerHTML = `<div class="text-zinc-500 text-sm">Loading...</div>`;
     
     try {
-      const result = await window.GhostAPI.post('/tool/journal_list', { session_id: sessionId });
+      const result = await window.GhostAPI.post('/api/journal/list', { session_id: sessionId });
       this.checkpoints = result.checkpoints || [];
       this.renderCheckpoints();
     } catch (err) {
@@ -232,7 +232,6 @@ window.GhostPages.durable_turn_journal = {
       </div>
     `).join('');
     
-    // Add click handlers
     container.querySelectorAll('.checkpoint-item').forEach(el => {
       el.addEventListener('click', () => {
         const idx = parseInt(el.dataset.idx);
@@ -241,71 +240,123 @@ window.GhostPages.durable_turn_journal = {
     });
   },
 
-  showCheckpointDetail(checkpoint) {
-    this.selectedCheckpoint = checkpoint;
-    const content = document.getElementById('detail-content');
-    
-    content.innerHTML = `
-      <div class="grid grid-cols-2 gap-4 text-sm">
-        <div>
-          <span class="text-zinc-500">ID:</span>
-          <span class="text-zinc-300 font-mono">${window.GhostUtils.escapeHtml(checkpoint.journal_id)}</span>
-        </div>
-        <div>
-          <span class="text-zinc-500">Timestamp:</span>
-          <span class="text-zinc-300">${window.GhostUtils.formatDate(checkpoint.timestamp)}</span>
-        </div>
-      </div>
-      
-      ${checkpoint.goal ? `
-        <div>
-          <span class="text-zinc-500 text-sm">Goal:</span>
-          <p class="text-zinc-300 mt-1">${window.GhostUtils.escapeHtml(checkpoint.goal)}</p>
-        </div>
-      ` : ''}
-      
-      ${checkpoint.completed_steps?.length ? `
-        <div>
-          <span class="text-zinc-500 text-sm">Completed Steps:</span>
-          <ul class="mt-1 space-y-1">
-            ${checkpoint.completed_steps.map(s => `<li class="text-zinc-300 text-sm">${window.GhostUtils.escapeHtml(s)}</li>`).join('')}
-          </ul>
-        </div>
-      ` : ''}
-      
-      ${checkpoint.pending_steps?.length ? `
-        <div>
-          <span class="text-zinc-500 text-sm">Pending Steps:</span>
-          <ul class="mt-1 space-y-1">
-            ${checkpoint.pending_steps.map(s => `<li class="text-zinc-300 text-sm">${window.GhostUtils.escapeHtml(s)}</li>`).join('')}
-          </ul>
-        </div>
-      ` : ''}
-    `;
-    
+  async showCheckpointDetail(checkpointSummary) {
+    const detailContent = document.getElementById('detail-content');
+    detailContent.innerHTML = `<div class="text-zinc-500 text-sm">Loading checkpoint details...</div>`;
+
+    document.getElementById('detail-modal').style.display = 'flex';
     document.getElementById('detail-modal').classList.remove('hidden');
     document.getElementById('detail-modal').classList.add('flex');
+
+    try {
+      const result = await window.GhostAPI.post('/api/journal/detail', {
+        journal_id: checkpointSummary.journal_id,
+      });
+
+      if (result.status !== 'ok' || !result.checkpoint) {
+        detailContent.innerHTML = `<div class="text-red-400 text-sm">Failed to load details: ${window.GhostUtils.escapeHtml(result.error || 'unknown error')}</div>`;
+        return;
+      }
+
+      const cp = result.checkpoint;
+      this.selectedCheckpoint = cp;
+
+      detailContent.innerHTML = `
+        <div class="grid grid-cols-2 gap-4 text-sm">
+          <div>
+            <span class="text-zinc-500">ID:</span>
+            <span class="text-zinc-300 font-mono text-xs ml-1">${window.GhostUtils.escapeHtml(cp.journal_id || '')}</span>
+          </div>
+          <div>
+            <span class="text-zinc-500">Timestamp:</span>
+            <span class="text-zinc-300 ml-1">${window.GhostUtils.formatDate(cp.timestamp)}</span>
+          </div>
+        </div>
+        
+        ${cp.label ? `
+          <div>
+            <span class="text-zinc-500 text-sm">Label:</span>
+            <span class="text-zinc-300 text-sm ml-1">${window.GhostUtils.escapeHtml(cp.label)}</span>
+          </div>
+        ` : ''}
+        
+        ${cp.goal ? `
+          <div>
+            <div class="text-zinc-500 text-sm mb-1">Goal</div>
+            <p class="text-zinc-300 text-sm bg-surface-700 rounded p-3">${window.GhostUtils.escapeHtml(cp.goal)}</p>
+          </div>
+        ` : ''}
+        
+        ${cp.completed_steps?.length ? `
+          <div>
+            <div class="text-zinc-500 text-sm mb-1">Completed Steps</div>
+            <ul class="space-y-1 bg-surface-700 rounded p-3">
+              ${cp.completed_steps.map(s => `
+                <li class="text-zinc-300 text-sm flex items-start gap-2">
+                  <span class="text-emerald-400 mt-0.5">&#10003;</span>
+                  <span>${window.GhostUtils.escapeHtml(s)}</span>
+                </li>
+              `).join('')}
+            </ul>
+          </div>
+        ` : ''}
+        
+        ${cp.pending_steps?.length ? `
+          <div>
+            <div class="text-zinc-500 text-sm mb-1">Pending Steps</div>
+            <ul class="space-y-1 bg-surface-700 rounded p-3">
+              ${cp.pending_steps.map(s => `
+                <li class="text-zinc-300 text-sm flex items-start gap-2">
+                  <span class="text-yellow-400 mt-0.5">&#9675;</span>
+                  <span>${window.GhostUtils.escapeHtml(s)}</span>
+                </li>
+              `).join('')}
+            </ul>
+          </div>
+        ` : ''}
+
+        ${cp.artifacts && Object.keys(cp.artifacts).length ? `
+          <div>
+            <div class="text-zinc-500 text-sm mb-1">Artifacts</div>
+            <div class="bg-surface-700 rounded p-3 space-y-1">
+              ${Object.entries(cp.artifacts).map(([k, v]) => `
+                <div class="text-sm">
+                  <span class="text-zinc-400">${window.GhostUtils.escapeHtml(k)}:</span>
+                  <span class="text-zinc-300 ml-1">${window.GhostUtils.escapeHtml(String(v))}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
+      `;
+    } catch (err) {
+      console.error('Failed to load checkpoint detail:', err);
+      detailContent.innerHTML = `<div class="text-red-400 text-sm">Failed to load checkpoint details</div>`;
+    }
   },
 
   hideDetailModal() {
+    document.getElementById('detail-modal').style.display = 'none';
     document.getElementById('detail-modal').classList.add('hidden');
     document.getElementById('detail-modal').classList.remove('flex');
     this.selectedCheckpoint = null;
   },
 
   showModal() {
-    document.getElementById('checkpoint-modal').classList.remove('hidden');
-    document.getElementById('checkpoint-modal').classList.add('flex');
-    // Pre-fill session if selected
+    const modal = document.getElementById('checkpoint-modal');
+    modal.style.display = 'flex';
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
     if (this.currentSession) {
       document.getElementById('input-session-id').value = this.currentSession;
     }
   },
 
   hideModal() {
-    document.getElementById('checkpoint-modal').classList.add('hidden');
-    document.getElementById('checkpoint-modal').classList.remove('flex');
-    // Clear inputs
+    const modal = document.getElementById('checkpoint-modal');
+    modal.style.display = 'none';
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
     document.getElementById('input-session-id').value = '';
     document.getElementById('input-label').value = '';
     document.getElementById('input-goal').value = '';
@@ -329,7 +380,7 @@ window.GhostPages.durable_turn_journal = {
     const pending = pendingText.split('\n').map(s => s.trim()).filter(Boolean);
     
     try {
-      const result = await window.GhostAPI.post('/tool/journal_checkpoint', {
+      const result = await window.GhostAPI.post('/api/journal/checkpoint', {
         session_id: sessionId,
         label: label || undefined,
         goal: goal || undefined,
@@ -356,14 +407,13 @@ window.GhostPages.durable_turn_journal = {
     if (!this.selectedCheckpoint) return;
     
     try {
-      const result = await window.GhostAPI.post('/tool/journal_resume', {
+      const result = await window.GhostAPI.post('/api/journal/resume', {
         journal_id: this.selectedCheckpoint.journal_id,
       });
       
       if (result.status === 'ok') {
         window.GhostUtils.toast('Checkpoint loaded — ready to resume', 'success');
         this.hideDetailModal();
-        // Could emit an event or update global state here
       } else {
         window.GhostUtils.toast(result.error || 'Failed to resume', 'error');
       }
@@ -380,13 +430,12 @@ window.GhostPages.durable_turn_journal = {
     }
     
     try {
-      const result = await window.GhostAPI.post('/tool/journal_export', {
+      const result = await window.GhostAPI.post('/api/journal/export', {
         session_id: this.currentSession,
         format: format,
       });
       
       if (result.status === 'ok') {
-        // Download the content
         const blob = new Blob([result.content], { type: format === 'json' ? 'application/json' : 'text/markdown' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');

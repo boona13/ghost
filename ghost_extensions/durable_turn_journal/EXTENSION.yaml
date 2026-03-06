@@ -16,7 +16,8 @@ provides:
     - journal_resume
     - journal_export
     - journal_import
-  routes: []
+  routes:
+    - journal_api
   pages:
     - durable_turn_journal
   cron_jobs: []
