@@ -19,7 +19,7 @@ bp = Blueprint("config", __name__)
 def _notify_daemon():
     """If running embedded, push config changes to the live daemon."""
     try:
-        from ghost_dashboard import get_daemon
+        import ghost_dashboard
         daemon = get_daemon()
         if daemon:
             fresh = load_config()
@@ -53,8 +53,7 @@ def _mask_key(key):
 
 @bp.route("/api/config")
 def get_config():
-    from ghost_dashboard import get_daemon
-    daemon = get_daemon()
+    daemon = ghost_dashboard.get_daemon()
     cfg = daemon.cfg if daemon else load_config()
     resp = dict(cfg)
     # Mask sensitive API keys before returning
@@ -118,8 +117,7 @@ def update_config():
 
 @bp.route("/api/cloud-providers")
 def list_cloud_providers():
-    from ghost_dashboard import get_daemon
-    daemon = get_daemon()
+    daemon = ghost_dashboard.get_daemon()
     if not daemon or not getattr(daemon, "cloud_providers", None):
         try:
             from ghost_cloud_providers import ProviderRegistry
@@ -144,9 +142,8 @@ def list_cloud_providers():
 @bp.route("/api/cloud-providers/<name>", methods=["PUT"])
 @rate_limit(requests_per_minute=20)
 def update_cloud_provider(name):
-    from ghost_dashboard import get_daemon
     data = request.get_json(silent=True) or {}
-    daemon = get_daemon()
+    daemon = ghost_dashboard.get_daemon()
 
     cfg = load_config()
     cloud_cfg = cfg.setdefault("cloud_providers", {})
@@ -176,6 +173,20 @@ def update_cloud_provider(name):
         )
         daemon.cfg["cloud_providers"] = cfg.get("cloud_providers", {})
 
+    # Audit log
+    try:
+        from ghost_audit_log import get_audit_log, AuditAction
+        audit = get_audit_log()
+        audit.log(
+            action=AuditAction.CLOUD_PROVIDER_UPDATE,
+            resource_type="cloud_provider",
+            resource_id=name,
+            success=True,
+            details={"enabled": data.get("enabled"), "api_key_updated": "api_key" in data, "secret_key_updated": "secret_key" in data},
+        )
+    except Exception as e:
+        logging.getLogger("ghost.audit").warning("Audit log failed: %s", e)
+
     return jsonify({"ok": True, "message": f"Updated {name}"})
 
 
@@ -187,8 +198,7 @@ def test_cloud_provider(name):
     secret_key = data.get("secret_key", "").strip()
 
     if not api_key:
-        from ghost_dashboard import get_daemon
-        daemon = get_daemon()
+        daemon = ghost_dashboard.get_daemon()
         if daemon and getattr(daemon, "cloud_providers", None):
             api_key = daemon.cloud_providers.get_api_key(name) or ""
             if not secret_key:
@@ -207,8 +217,7 @@ def test_cloud_provider(name):
 
 @bp.route("/api/cloud-providers/costs")
 def cloud_provider_costs():
-    from ghost_dashboard import get_daemon
-    daemon = get_daemon()
+    daemon = ghost_dashboard.get_daemon()
     if not daemon or not getattr(daemon, "cloud_providers", None):
         return jsonify({"costs": {}, "error": "Cloud providers not initialized"})
     return jsonify(daemon.cloud_providers.get_costs_summary())

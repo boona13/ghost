@@ -63,6 +63,18 @@ def enable_extension(name):
     if not mgr:
         return jsonify({"error": "Extension system not initialized"}), 503
     ok = mgr.enable_extension(name)
+    # Audit log
+    try:
+        from ghost_audit_log import get_audit_log, AuditAction
+        audit = get_audit_log()
+        audit.log(
+            action=AuditAction.EXTENSION_ENABLE,
+            resource_type="extension",
+            resource_id=name,
+            success=ok,
+        )
+    except Exception as e:
+        logging.getLogger("ghost.audit").warning("Audit log failed: %s", e)
     return jsonify({"ok": ok, "message": f"Enabled {name}" if ok else "Extension not found"})
 
 
@@ -72,6 +84,18 @@ def disable_extension(name):
     if not mgr:
         return jsonify({"error": "Extension system not initialized"}), 503
     ok = mgr.disable_extension(name)
+    # Audit log
+    try:
+        from ghost_audit_log import get_audit_log, AuditAction
+        audit = get_audit_log()
+        audit.log(
+            action=AuditAction.EXTENSION_DISABLE,
+            resource_type="extension",
+            resource_id=name,
+            success=ok,
+        )
+    except Exception as e:
+        logging.getLogger("ghost.audit").warning("Audit log failed: %s", e)
     return jsonify({"ok": ok, "message": f"Disabled {name}" if ok else "Extension not found"})
 
 
@@ -91,6 +115,19 @@ def install_extension():
         result = mgr.install_from_github(source)
     else:
         result = mgr.install_local(source)
+    # Audit log
+    try:
+        from ghost_audit_log import get_audit_log, AuditAction
+        audit = get_audit_log()
+        audit.log(
+            action=AuditAction.EXTENSION_INSTALL,
+            resource_type="extension",
+            resource_id=source,
+            success=result.get("ok", False),
+            details={"source": source},
+        )
+    except Exception as e:
+        logging.getLogger("ghost.audit").warning("Audit log failed: %s", e)
     return jsonify(result)
 
 
@@ -100,6 +137,18 @@ def uninstall_extension(name):
     if not mgr:
         return jsonify({"error": "Extension system not initialized"}), 503
     ok = mgr.uninstall_extension(name)
+    # Audit log
+    try:
+        from ghost_audit_log import get_audit_log, AuditAction
+        audit = get_audit_log()
+        audit.log(
+            action=AuditAction.EXTENSION_UNINSTALL,
+            resource_type="extension",
+            resource_id=name,
+            success=ok,
+        )
+    except Exception as e:
+        logging.getLogger("ghost.audit").warning("Audit log failed: %s", e)
     return jsonify({"ok": ok})
 
 

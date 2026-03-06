@@ -298,8 +298,8 @@ class AuditLog:
                                 newest = ts
                     except json.JSONDecodeError:
                         continue
-        except OSError:
-            pass
+        except OSError as e:
+            log.warning("Failed to read audit log for stats: %s", e)
         
         return {
             "total_entries": total,

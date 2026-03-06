@@ -39,6 +39,7 @@ def build_credential_tools() -> list:
         notes: str = "",
         metadata: Optional[dict] = None,
     ) -> str:
+        from ghost_audit_log import get_audit_log, AuditAction
         creds = _load_credentials()
         entry = {
             "service": service.strip().lower(),
@@ -51,6 +52,18 @@ def build_credential_tools() -> list:
         }
         creds.append(entry)
         _save_credentials(creds)
+        # Audit log
+        try:
+            audit = get_audit_log()
+            audit.log(
+                action=AuditAction.CREDENTIAL_SAVE,
+                resource_type="credential",
+                resource_id=entry["service"],
+                success=True,
+                details={"username": username, "email": email},
+            )
+        except Exception as e:
+            logging.getLogger("ghost.audit").warning("Audit log failed: %s", e)
         display_email = entry["email"] or entry["username"]
         return f"OK: credentials saved for {entry['service']} ({display_email})"
 

@@ -77,6 +77,20 @@ class AuthProfileStore:
             order.append(provider)
         self._save()
         log.info("Saved auth profile: %s", profile_id)
+        # Audit log
+        try:
+            from ghost_audit_log import get_audit_log, AuditAction
+            audit = get_audit_log()
+            ptype = profile.get("type", "unknown")
+            audit.log(
+                action=AuditAction.AUTH_PROFILE_SET,
+                resource_type="auth_profile",
+                resource_id=profile_id,
+                success=True,
+                details={"provider": provider, "type": ptype},
+            )
+        except Exception as e:
+            log.warning("Audit log failed: %s", e)
 
     def remove_profile(self, profile_id: str):
         profiles = self._store.get("profiles", {})
@@ -84,6 +98,18 @@ class AuthProfileStore:
             del profiles[profile_id]
             self._save()
             log.info("Removed auth profile: %s", profile_id)
+            # Audit log
+            try:
+                from ghost_audit_log import get_audit_log, AuditAction
+                audit = get_audit_log()
+                audit.log(
+                    action=AuditAction.AUTH_PROFILE_REMOVE,
+                    resource_type="auth_profile",
+                    resource_id=profile_id,
+                    success=True,
+                )
+            except Exception as e:
+                log.warning("Audit log failed: %s", e)
 
     def set_api_key(self, provider_id: str, key: str, name: str = "default"):
         """Convenience: save an API key profile."""
