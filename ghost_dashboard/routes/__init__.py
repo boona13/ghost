@@ -41,6 +41,7 @@ def register_routes(app: Flask):
     from .nodes import bp as nodes_bp
     from .media import bp as media_bp
     from .extensions import bp as extensions_bp
+    from .audit import bp as audit_bp
 
     for bp in [status_bp, config_bp, models_bp, identity_bp,
                skills_bp, cron_bp, memory_bp, feed_bp, daemon_bp, evolve_bp,
@@ -48,7 +49,7 @@ def register_routes(app: Flask):
                security_bp, console_bp, channels_bp, future_features_bp,
                voice_bp, canvas_bp, usage_bp, webhooks_bp, projects_bp,
                prs_bp, doctor_bp, mcp_bp, langfuse_bp, browser_use_bp,
-               pairing_bp, nodes_bp, media_bp, extensions_bp]:
+               pairing_bp, nodes_bp, media_bp, extensions_bp, audit_bp]:
         app.register_blueprint(bp)
 
     _register_extension_routes(app)
