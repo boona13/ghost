@@ -419,3 +419,7 @@ window.GhostPages.durable_turn_journal = {
       : '-';
   },
 };
+
+export function render(container) {
+  return window.GhostPages.durable_turn_journal.render(container);
+}

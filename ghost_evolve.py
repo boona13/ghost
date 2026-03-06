@@ -1247,6 +1247,12 @@ class EvolutionEngine:
         if not ok:
             return False, f"Cannot checkout branch '{branch}': {msg}"
 
+        # Merge latest main into the evolve branch so any changes made
+        # to main since the branch was created are preserved.
+        update_ok, update_msg = ghost_git.update_branch(branch)
+        if not update_ok:
+            log.warning("Could not merge main into %s: %s (continuing anyway)", branch, update_msg)
+
         evo["status"] = "approved"
         evo["test_results"] = None
 

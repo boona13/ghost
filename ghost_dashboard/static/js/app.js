@@ -31,7 +31,8 @@ import { render as pairing } from './pages/pairing.js';
 import { render as nodes } from './pages/nodes.js';
 import { render as gallery } from './pages/gallery.js';
 import { render as extensions } from './pages/extensions.js';
-const pages = { overview, chat, models, config, soul, user, skills, cron, memory, feed, evolve, integrations, autonomy, accounts, setup, security, console: console_page, channels, future_features, webhooks, projects, prs, mcp, langfuse, browser_use, pairing, nodes, gallery, extensions };
+import { render as audit } from './pages/audit.js';
+const pages = { overview, chat, models, config, soul, user, skills, cron, memory, feed, evolve, integrations, autonomy, accounts, setup, security, console: console_page, channels, future_features, webhooks, projects, prs, mcp, langfuse, browser_use, pairing, nodes, gallery, extensions, audit };
 const container = document.getElementById('page-content');
 let currentPage = null;
 let pollTimer = null;
@@ -174,6 +175,8 @@ async function loadExtensionPages() {
     const data = await window.GhostAPI.get('/api/extensions/pages');
     const extPages = (data && data.pages) || [];
     const navContainer = document.getElementById('extension-nav-items');
+    const navSection = document.getElementById('extension-nav-section');
+    let addedCount = 0;
 
     for (const page of extPages) {
       if (!page.id || !page.js_url || pages[page.id]) continue;
@@ -212,12 +215,14 @@ async function loadExtensionPages() {
               navigate(page.id);
             });
             navContainer.appendChild(link);
+            addedCount++;
           }
         }
       } catch (err) {
         console.warn(`Failed to load extension page ${page.id}:`, err);
       }
     }
+    if (addedCount > 0 && navSection) navSection.classList.remove('hidden');
   } catch {
     // Extension system not available — silent fail
   }
