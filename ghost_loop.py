@@ -718,6 +718,7 @@ def _check_incomplete_workflows(tool_calls_log: list, available_tools: set[str] 
     """Check if any tool workflows are incomplete. Returns a message if so, None if OK."""
     tools_used = {tc["tool"] for tc in tool_calls_log}
     available_tools = set(available_tools or [])
+    can_task_complete = not available_tools or "task_complete" in available_tools
 
     started_feature = "start_future_feature" in tools_used
     used_evolve_plan = "evolve_plan" in tools_used
@@ -728,6 +729,27 @@ def _check_incomplete_workflows(tool_calls_log: list, available_tools: set[str] 
     used_fail = "fail_future_feature" in tools_used
     can_plan_in_this_phase = not available_tools or "evolve_plan" in available_tools or "evolve_resume" in available_tools
     can_submit_in_this_phase = not available_tools or "evolve_submit_pr" in available_tools or "evolve_deploy" in available_tools
+
+    if can_task_complete:
+        rejected_pr_idx = -1
+        for idx, tc in enumerate(tool_calls_log):
+            if tc["tool"] != "evolve_submit_pr":
+                continue
+            result_text = str(tc.get("result", ""))
+            if "REJECTED" in result_text:
+                rejected_pr_idx = idx
+
+        if rejected_pr_idx >= 0:
+            completed_after_rejection = any(
+                tc["tool"] == "task_complete"
+                for tc in tool_calls_log[rejected_pr_idx + 1:]
+            )
+            if not completed_after_rejection:
+                return (
+                    "Your PR was rejected by evolve_submit_pr. "
+                    "Call task_complete NOW so the orchestrator can requeue the feature with reviewer feedback. "
+                    "Do not inspect logs, grep, or read more files first."
+                )
 
     if used_evolve_start and not used_evolve_deploy and not used_fail and can_submit_in_this_phase:
         if not used_evolve_apply:

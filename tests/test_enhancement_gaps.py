@@ -214,6 +214,30 @@ class EnhancementGapTests(unittest.TestCase):
             ) or "",
         )
 
+    def test_rejected_pr_requires_immediate_task_complete(self):
+        self.assertIn(
+            "Call task_complete NOW",
+            _check_incomplete_workflows(
+                [
+                    {"tool": "evolve_plan"},
+                    {"tool": "evolve_apply"},
+                    {"tool": "evolve_test", "result": "Tests PASSED"},
+                    {"tool": "evolve_submit_pr", "result": "PR pr-123 REJECTED (round 0/3). Call task_complete NOW."},
+                ],
+                {"evolve_submit_pr", "task_complete", "file_read", "grep"},
+            ) or "",
+        )
+
+        self.assertIsNone(
+            _check_incomplete_workflows(
+                [
+                    {"tool": "evolve_submit_pr", "result": "PR pr-123 REJECTED (round 0/3). Call task_complete NOW."},
+                    {"tool": "task_complete"},
+                ],
+                {"evolve_submit_pr", "task_complete", "file_read", "grep"},
+            )
+        )
+
     def test_resolve_search_path_falls_back_from_stale_ghost_checkout(self):
         resolved = _resolve_search_path("/Users/ibrahimboona/Desktop/Ghost-0.5")
         self.assertEqual(resolved, CODE_TOOLS_PROJECT_DIR)
