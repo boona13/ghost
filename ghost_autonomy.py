@@ -1576,6 +1576,18 @@ def _build_identity(daemon):
     return ""
 
 
+def _cleanup_incomplete_evolutions():
+    """Roll back any incomplete evolutions left by phased runs."""
+    try:
+        from ghost_evolve import get_engine
+        results = get_engine().cleanup_incomplete()
+        if results:
+            for evo_id, ok, msg in results:
+                _evo_log.info("[CLEANUP] %s: %s", evo_id, msg)
+    except Exception as exc:
+        _evo_log.warning("[CLEANUP] Failed: %s", exc)
+
+
 def _log_phase(phase_name, feature_id, msg):
     _evo_log.info("[%s] feature=%s: %s", phase_name, feature_id or "?", msg)
 
@@ -1755,12 +1767,14 @@ def run_phased_evolution(daemon, feature_id=None):
 
     if not success:
         _log_phase("ORCHESTRATOR", feature_id, "Implementation failed — stopping")
+        _cleanup_incomplete_evolutions()
         return
 
     # Phase 3: VERIFY + SUBMIT
     _log_phase("ORCHESTRATOR", feature_id, "Running VERIFY phase")
     _run_verify_phase(daemon, feature_id, scratch_path)
 
+    _cleanup_incomplete_evolutions()
     _log_phase("ORCHESTRATOR", feature_id, "Phased evolution complete")
 
 
@@ -1954,6 +1968,7 @@ def _run_implement_phase(daemon, feature_id, scratch_path):
             hook_runner=getattr(daemon, "hooks", None),
             tool_intent_security=getattr(daemon, "tool_intent_security", None),
             tool_event_bus=getattr(daemon, "tool_event_bus", None),
+            skip_evolve_cleanup=True,
         )
         _log_phase("IMPLEMENT", feature_id, f"Completed in {result.steps} steps")
 
@@ -2045,6 +2060,7 @@ def _run_verify_phase(daemon, feature_id, scratch_path):
             hook_runner=getattr(daemon, "hooks", None),
             tool_intent_security=getattr(daemon, "tool_intent_security", None),
             tool_event_bus=getattr(daemon, "tool_event_bus", None),
+            skip_evolve_cleanup=True,
         )
         _log_phase("VERIFY", feature_id, f"Completed in {result.steps} steps")
 
@@ -2144,6 +2160,7 @@ def _run_fix_phase(daemon, feature_id, scratch_path):
             hook_runner=getattr(daemon, "hooks", None),
             tool_intent_security=getattr(daemon, "tool_intent_security", None),
             tool_event_bus=getattr(daemon, "tool_event_bus", None),
+            skip_evolve_cleanup=True,
         )
         _log_phase("FIX", feature_id, f"Completed in {result.steps} steps")
 

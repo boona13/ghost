@@ -1719,7 +1719,7 @@ class ToolLoopEngine:
             max_steps=DEFAULT_MAX_STEPS, temperature=0.3, max_tokens=DEFAULT_MAX_TOKENS,
             image_b64=None, images=None, on_step=None, force_tool=False, history=None,
             cancel_check=None, hook_runner=None, tool_intent_security=None, model_override=None,
-            enable_reasoning=False, tool_event_bus=None):
+            enable_reasoning=False, tool_event_bus=None, skip_evolve_cleanup=False):
         """
         Run the autonomous tool loop.
 
@@ -2343,7 +2343,7 @@ class ToolLoopEngine:
         used_evolve = any(
             tc["tool"].startswith("evolve_") for tc in tool_calls_log
         )
-        if used_evolve:
+        if used_evolve and not skip_evolve_cleanup:
             try:
                 from ghost_evolve import get_engine
                 run_evo_ids = set()
