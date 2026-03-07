@@ -164,7 +164,6 @@ Check EVERY section below. Missing even one has caused shipped bugs.
 - ghost_plugins.py — PluginLoader, HookRunner
 - ghost_evolve.py — EvolutionEngine, build_evolve_tools()
 - ghost_autonomy.py — Growth routines, action items, self-repair
-- ghost_mcp.py — MCP client, build_mcp_tools()
 - ghost_integrations.py — Google APIs + Grok/X
 - ghost_credentials.py — Encrypted credential storage
 - ghost_web_search.py — Multi-provider web search

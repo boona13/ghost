@@ -2,7 +2,7 @@
 
 **Self-evolving AI agent** — runs locally, improves itself, gets things done while you sleep.
 
-Ghost is an autonomous AI agent that runs on your machine. It modifies its own source code, fixes its own bugs, and grows new capabilities on a schedule — without you lifting a finger. Talk to it through a web dashboard or reach it on WhatsApp, Telegram, Discord, Slack, iMessage, and 15+ other channels. Give it a task and watch it execute with real tools: browser automation, shell commands, web research, file management, Google Workspace, MCP servers, and more.
+Ghost is an autonomous AI agent that runs on your machine. It modifies its own source code, fixes its own bugs, and grows new capabilities on a schedule — without you lifting a finger. Talk to it through a web dashboard or reach it on WhatsApp, Telegram, Discord, Slack, iMessage, and 15+ other channels. Give it a task and watch it execute with real tools: browser automation, shell commands, web research, file management, Google Workspace, and more.
 
 > **Ghost is not a chatbot. It's a system that runs 24/7 and gets better every day.**
 
@@ -159,33 +159,9 @@ Specialized knowledge that Ghost injects automatically when relevant:
 | **Media** | Spotify player, GIF search, video frame extraction, image generation |
 | **Social** | X/Twitter growth (post, like, comment, repost, follow with duplicate prevention), X account creator |
 | **Finance** | Trading analysis (chart patterns, technical indicators, portfolio tracking) |
-| **System** | Ghost system management, MCP servers, webhooks, weather, tmux, 1password, PDF tools, speech-to-text |
+| **System** | Ghost system management, webhooks, weather, tmux, 1password, PDF tools, speech-to-text |
 
 Plus user-created skills in `~/.ghost/skills/`.
-
-### MCP (Model Context Protocol)
-
-Ghost supports the open [Model Context Protocol](https://modelcontextprotocol.io/) for connecting to external tool servers. MCP lets Ghost dynamically discover and use tools from any MCP-compatible server — filesystem access, database queries, API integrations, and more — without hardcoding each integration.
-
-- **Connect to any MCP server** — configure servers in Ghost's config, connect/disconnect from the dashboard or via chat
-- **Dynamic tool discovery** — Ghost auto-discovers available tools from connected servers
-- **Tool-level access control** — whitelist (`allowed_tools`) or blacklist (`blocked_tools`) per server
-- **Process isolation** — each MCP server runs as a subprocess with separate process groups
-- **Security** — command validation prevents shell injection, timeout protection on every request
-- **Dashboard management** — full MCP page with server status, tool browser, and interactive tool testing
-
-```json
-{
-  "mcp_servers": {
-    "filesystem": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
-      "enabled": true,
-      "timeout": 30
-    }
-  }
-}
-```
 
 ### Webhook Triggers
 
@@ -268,7 +244,6 @@ The web dashboard at [http://localhost:3333](http://localhost:3333) is a full ma
 | **Autonomy** | Action items, growth routine status, growth log, crash reports |
 | **Evolution** | Self-modification history, approve/reject pending changes, view diffs, rollback |
 | **Future Features** | Prioritized backlog for autonomous implementation — add, approve, reject, track |
-| **MCP Servers** | Connect/disconnect MCP servers, browse discovered tools, test tool execution |
 | **Channels** | Configure, enable/disable, test, and monitor 20+ messaging channels |
 | **Integrations** | Google OAuth, Grok, ElevenLabs, web search providers, image gen, vision, TTS |
 | **Configuration** | All settings with hot-reload — feature toggles, rate limits, growth schedules, security, voice controls |
@@ -305,7 +280,6 @@ ghost_providers.py          LLM providers — 7 providers with format adapters
 ghost_auth_profiles.py      Auth store — API keys, OAuth tokens, credential sync
 ghost_oauth.py              OAuth — Codex PKCE flow
 ghost_integrations.py       Google Workspace + Grok integration
-ghost_mcp.py                MCP client — connect to external tool servers via JSON-RPC
 ghost_webhooks.py           Webhook triggers — event-driven automation via HTTP POST
 ghost_sandbox.py            Docker sandboxing — isolated code execution
 ghost_code_intel.py         Code intelligence — analysis, metrics, bug detection
@@ -393,7 +367,6 @@ Ghost stores configuration at `~/.ghost/config.json`. Every setting is editable 
 | `enable_evolve` | `true` | Allow self-modification |
 | `evolve_auto_approve` | `false` | Skip approval for evolution changes |
 | `enable_growth` | `true` | Autonomous improvement routines |
-| `enable_mcp` | `true` | MCP (Model Context Protocol) external tool servers |
 | `enable_browser_tools` | `true` | Browser automation |
 | `enable_memory_db` | `true` | Persistent memory |
 | `enable_cron` | `true` | Cron scheduler |

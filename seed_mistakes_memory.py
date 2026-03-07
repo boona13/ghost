@@ -67,8 +67,8 @@ MISTAKES = [
             "M-06 PYTHON IMPORT BUG: Never use 'from module import mutable_variable'. "
             "In Python, 'from module import var' copies the value at import time. "
             "If the module later updates that variable, the importing file's copy stays stale forever. "
-            "WRONG: from ghost_mcp import _mcp_process (stays None forever). "
-            "RIGHT: import ghost_mcp; then use ghost_mcp._mcp_process (live reference). "
+            "WRONG: from ghost_foo import _process (stays None forever). "
+            "RIGHT: import ghost_foo; then use ghost_foo._process (live reference). "
             "This applies to ALL mutable module-level state: processes, flags, lists, dicts."
         ),
         "citations": [
@@ -182,7 +182,7 @@ MISTAKES = [
             "M-17 REDUNDANCY: Audit existing tools before building new ones. "
             "Before implementing any new capability, grep the codebase for existing tools that do the same thing. "
             "If overlap exists, extend the existing tool. "
-            "Ghost had a mature native Playwright browser tool but the LLM built a second inferior MCP Browser tool. "
+            "Ghost had a mature native Playwright browser tool but the LLM built a second inferior duplicate. "
             "A capability audit step should precede every feature implementation."
         ),
     },
@@ -224,7 +224,7 @@ MISTAKES = [
             "M-21 EVOLUTION: Always verify after deploy — post-deploy smoke tests are mandatory. "
             "After evolve_deploy, the feature must actually work. Hit new API endpoints with web_fetch. "
             "Check that status endpoints return live data, not stale defaults. "
-            "Features deployed in broken states (MCP showing 'stopped', Projects modal always open) "
+            "Features deployed in broken states (Projects modal always open, status pages showing stale data) "
             "because Ghost considered them 'done' without verification."
         ),
     },

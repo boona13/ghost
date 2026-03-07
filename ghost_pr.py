@@ -121,7 +121,6 @@ ghost_skills.py   — SkillLoader, trigger matching, prompt injection
 ghost_plugins.py  — PluginLoader, HookRunner
 ghost_evolve.py   — EvolutionEngine, build_evolve_tools()
 ghost_autonomy.py — Growth routines, action items, self-repair
-ghost_mcp.py      — MCP client, build_mcp_tools()
 ghost_integrations.py — Google APIs + Grok/X
 ghost_credentials.py  — Encrypted credential storage
 ghost_web_search.py   — Multi-provider web search
@@ -137,7 +136,7 @@ NO UI methods. Tools are backend-only.
 ### Dashboard Routes (ghost_dashboard/routes/)
 chat.py, status.py, config.py, models.py, identity.py, skills.py,
 cron.py, memory.py, feed.py, daemon.py, evolve.py, integrations.py,
-autonomy.py, mcp.py, webhooks.py, setup.py, accounts.py
+autonomy.py, webhooks.py, setup.py, accounts.py
 New blueprints MUST be registered in routes/__init__.py
 
 ### Frontend (ghost_dashboard/static/js/)

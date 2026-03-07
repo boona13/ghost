@@ -170,24 +170,6 @@ CONFIG_SCHEMA = {
     "langfuse_public_key": {"type": "string", "description": "Langfuse public key for authentication"},
     "langfuse_secret_key": {"type": "string", "description": "Langfuse secret key for authentication"},
     "langfuse_project_id": {"type": "string", "description": "Langfuse project ID"},
-    "enable_mcp": {"type": "boolean", "description": "Enable MCP (Model Context Protocol) client for external tool servers"},
-    "mcp_servers": {
-        "type": "object",
-        "description": "MCP server configurations. Keys are server names, values are server config objects with command, args, env, enabled, timeout, allowed_tools, blocked_tools.",
-        "additionalProperties": {
-            "type": "object",
-            "properties": {
-                "command": {"type": "string", "description": "Command to start the MCP server (e.g. 'npx', 'node', 'python')"},
-                "args": {"type": "array", "items": {"type": "string"}, "description": "Command arguments"},
-                "env": {"type": "object", "description": "Environment variables for the server process"},
-                "enabled": {"type": "boolean", "description": "Whether the server is enabled"},
-                "timeout": {"type": "number", "description": "Request timeout in seconds"},
-                "allowed_tools": {"type": "array", "items": {"type": "string"}, "description": "Tool names to allow (empty = allow all)"},
-                "blocked_tools": {"type": "array", "items": {"type": "string"}, "description": "Tool names to block"}
-            },
-            "required": ["command"]
-        }
-    },
     "max_feed_items": {"type": "integer", "description": "Max items in feed (10-500)"},
     "rate_limit_seconds": {"type": "number", "description": "Rate limit between actions"},
     "web_fetch_max_chars": {"type": "integer", "description": "Max characters to keep from web fetch results (default: 50000)"},

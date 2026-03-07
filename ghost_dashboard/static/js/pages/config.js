@@ -95,7 +95,7 @@ export async function render(container) {
       <div class="stat-card">
         <h3 class="text-sm font-semibold text-white mb-3">${t('config.featureToggles')}</h3>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8">
-          ${['enable_tool_loop','enable_memory_db','enable_plugins','enable_skills','enable_system_tools','enable_browser_tools','enable_browser_use','enable_channels','enable_cron','enable_evolve','enable_future_features','enable_integrations','enable_web_search','enable_web_fetch','enable_image_gen','enable_vision','enable_tts','enable_canvas','enable_security_audit','enable_session_memory','enable_mcp','enable_langfuse'].map(k => toggle(k)).join('')}
+          ${['enable_tool_loop','enable_memory_db','enable_plugins','enable_skills','enable_system_tools','enable_browser_tools','enable_browser_use','enable_channels','enable_cron','enable_evolve','enable_future_features','enable_integrations','enable_web_search','enable_web_fetch','enable_image_gen','enable_vision','enable_tts','enable_canvas','enable_security_audit','enable_session_memory','enable_langfuse'].map(k => toggle(k)).join('')}
         </div>
       </div>
 
@@ -142,12 +142,6 @@ export async function render(container) {
         <div class="text-[10px] text-zinc-500 mt-2">${t('config.langfuseKeysHint')}</div>
       </div>
 
-      <!-- MCP -->
-      <div class="stat-card mt-4">
-        <h3 class="text-sm font-semibold text-white mb-1">${t('config.mcpTitle')}</h3>
-        <div class="text-[10px] text-zinc-600 mb-2">${t('config.mcpDesc')}</div>
-        <div class="text-[10px] text-zinc-500">${t('config.mcpSeeMore')}</div>
-      </div>
     </div>
 
     <!-- ── Voice ────────────────────────────────────────────── -->

@@ -65,7 +65,6 @@ Read this ENTIRE section before writing any code.
 | `ghost_data_extract.py` | LLM-powered structured extraction | `build_data_extract_tools()` |
 | `ghost_web_search.py` | Multi-provider web search with fallback | `build_web_search_tools()` |
 | `ghost_sandbox.py` | Docker-based isolated execution | `build_sandbox_tools()` |
-| `ghost_mcp.py` | MCP (Model Context Protocol) client — connect to external tool servers via JSON-RPC | `MCPClientManager`, `build_mcp_tools()` |
 | `ghost_supervisor.py` | Process supervisor — restarts, crash recovery, deploy handling | `GhostSupervisor` |
 
 ### Adding a New Backend Module
@@ -119,7 +118,6 @@ def build_my_tools(cfg):
 | `routes/evolve.py` | Evolution history, approve/reject, rollback |
 | `routes/integrations.py` | Google OAuth, Grok/X config |
 | `routes/autonomy.py` | Action items, growth log |
-| `routes/mcp.py` | MCP server management, tool discovery, tool testing |
 | `routes/webhooks.py` | Webhook trigger CRUD, fire endpoint, event history |
 | `routes/setup.py` | First-run setup wizard |
 | `routes/accounts.py` | Account management |
@@ -144,7 +142,6 @@ Every page module exports `render(container)`. The SPA router in `app.js` calls 
 | `evolve.js` | Evolution history | `#evolve` |
 | `integrations.js` | Integrations | `#integrations` |
 | `autonomy.js` | Autonomy/Growth | `#autonomy` |
-| `mcp.js` | MCP Servers | `#mcp` |
 | `webhooks.js` | Webhook Triggers | `#webhooks` |
 | `accounts.js` | Accounts | `#accounts` |
 | `setup.js` | Setup wizard | `#setup` |

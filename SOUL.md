@@ -155,7 +155,7 @@ ghost_community_hub.py          — Community Hub client: browse, install, publi
 # Dashboard
 ghost_dashboard/                — Flask web dashboard
   __init__.py                   — App factory, start_with_daemon(), stop_dashboard()
-  routes/                       — API blueprints (status, config, models, identity, skills, cron, memory, feed, daemon, evolve, chat, future_features, projects, webhooks, voice, canvas, security, setup, mcp, etc.)
+  routes/                       — API blueprints (status, config, models, identity, skills, cron, memory, feed, daemon, evolve, chat, future_features, projects, webhooks, voice, canvas, security, setup, etc.)
   static/js/pages/              — Frontend page modules (one per dashboard tab)
   templates/                    — index.html (main SPA shell)
 

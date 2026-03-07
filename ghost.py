@@ -88,7 +88,6 @@ from ghost_interrupt import make_interrupt_tools
 from ghost_config_payloads import build_config_payload_tools
 from ghost_dependency_doctor import build_dependency_doctor_tools
 from ghost_pr import build_pr_tools
-from ghost_mcp import MCPClientManager, build_mcp_tools
 from ghost_subagents import build_subagent_tools
 from ghost_langfuse import get_langfuse_manager, build_langfuse_tools
 from ghost_browser_use import build_browser_use_tools
@@ -391,22 +390,6 @@ DEFAULT_CONFIG = {
     "anthropic_effort": "high",
     "anthropic_context_compaction": False,
     "anthropic_context_compaction_ratio": 0.5,
-    # MCP (Model Context Protocol) — enabled by default; servers auto-connect on start
-    "enable_mcp": True,
-    "mcp_servers": {
-        "markitdown": {
-            "command": "python",
-            "args": ["-m", "markitdown_mcp"],
-            "enabled": True,
-            "timeout": 60,
-        },
-        "playwright": {
-            "command": "npx",
-            "args": ["-y", "@executeautomation/playwright-mcp-server"],
-            "enabled": True,
-            "timeout": 60,
-        },
-    },
     # Webhook Triggers (auto-generated on startup if empty for security)
     "webhook_secret": "",
     "webhook_max_concurrent": 3,
@@ -436,7 +419,7 @@ DEFAULT_CONFIG = {
     },
 }
 
-_DEEP_MERGE_KEYS = {"mcp_servers", "skill_model_aliases", "provider_chains"}
+_DEEP_MERGE_KEYS = {"skill_model_aliases", "provider_chains"}
 
 
 def _hf_login(cfg):
@@ -1507,32 +1490,6 @@ class GhostDaemon:
         except Exception as e:
             print(f"  [pr] Failed to initialize: {e}")
 
-        # MCP (Model Context Protocol) tools
-        self.mcp_manager = None
-        if cfg.get("enable_mcp", True):
-            try:
-                self.mcp_manager = MCPClientManager(cfg)
-                for tool_def in build_mcp_tools(cfg, mcp_manager=self.mcp_manager):
-                    self.tool_registry.register(tool_def)
-                servers = self.mcp_manager.list_servers()
-                enabled = [s for s in servers if s.get("enabled")]
-                print(f"  [mcp] Initialized with {len(servers)} server(s) ({len(enabled)} enabled)")
-                if enabled and not dry_run:
-                    def _mcp_background_connect(mgr=self.mcp_manager):
-                        try:
-                            results = mgr.auto_connect()
-                            connected = sum(1 for r in results.values() if r.get("ok"))
-                            print(f"  [mcp] Auto-connected {connected}/{len(enabled)} server(s)")
-                            mgr.start_monitor()
-                        except Exception as exc:
-                            log.warning("MCP background connect error: %s", exc)
-                    t = threading.Thread(target=_mcp_background_connect, daemon=True,
-                                         name="mcp-auto-connect")
-                    t.start()
-                    print("  [mcp] Connecting servers in background...")
-            except Exception as e:
-                print(f"  [mcp] Failed to initialize: {e}")
-
         # Focused Delegation — fresh-context research and verification
         if cfg.get("enable_subagents", True):
             try:
@@ -2075,11 +2032,6 @@ class GhostDaemon:
         if self.memory_db:
             self.memory_db.prune(5000)
             self.memory_db.close()
-        if getattr(self, "mcp_manager", None):
-            try:
-                self.mcp_manager.shutdown()
-            except Exception as e:
-                print(f"  [mcp] Shutdown error: {e}")
         try:
             _browser_stop()
         except Exception as e:
