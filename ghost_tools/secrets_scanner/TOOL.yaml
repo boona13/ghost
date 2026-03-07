@@ -1,0 +1,18 @@
+name: secrets_scanner
+description: Scan code for accidentally committed secrets and check .gitignore coverage
+version: 1.0.0
+author: Ghost
+license: MIT
+deps: []
+
+settings:
+  - name: default_path
+    type: string
+    default: "."
+    description: Default path to scan when none specified
+
+capabilities:
+  - scan_secrets
+  - check_gitignore
+
+hooks: []
