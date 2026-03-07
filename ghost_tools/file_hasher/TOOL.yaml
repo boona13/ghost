@@ -1,0 +1,5 @@
+name: file_hasher
+version: 1.0.0
+description: File hash and diff calculator for file integrity and comparison
+author: ghost
+category: utility
