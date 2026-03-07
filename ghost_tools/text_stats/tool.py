@@ -24,6 +24,12 @@ def register(api):
                 "error": "Invalid input: text must be a non-empty string"
             })
         
+        # Validate top_n to prevent negative values
+        if not isinstance(top_n, int) or top_n < 0:
+            return json.dumps({
+                "error": "Invalid input: top_n must be a non-negative integer"
+            })
+        
         # Basic counts
         char_count = len(text)
         char_count_no_spaces = len(text.replace(" ", "").replace("\n", "").replace("\t", ""))
