@@ -1,0 +1,10 @@
+name: web_summarizer
+version: 1.0.0
+description: Fetches a web page and produces a concise summary with title, word count,
+  and metadata
+author: ghost
+category: utility
+deps:
+- requests
+- readability-lxml
+- lxml
