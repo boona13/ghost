@@ -695,7 +695,18 @@ class EvolutionEngine:
                         cwd=str(PROJECT_DIR),
                     )
                     ok = r.returncode == 0
-                    output = r.stderr.strip()[:300] if not ok else None
+                    if not ok:
+                        filtered_stderr = r.stderr
+                        for noise_pattern in [
+                            r".*RequestsDependencyWarning:.*\n?",
+                            r"\s*warnings\.warn\(.*\n?",
+                            r"INFO\s+\[.*\].*\n?",
+                            r"WARNING\s+\[.*\].*\n?",
+                        ]:
+                            filtered_stderr = re.sub(noise_pattern, "", filtered_stderr)
+                        output = filtered_stderr.strip()[:300] if filtered_stderr.strip() else None
+                    else:
+                        output = None
                 except subprocess.TimeoutExpired:
                     ok, output = False, "Import timed out"
 
