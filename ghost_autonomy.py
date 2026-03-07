@@ -1576,6 +1576,39 @@ def _build_identity(daemon):
     return ""
 
 
+def _guard_evolve_plan_once(registry):
+    """Wrap evolve_plan in a registry so it can only be called once.
+
+    Prevents the infinite-loop bug where the model keeps starting new evolutions.
+    After the first successful call, all subsequent calls return an error message
+    telling the model to use the existing evolution_id.
+    """
+    tool_def = registry._tools.get("evolve_plan")
+    if not tool_def:
+        return
+    original_exec = tool_def["execute"]
+    _plan_called = {"count": 0, "evo_id": None}
+
+    def _guarded_evolve_plan(**kwargs):
+        if _plan_called["count"] > 0:
+            return (
+                f"BLOCKED: evolve_plan already called (evolution {_plan_called['evo_id']}). "
+                "You MUST NOT call evolve_plan again. Use the existing evolution_id. "
+                "If tests passed, write '## Phase 2 Results' to the scratch file "
+                "and call task_complete IMMEDIATELY."
+            )
+        result = original_exec(**kwargs)
+        _plan_called["count"] += 1
+        if "Evolution planned:" in str(result):
+            try:
+                _plan_called["evo_id"] = str(result).split("Evolution planned:")[1].strip().split()[0]
+            except (IndexError, AttributeError):
+                pass
+        return result
+
+    tool_def["execute"] = _guarded_evolve_plan
+
+
 def _cleanup_incomplete_evolutions():
     """Roll back any incomplete evolutions left by phased runs."""
     try:
@@ -1891,39 +1924,34 @@ def _run_scout_phase(daemon, feature_id=None):
 _IMPLEMENT_PROMPT = (
     "You are Ghost's Implementer — Phase 2 of a multi-phase evolution.\n\n"
     "The Scout phase already explored the codebase and wrote a detailed plan.\n"
-    "Your job: execute the plan. Write code. Run tests.\n\n"
+    "Your job: execute the plan. Write code. Run tests. Then STOP.\n\n"
     "## SCOUT'S PLAN (from scratch file)\n"
     "{scratch_content}\n\n"
-    "## RULES\n"
-    "- You MUST call evolve_plan first, then evolve_apply at least once.\n"
-    "- You MUST run evolve_test after all changes.\n"
-    "- Do NOT call evolve_submit_pr — that is Phase 3's job.\n"
+    "## CRITICAL RULES\n"
+    "- Call evolve_plan EXACTLY ONCE. NEVER call evolve_plan a second time.\n"
+    "- Do NOT call evolve_submit_pr — you do not have that tool. Phase 3 handles PR submission.\n"
+    "- Do NOT try to submit PRs via shell_exec — it will not work.\n"
     "- BEFORE each evolve_apply with patches: file_read the target file for exact bytes.\n"
-    "  The scratch file has signatures but you need exact current content for patches.\n"
-    "- After evolve_test: write results to the scratch file:\n"
-    "  Append a '## Phase 2 Results' section with evolution_id, branch, and test status.\n"
-    "- If evolve_test fails after 3 fix attempts: write failure details to scratch, task_complete.\n"
-    "- OUTPUT TOKEN LIMIT: ~8K tokens. Split large files with append=True.\n\n"
+    "- OUTPUT TOKEN LIMIT: ~8K tokens. Split large files with append=True.\n"
+    "- After evolve_test PASSES: write results to scratch, then call task_complete IMMEDIATELY.\n"
+    "  Do NOT do anything else after writing results. Just task_complete.\n\n"
+    "## EXACT SEQUENCE (follow this precisely, do not deviate)\n"
+    "1. evolve_plan(description, files=[list from scratch])\n"
+    "2. For each file: file_read → evolve_apply (patches for existing, content for new)\n"
+    "3. evolve_test(evolution_id)\n"
+    "4. If test fails: read error, fix with evolve_apply, re-test (max 3 tries)\n"
+    "5. file_write to scratch file at: {scratch_path}\n"
+    "   Write a '## Phase 2 Results' section with: evolution_id, branch, test status\n"
+    "   Write a '## Learnings' section with reusable insights (not feature-specific)\n"
+    "6. task_complete  ← THIS IS YOUR FINAL STEP. STOP HERE.\n\n"
     "## TOOLS\n"
     "- code_symbol_lookup — verify signatures before patching.\n"
-    "- evolve_plan(description, files) — start the evolution.\n"
+    "- evolve_plan(description, files) — start the evolution (CALL ONCE ONLY).\n"
     "- evolve_apply(evolution_id, file, patches=[...]) — for existing files.\n"
     "- evolve_apply(evolution_id, file, content='...') — for new files.\n"
     "- evolve_test(evolution_id) — validate changes.\n"
     + _CODE_PATTERNS
     + "\n\n"
-    "## EXACT SEQUENCE\n"
-    "1. evolve_plan(description, files=[list from scratch])\n"
-    "2. For each file: file_read → evolve_apply (patches for existing, content for new)\n"
-    "3. evolve_test(evolution_id)\n"
-    "4. If test fails: read error, fix with evolve_apply, re-test (max 3 tries)\n"
-    "5. Write '## Phase 2 Results' to scratch file at: {scratch_path}\n"
-    "   Include: evolution_id, branch, test status\n"
-    "6. Write '## Learnings' section to scratch file with:\n"
-    "   - Patterns discovered (e.g. 'this module uses X pattern for Y')\n"
-    "   - Gotchas encountered (e.g. 'must update Z when changing W')\n"
-    "   Only include general, reusable insights — not feature-specific details.\n"
-    "7. task_complete\n\n"
     "## REFERENCE: CODEBASE MAP\n"
     "{repo_map}\n"
 )
@@ -1941,6 +1969,9 @@ def _run_implement_phase(daemon, feature_id, scratch_path):
 
     engine = _build_phase_engine(daemon)
     registry = _build_phase_registry(daemon, _IMPLEMENT_TOOLS)
+
+    _guard_evolve_plan_once(registry)
+
     repo_map = _get_repo_map(daemon)
     identity = _build_identity(daemon)
     learnings = _get_learnings_context()
@@ -1954,7 +1985,7 @@ def _run_implement_phase(daemon, feature_id, scratch_path):
         + learnings
     )
 
-    max_steps = daemon.cfg.get("implement_max_steps", 80)
+    max_steps = daemon.cfg.get("implement_max_steps", 50)
 
     try:
         result = engine.run(
