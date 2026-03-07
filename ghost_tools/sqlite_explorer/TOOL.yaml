@@ -1,0 +1,6 @@
+name: sqlite_explorer
+version: 1.0.0
+description: SQLite Database Explorer - explore and query SQLite databases with read-only
+  safety
+author: ghost
+category: utility

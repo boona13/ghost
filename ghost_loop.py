@@ -1913,13 +1913,15 @@ class ToolLoopEngine:
                 else:
                     payload["tool_choice"] = "auto"
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(self._call_llm, payload)
-                try:
-                    data, error = future.result(timeout=MAX_LLM_WALL_CLOCK)
-                except concurrent.futures.TimeoutError:
-                    data, error = None, f"Wall-clock timeout ({MAX_LLM_WALL_CLOCK}s) — model too slow"
-                    log.warning("LLM call exceeded %ds wall clock at step %d", MAX_LLM_WALL_CLOCK, step)
+            pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            future = pool.submit(self._call_llm, payload)
+            try:
+                data, error = future.result(timeout=MAX_LLM_WALL_CLOCK)
+            except concurrent.futures.TimeoutError:
+                data, error = None, f"Wall-clock timeout ({MAX_LLM_WALL_CLOCK}s) — model too slow"
+                log.warning("LLM call exceeded %ds wall clock at step %d", MAX_LLM_WALL_CLOCK, step)
+            finally:
+                pool.shutdown(wait=False, cancel_futures=True)
 
             if cancel_check and cancel_check():
                 final_text = "(Stopped by user)"
