@@ -1718,6 +1718,12 @@ class EvolutionEngine:
             self._save_history()
             self._active_evolutions.pop(evolution_id, None)
 
+            try:
+                from ghost_code_index import get_code_index
+                get_code_index().rebuild()
+            except Exception:
+                pass
+
             deploy_info = {
                 "evolution_id": evolution_id,
                 "feature_id": feature_id,

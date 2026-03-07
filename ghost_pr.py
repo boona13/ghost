@@ -993,6 +993,14 @@ class ReviewEngine:
             reviewer_registry.register(tool_def)
 
         try:
+            from ghost_code_index import build_code_index_tools, get_code_index
+            for tool_def in build_code_index_tools({}, get_code_index()):
+                if tool_def["name"] == "code_symbol_lookup":
+                    reviewer_registry.register(tool_def)
+        except Exception:
+            pass
+
+        try:
             result = engine.run(
                 system_prompt=system_prompt,
                 user_message=context_message,

@@ -512,6 +512,41 @@ class EvolveContextLogger:
         })
         self._write(rec)
 
+    # ── Phase tracking (multi-phase evolution) ────────────────────
+
+    def log_phase_start(self, phase_name: str, feature_id: str):
+        """Log the start of an evolution phase."""
+        rec = self._base()
+        rec.update({
+            "event": "phase_start",
+            "phase": phase_name,
+            "phase_feature_id": feature_id,
+        })
+        self._write(rec)
+
+    def log_phase_end(self, phase_name: str, steps_used: int,
+                      tokens_used: int = 0, success: bool = True):
+        """Log the completion of an evolution phase."""
+        rec = self._base()
+        rec.update({
+            "event": "phase_end",
+            "phase": phase_name,
+            "steps_used": steps_used,
+            "tokens_used": tokens_used,
+            "success": success,
+        })
+        self._write(rec)
+
+    def log_scratch_file_write(self, feature_id: str, sections: list[str]):
+        """Log what was written to a scratch file between phases."""
+        rec = self._base()
+        rec.update({
+            "event": "scratch_file_write",
+            "phase_feature_id": feature_id,
+            "sections": sections[:10],
+        })
+        self._write(rec)
+
     # ── Skill compliance ─────────────────────────────────────────
 
     def log_skill_compliance(self, role: str, tool_calls: list,

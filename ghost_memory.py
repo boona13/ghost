@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 from datetime import datetime
 from hashlib import md5
-from typing import List, Dict, Optional
+from typing import Optional
 
 
 GHOST_HOME = Path.home() / ".ghost"
@@ -81,18 +81,31 @@ class MemoryDB:
         except sqlite3.OperationalError:
             pass
 
+        try:
+            c.execute("ALTER TABLE memories ADD COLUMN citations TEXT DEFAULT ''")
+            self.conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
         self.conn.commit()
 
     def save(self, content, type="analysis", source_preview="", tags="",
-             skill="", tools_used="", tokens_used=0, source_hash=None):
-        """Save a memory entry."""
+             skill="", tools_used="", tokens_used=0, source_hash=None,
+             citations=""):
+        """Save a memory entry.
+
+        Args:
+            citations: Optional JSON string of citation locations.
+                Format: [{"file": "ghost_loop.py", "line": 42, "snippet": "class Foo:"}]
+                Citations enable JIT verification on retrieval.
+        """
         if not source_hash:
             source_hash = md5(content.encode(errors="replace")).hexdigest()
 
         c = self.conn.cursor()
         c.execute("""
-            INSERT INTO memories (timestamp, type, source_hash, content, source_preview, tags, skill, tools_used, tokens_used)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO memories (timestamp, type, source_hash, content, source_preview, tags, skill, tools_used, tokens_used, citations)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             datetime.now().isoformat(),
             type,
@@ -103,9 +116,70 @@ class MemoryDB:
             skill,
             tools_used,
             tokens_used,
+            citations[:5000] if citations else "",
         ))
         self.conn.commit()
         return c.lastrowid
+
+    def expire_old_memories(self, max_age_days: int = 28):
+        """Remove memories older than max_age_days (Copilot uses 28-day expiration).
+
+        Returns the number of expired memories removed.
+        """
+        from datetime import datetime, timedelta
+        cutoff = (datetime.now() - timedelta(days=max_age_days)).isoformat()
+        c = self.conn.cursor()
+        c.execute("SELECT COUNT(*) FROM memories WHERE timestamp < ?", (cutoff,))
+        count = c.fetchone()[0]
+        if count > 0:
+            c.execute("DELETE FROM memories WHERE timestamp < ?", (cutoff,))
+            self.conn.commit()
+        return count
+
+    def verify_citations(self, citations_json):
+        """Verify that citation locations still contain the expected code.
+
+        Returns (all_valid: bool, status_note: str).
+        Implements the JIT verification pattern from GitHub Copilot's
+        agentic memory system — verify before trusting.
+        """
+        if not citations_json:
+            return True, ""
+        try:
+            citations = json.loads(citations_json)
+        except (json.JSONDecodeError, TypeError):
+            return True, ""
+        if not citations:
+            return True, ""
+
+        project_dir = Path(__file__).resolve().parent
+        stale = []
+        for cite in citations:
+            fpath = project_dir / cite.get("file", "")
+            if not fpath.exists():
+                stale.append(f"{cite.get('file', '?')} (not found)")
+                continue
+            try:
+                lines = fpath.read_text(encoding="utf-8").split("\n")
+                line_idx = cite.get("line", 0) - 1
+                snippet = cite.get("snippet", "").strip()
+                if not snippet:
+                    continue
+                if 0 <= line_idx < len(lines):
+                    if snippet in lines[line_idx]:
+                        continue
+                    window = lines[max(0, line_idx - 2):min(len(lines), line_idx + 3)]
+                    if any(snippet in l for l in window):
+                        continue
+                    stale.append(f"{cite['file']}:{cite['line']} (changed)")
+                else:
+                    stale.append(f"{cite['file']}:{cite['line']} (out of range)")
+            except Exception:
+                stale.append(f"{cite.get('file', '?')} (read error)")
+
+        if stale:
+            return False, f" [STALE: {'; '.join(stale[:3])}]"
+        return True, " [VERIFIED]"
 
     @staticmethod
     def _sanitize_fts_query(query):
@@ -152,7 +226,7 @@ class MemoryDB:
             if type_filter:
                 c.execute("""
                     SELECT m.id, m.timestamp, m.type, m.content, m.source_preview,
-                           m.tags, m.skill, m.tools_used,
+                           m.tags, m.skill, m.tools_used, m.citations,
                            rank
                     FROM memories_fts f
                     JOIN memories m ON m.id = f.rowid
@@ -164,7 +238,7 @@ class MemoryDB:
             else:
                 c.execute("""
                     SELECT m.id, m.timestamp, m.type, m.content, m.source_preview,
-                           m.tags, m.skill, m.tools_used,
+                           m.tags, m.skill, m.tools_used, m.citations,
                            rank
                     FROM memories_fts f
                     JOIN memories m ON m.id = f.rowid
@@ -200,7 +274,7 @@ class MemoryDB:
             params.append(type_filter)
 
         c.execute(f"""
-            SELECT id, timestamp, type, content, source_preview, tags, skill, tools_used
+            SELECT id, timestamp, type, content, source_preview, tags, skill, tools_used, citations
             FROM memories
             WHERE {conditions}
             ORDER BY timestamp DESC
@@ -208,21 +282,26 @@ class MemoryDB:
         """, params + [limit])
         return [dict(row) for row in c.fetchall()]
 
-    def get_recent(self, limit=20, type_filter=None):
-        """Get the most recent memories."""
+    def get_recent(self, limit=20, type_filter=None, verify=False):
+        """Get the most recent memories, optionally verifying citations."""
         c = self.conn.cursor()
         if type_filter:
             c.execute("""
-                SELECT id, timestamp, type, content, source_preview, tags, skill, tools_used
+                SELECT id, timestamp, type, content, source_preview, tags, skill, tools_used, citations
                 FROM memories WHERE type = ?
                 ORDER BY timestamp DESC LIMIT ?
             """, (type_filter, limit))
         else:
             c.execute("""
-                SELECT id, timestamp, type, content, source_preview, tags, skill, tools_used
+                SELECT id, timestamp, type, content, source_preview, tags, skill, tools_used, citations
                 FROM memories ORDER BY timestamp DESC LIMIT ?
             """, (limit,))
-        return [dict(row) for row in c.fetchall()]
+        rows = [dict(row) for row in c.fetchall()]
+        if verify:
+            for row in rows:
+                _, note = self.verify_citations(row.get("citations", ""))
+                row["_citation_status"] = note
+        return rows
 
     def get_by_id(self, memory_id):
         c = self.conn.cursor()
@@ -309,16 +388,34 @@ def make_memory_search(memory_db):
         if not results:
             return "No memories found matching that query."
         parts = []
+        has_stale = False
         for r in results:
             ts = r["timestamp"][:19].replace("T", " ")
+            citations_raw = r.get("citations", "")
+            valid, verify_note = memory_db.verify_citations(citations_raw)
+            if not valid:
+                has_stale = True
             parts.append(
-                f"[{ts}] ({r['type']}) {r['content'][:300]}"
+                f"[{ts}] ({r['type']}) {r['content'][:300]}{verify_note}"
             )
-        return "\n---\n".join(parts)
+        result = "\n---\n".join(parts)
+        if has_stale:
+            result += (
+                "\n\n⚠ STALE MEMORIES DETECTED: Some memories have citations that no "
+                "longer match the current codebase. If you use information from a "
+                "[STALE] memory, verify it first. Consider saving a corrected version "
+                "with memory_save (include updated citations)."
+            )
+        return result
 
     return {
         "name": "memory_search",
-        "description": "Search Ghost's memory for past analyses, notes, and context. Use this to find relevant prior knowledge.",
+        "description": (
+            "Search Ghost's memory for past analyses, notes, and context. "
+            "Results with code citations are verified in real-time: [VERIFIED] "
+            "means the cited code still matches, [STALE] means the code has changed "
+            "since the memory was saved — treat stale memories with caution."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -334,24 +431,46 @@ def make_memory_search(memory_db):
 
 def make_memory_save(memory_db):
     """Create memory_save tool that writes to the memory DB."""
-    def execute(content, tags="", type="note"):
+    def execute(content, tags="", type="note", citations=""):
         memory_db.save(
             content=content,
             type=type,
             tags=tags,
             source_preview=content[:100],
+            citations=citations,
         )
-        return f"OK: saved to memory ({len(content)} chars, tags: {tags or 'none'})"
+        cite_info = ""
+        if citations:
+            try:
+                n = len(json.loads(citations))
+                cite_info = f", {n} citation(s)"
+            except Exception:
+                pass
+        return f"OK: saved to memory ({len(content)} chars, tags: {tags or 'none'}{cite_info})"
 
     return {
         "name": "memory_save",
-        "description": "Save important information to Ghost's persistent memory for future reference.",
+        "description": (
+            "Save important information to Ghost's persistent memory for future reference. "
+            "Optionally include citations — references to specific code locations "
+            "(file, line, snippet) that support the fact. Cited memories are "
+            "automatically verified on retrieval."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
                 "content": {"type": "string", "description": "Information to remember"},
                 "tags": {"type": "string", "description": "Comma-separated tags for organization", "default": ""},
                 "type": {"type": "string", "description": "Type of memory (note, insight, preference, etc.)", "default": "note"},
+                "citations": {
+                    "type": "string",
+                    "description": (
+                        "Optional JSON array of code location citations. "
+                        "Format: [{\"file\": \"ghost_loop.py\", \"line\": 42, \"snippet\": \"class Foo:\"}]. "
+                        "Citations are verified when the memory is retrieved."
+                    ),
+                    "default": "",
+                },
             },
             "required": ["content"],
         },

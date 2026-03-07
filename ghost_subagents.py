@@ -32,6 +32,7 @@ DELEGATE_SYSTEM_PROMPT = (
 READONLY_TOOLS = frozenset({
     "file_read", "grep", "glob", "memory_search",
     "analyze_code_file", "find_code_patterns",
+    "code_symbol_lookup", "code_symbol_list",
 })
 
 MAX_DELEGATE_STEPS = 15

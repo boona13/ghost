@@ -353,28 +353,8 @@ _CODE_PATTERNS = (
     "(3) 'required' list matches the non-defaulted params.\n"
 )
 
-_GHOST_SYSTEM_MAP = (
-    "\n\n## GHOST SYSTEM MAP (know your codebase before you build)\n"
-    "### Backend Modules (ghost_*.py in project root)\n"
-    "ghost.py          — Main daemon, GhostDaemon class, tool registration\n"
-    "ghost_loop.py     — ToolLoopEngine, ToolRegistry, LoopDetector\n"
-    "ghost_tools.py    — Core tools: shell_exec, file_read/write, web_fetch, notify\n"
-    "ghost_browser.py  — Playwright browser automation\n"
-    "ghost_memory.py   — SQLite FTS5 memory (save/search/prune)\n"
-    "ghost_cron.py     — CronService, build_cron_tools()\n"
-    "ghost_skills.py   — SkillLoader, trigger matching, prompt injection\n"
-    "ghost_plugins.py  — PluginLoader, HookRunner\n"
-    "ghost_evolve.py   — EvolutionEngine, build_evolve_tools()\n"
-    "ghost_autonomy.py — Growth routines, action items, self-repair\n"
-    "ghost_mcp.py      — MCP client, build_mcp_tools()\n"
-    "ghost_integrations.py — Google APIs + Grok/X\n"
-    "ghost_credentials.py  — Encrypted credential storage\n"
-    "ghost_web_search.py   — Multi-provider web search\n"
-    "ghost_code_intel.py   — AST-based code analysis\n"
-    "ghost_tool_builder.py — ToolManager, ToolAPI, ToolEventBus for ghost_tools/\n"
-    "ghost_community_hub.py     — Community Hub: discover, install, publish nodes\n"
-    "ghost_supervisor.py   — Process supervisor (PROTECTED — cannot modify)\n\n"
-    "### Ghost Tools (ghost_tools/<name>/)\n"
+_GHOST_SYSTEM_MAP_DASHBOARD = (
+    "\n### Ghost Tools (ghost_tools/<name>/)\n"
     "Isolated LLM-callable tools. Each has TOOL.yaml + tool.py with register(api).\n"
     "Use tools_create/tools_install_github to add new tools.\n"
     "ToolAPI provides: register_tool, register_hook, register_cron, register_setting,\n"
@@ -412,34 +392,37 @@ _GHOST_SYSTEM_MAP = (
     "   2. Register in routes/__init__.py\n"
     "   3. ghost_dashboard/static/js/pages/<page>.js — export render(container)\n"
     "   4. Add route in app.js + sidebar link in index.html\n\n"
-    "### CORE API REFERENCE (do NOT hallucinate methods — use ONLY these)\n"
-    "These are the EXACT public methods on the most-imported classes. If a method\n"
-    "is not listed here, it does NOT exist. Always file_read the source to confirm.\n\n"
-    "ToolLoopEngine (ghost_loop.py):\n"
-    "  __init__(api_key, model, base_url=..., fallback_models=None, auth_store=None, provider_chain=None, usage_tracker=None)\n"
-    "  .run(system_prompt, user_message, tool_registry=None, max_steps=20, temperature=0.3, max_tokens=..., ...)\n"
-    "  .single_shot(system_prompt, user_message, temperature=0.2, max_tokens=1024, image_b64=None, images=None)\n"
-    "  .api_key (property, getter+setter)    .model (property, getter+setter)\n"
-    "  .fallback_chain (property -> ModelFallbackChain)\n"
-    "  NOTE: There is NO .run_once(), NO .step(), NO .execute(). Use .run() for the full loop.\n\n"
-    "ToolRegistry (ghost_loop.py):\n"
-    "  __init__(strict_mode=False)\n"
-    "  .register(tool_def)    .unregister(name)    .get(name)    .get_all() -> dict\n"
-    "  .names() -> list    .execute(name, args) -> str    .to_openai_schema() -> list\n"
-    "  .subset(names) -> ToolRegistry    .is_reserved(name) -> bool    .get_audit_log() -> list\n"
-    "  NOTE: There is NO .list_tools(), NO .list(), NO .find(). Use .get_all() or .names().\n\n"
-    "SkillLoader (ghost_skills.py):\n"
-    "  __init__(extra_dirs=None)\n"
-    "  .skills -> Dict[str, Skill]    .reload()    .check_reload(interval=30)\n"
-    "  .match(text, content_type=None, disabled=None) -> list[Skill]\n"
-    "  .get(name) -> Skill|None    .list_all() -> list[Skill]\n"
-    "  .build_skills_prompt(matched_skills) -> str\n"
-    "  .get_tools_for_skills(matched_skills) -> set[str]\n"
-    "  NOTE: There is NO .get_skill(), NO .load(). Use .get(name) or .skills dict.\n\n"
-    "Skill (ghost_skills.py):\n"
-    "  Slots: .name .description .triggers .tools .body .path .priority .os_filter .requires .model\n"
-    "  .matches(text, content_type=None) -> bool    .to_prompt_section() -> str\n"
+    "### IMPORTANT: Use code_symbol_lookup to verify method signatures\n"
+    "Do NOT guess method names. Use code_symbol_lookup('ClassName') or\n"
+    "code_symbol_lookup('ClassName.method') to see exact current signatures.\n"
+    "ghost_supervisor.py — Process supervisor (PROTECTED — cannot modify)\n"
 )
+
+
+def get_ghost_system_map(token_budget: int = 3000) -> str:
+    """Generate the GHOST SYSTEM MAP dynamically from the code index.
+
+    Falls back to a minimal static map if the code index is unavailable.
+    The AST-generated map is always current — no manual maintenance needed.
+    """
+    try:
+        from ghost_code_index import get_code_index
+        idx = get_code_index()
+        idx.build()
+        dynamic_map = idx.generate_repo_map(token_budget=token_budget)
+        return dynamic_map + _GHOST_SYSTEM_MAP_DASHBOARD
+    except Exception:
+        pass
+
+    return (
+        "\n\n## GHOST SYSTEM MAP (static fallback — code index unavailable)\n"
+        "Use code_symbol_lookup('ClassName') to verify exact method signatures.\n"
+        "Use code_symbol_list('filename.py') to see all symbols in a module.\n"
+        + _GHOST_SYSTEM_MAP_DASHBOARD
+    )
+
+
+_GHOST_SYSTEM_MAP = get_ghost_system_map()
 
 _PRE_PR_CHECKLIST = (
     "\n\n## PRE-PR SELF-REVIEW (MANDATORY — complete EVERY item before evolve_submit_pr)\n"
@@ -1158,6 +1141,11 @@ def bootstrap_growth_cron(cron_service, cfg):
     if not cron_service or not cfg.get("enable_growth", True):
         return
 
+    try:
+        cleanup_stale_scratch()
+    except Exception:
+        pass
+
     schedules = cfg.get("growth_schedules", {})
     store = cron_service.store
 
@@ -1465,3 +1453,715 @@ def run_self_repair(daemon):
         print(f"  [AUTONOMY] Self-repair failed: {e}")
         CRASH_REPORT_FILE.unlink(missing_ok=True)
         return False
+
+
+# ═══════════════════════════════════════════════════════════════
+#  MULTI-PHASE EVOLUTION (Ralph pattern — fresh context per phase)
+# ═══════════════════════════════════════════════════════════════
+
+import logging as _logging
+_evo_log = _logging.getLogger("ghost.phased_evolution")
+
+SCRATCH_DIR = GHOST_HOME / "evolve" / "scratch"
+SCRATCH_ARCHIVE_DIR = SCRATCH_DIR / "archive"
+LEARNINGS_FILE = GHOST_HOME / "evolve" / "learnings.md"
+MAX_FEATURE_ATTEMPTS = 5
+
+_SCOUT_TOOLS = [
+    "list_future_features", "get_future_feature",
+    "start_future_feature", "reject_future_feature",
+    "code_symbol_lookup", "code_symbol_list",
+    "grep", "glob", "file_read", "file_write",
+    "memory_search",
+    "task_complete",
+]
+
+_IMPLEMENT_TOOLS = [
+    "evolve_plan", "evolve_apply", "evolve_apply_config",
+    "evolve_test", "evolve_rollback", "evolve_delete",
+    "file_read", "file_write",
+    "code_symbol_lookup", "code_symbol_list",
+    "grep", "glob", "find_code_patterns",
+    "shell_exec", "shell_session",
+    "shell_bg_start", "shell_bg_status", "shell_bg_kill",
+    "memory_save", "memory_search",
+    "tools_list", "tools_create", "tools_install_github",
+    "tools_uninstall", "tools_validate",
+    "tools_enable", "tools_disable",
+    "config_get", "config_set",
+    "task_complete",
+]
+
+_VERIFY_TOOLS = [
+    "evolve_submit_pr", "evolve_test", "evolve_rollback",
+    "evolve_apply",
+    "file_read", "file_write",
+    "code_symbol_lookup", "code_symbol_list",
+    "grep", "glob",
+    "delegate_task",
+    "memory_save", "memory_search",
+    "complete_future_feature", "fail_future_feature",
+    "task_complete",
+]
+
+_FIX_TOOLS = [
+    "evolve_resume", "evolve_apply", "evolve_apply_config",
+    "evolve_test", "evolve_rollback",
+    "evolve_submit_pr",
+    "file_read", "file_write",
+    "code_symbol_lookup", "code_symbol_list",
+    "grep", "glob",
+    "memory_save", "memory_search",
+    "complete_future_feature", "fail_future_feature",
+    "task_complete",
+]
+
+
+def _build_phase_engine(daemon):
+    """Create a fresh ToolLoopEngine for a phase (like delegate_task)."""
+    import os
+    from ghost_loop import ToolLoopEngine
+
+    api_key = None
+    if daemon.auth_store:
+        try:
+            api_key = daemon.auth_store.get_api_key("openrouter")
+        except (AttributeError, TypeError):
+            pass
+    if not api_key:
+        api_key = os.environ.get("OPENROUTER_API_KEY", "")
+    if not api_key:
+        api_key = getattr(daemon, "api_key", "")
+
+    model = daemon.cfg.get("model", "anthropic/claude-sonnet-4")
+    provider_chain = getattr(daemon, "_provider_chain", None)
+
+    return ToolLoopEngine(
+        api_key=api_key,
+        model=model,
+        fallback_models=daemon.cfg.get("fallback_models", []),
+        auth_store=getattr(daemon, "auth_store", None),
+        provider_chain=provider_chain,
+        usage_tracker=getattr(daemon, "usage_tracker", None),
+    )
+
+
+def _build_phase_registry(daemon, tool_names):
+    """Build a tool registry subset for a specific phase."""
+    available = set(daemon.tool_registry.names())
+    valid = [t for t in tool_names if t in available]
+    return daemon.tool_registry.subset(valid)
+
+
+def _get_repo_map(daemon):
+    """Get the dynamic repo map for system prompts.
+
+    Includes both the AST-generated code map AND the static dashboard
+    reference (routes, CSS, JS pages) that the code index doesn't cover.
+    """
+    budget = daemon.cfg.get("repo_map_token_budget", 3000)
+    try:
+        from ghost_code_index import get_code_index
+        idx = get_code_index()
+        idx.build()
+        return idx.generate_repo_map(token_budget=budget) + _GHOST_SYSTEM_MAP_DASHBOARD
+    except Exception:
+        return _GHOST_SYSTEM_MAP
+
+
+def _build_identity(daemon):
+    """Build the identity context prefix."""
+    if hasattr(daemon, "_build_identity_context"):
+        return daemon._build_identity_context()
+    return ""
+
+
+def _log_phase(phase_name, feature_id, msg):
+    _evo_log.info("[%s] feature=%s: %s", phase_name, feature_id or "?", msg)
+
+
+def _truncate_scratch(content: str, max_chars: int = 12000, keep_end: bool = False) -> str:
+    """Truncate scratch content for prompt injection.
+
+    For IMPLEMENT/SCOUT: keep the beginning (plan, feature description).
+    For FIX/VERIFY: keep the END (Resume Context, Reviewer Feedback, Phase 2 Results)
+    since those are appended at the bottom and are the most critical for later phases.
+    """
+    if len(content) <= max_chars:
+        return content
+    if keep_end:
+        half = max_chars // 2
+        return (
+            content[:half]
+            + "\n\n... [TRUNCATED — middle sections omitted to fit context] ...\n\n"
+            + content[-half:]
+        )
+    return content[:max_chars] + "\n\n... [TRUNCATED at 12K chars]"
+
+
+def _extract_feature_id_from_scratch(scratch_path):
+    """Try to extract the real feature ID from a scratch file's content.
+
+    Looks for patterns like 'start_future_feature(id)' results or
+    '## Feature' sections with an ID field.
+    """
+    import re
+    try:
+        text = scratch_path.read_text(encoding="utf-8")[:3000]
+        # Look for feature ID patterns (feat-XXXX, feature-XXXX, etc.)
+        m = re.search(r"(?:feature.?id|id)\s*[:=]\s*['\"]?(feat[_-][\w-]+|feature[_-][\w-]+|[a-f0-9]{8,})", text, re.IGNORECASE)
+        if m:
+            return m.group(1)
+        m = re.search(r"start_future_feature\(['\"]?([\w-]+)", text)
+        if m:
+            return m.group(1)
+    except Exception:
+        pass
+    return None
+
+
+ATTEMPT_COUNTS_FILE = SCRATCH_DIR / "attempt_counts.json"
+
+
+def _read_attempt_count(feature_id: str) -> int:
+    """Read the iteration/attempt counter for a feature (Ralph pattern).
+
+    Stored in a separate JSON file to survive scratch file overwrites
+    (the Scout phase rewrites scratch files on each run).
+    """
+    if not ATTEMPT_COUNTS_FILE.exists():
+        return 0
+    try:
+        data = json.loads(ATTEMPT_COUNTS_FILE.read_text(encoding="utf-8"))
+        return data.get(feature_id, 0)
+    except Exception:
+        return 0
+
+
+def _increment_attempt_count(feature_id: str):
+    """Increment the attempt counter for a feature."""
+    try:
+        ATTEMPT_COUNTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        data = {}
+        if ATTEMPT_COUNTS_FILE.exists():
+            data = json.loads(ATTEMPT_COUNTS_FILE.read_text(encoding="utf-8"))
+        data[feature_id] = data.get(feature_id, 0) + 1
+        ATTEMPT_COUNTS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _append_learnings(feature_id: str, learnings: str):
+    """Append cross-feature learnings to the persistent learnings file (Ralph pattern).
+
+    This is the equivalent of Ralph's progress.txt Codebase Patterns section —
+    knowledge that persists across features.
+    """
+    try:
+        LEARNINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        header = f"\n## [{time.strftime('%Y-%m-%d %H:%M')}] Feature: {feature_id}\n"
+        with open(LEARNINGS_FILE, "a", encoding="utf-8") as f:
+            f.write(header + learnings + "\n---\n")
+    except Exception:
+        pass
+
+
+def _get_learnings_context(max_chars: int = 4000) -> str:
+    """Read the most recent cross-feature learnings for injection into prompts."""
+    if not LEARNINGS_FILE.exists():
+        return ""
+    try:
+        text = LEARNINGS_FILE.read_text(encoding="utf-8")
+        if len(text) > max_chars:
+            text = text[-max_chars:]
+            idx = text.find("\n## ")
+            if idx > 0:
+                text = text[idx:]
+        return f"\n## CROSS-FEATURE LEARNINGS (from previous evolutions)\n{text}\n"
+    except Exception:
+        return ""
+
+
+def run_phased_evolution(daemon, feature_id=None):
+    """Multi-phase evolution with fresh context per phase.
+
+    Implements the Ralph loop pattern: each phase gets a clean context window.
+    State is persisted through scratch files on disk between phases.
+    Includes iteration tracking and cross-feature learnings (Ralph's progress.txt).
+    """
+    SCRATCH_DIR.mkdir(parents=True, exist_ok=True)
+
+    _log_phase("ORCHESTRATOR", feature_id, "Starting phased evolution")
+
+    try:
+        from ghost_loop import EvolveContextLogger
+        ctx_log = EvolveContextLogger.get()
+        ctx_log.log_phase_start("orchestrator", feature_id or "auto")
+    except Exception:
+        pass
+
+    # Phase 1: SCOUT
+    feature_id, scratch_path = _run_scout_phase(daemon, feature_id)
+    if not feature_id:
+        _log_phase("ORCHESTRATOR", None, "No features to implement — done")
+        return
+
+    # Check iteration count (Ralph pattern: max retries per feature)
+    # Stored in a separate JSON file so scout's scratch rewrites can't lose it
+    attempt = _read_attempt_count(feature_id)
+    max_attempts = daemon.cfg.get("max_feature_attempts", MAX_FEATURE_ATTEMPTS)
+    if attempt >= max_attempts:
+        _log_phase("ORCHESTRATOR", feature_id,
+                   f"Feature exceeded max attempts ({attempt}/{max_attempts}) — skipping")
+        _archive_scratch(scratch_path)
+        return
+    _increment_attempt_count(feature_id)
+
+    # Read scratch to decide path
+    try:
+        scratch_content = scratch_path.read_text(encoding="utf-8")
+    except Exception:
+        _log_phase("ORCHESTRATOR", feature_id, "Failed to read scratch file")
+        return
+
+    if "## Resume Context" in scratch_content:
+        _log_phase("ORCHESTRATOR", feature_id, "Resume path detected — running FIX phase")
+        success = _run_fix_phase(daemon, feature_id, scratch_path)
+    else:
+        _log_phase("ORCHESTRATOR", feature_id, "Fresh path — running IMPLEMENT phase")
+        success = _run_implement_phase(daemon, feature_id, scratch_path)
+
+    if not success:
+        _log_phase("ORCHESTRATOR", feature_id, "Implementation failed — stopping")
+        return
+
+    # Phase 3: VERIFY + SUBMIT
+    _log_phase("ORCHESTRATOR", feature_id, "Running VERIFY phase")
+    _run_verify_phase(daemon, feature_id, scratch_path)
+
+    _log_phase("ORCHESTRATOR", feature_id, "Phased evolution complete")
+
+
+# ── Phase 1: SCOUT ──────────────────────────────────────────────
+
+_SCOUT_PROMPT = (
+    "You are Ghost's Scout — Phase 1 of a multi-phase evolution.\n\n"
+    "Your ONLY job: analyze a feature, explore the codebase, and write a complete\n"
+    "implementation plan to the scratch file. You do NOT write any code.\n\n"
+    "## TOOLS\n"
+    "- code_symbol_lookup('ClassName') or code_symbol_lookup('Class.method') — "
+    "returns exact current source code of a symbol (~200 tokens vs ~15000 for file_read).\n"
+    "- code_symbol_list('filename.py') — lists all symbols with signatures.\n"
+    "- grep/glob/file_read — for non-Python files or when you need full file context.\n"
+    "- memory_search — check for known mistakes and prior learnings.\n\n"
+    "## STEPS\n"
+    "1. list_future_features(status='in_progress'). If found, use that feature.\n"
+    "   Otherwise list_future_features(status='pending'). If empty: task_complete.\n\n"
+    "2. get_future_feature(id) — read the full brief.\n\n"
+    "3. If resume context exists (look for current_branch, current_evolution_id, current_pr_id\n"
+    "   in the output), write a scratch file with '## Resume Context' section containing\n"
+    "   the branch, evolution_id, PR ID, and ALL reviewer feedback. Then task_complete.\n"
+    "   (The orchestrator will route to the FIX phase.)\n\n"
+    "4. ALREADY-IMPLEMENTED CHECK: grep for 2-3 key technical terms from the feature.\n"
+    "   If already implemented: reject_future_feature(id, reason). Move to next feature.\n\n"
+    "5. start_future_feature(id)\n\n"
+    "6. EXPLORE (use code_symbol_lookup, NOT file_read for Ghost modules):\n"
+    "   a) memory_search(query='<keywords>', type_filter='mistake') — MANDATORY\n"
+    "   b) code_symbol_lookup for every class/module you will import from\n"
+    "   c) grep for related patterns in the codebase\n\n"
+    "7. Write the scratch file at: {scratch_path}\n"
+    "   The file MUST contain these sections:\n"
+    "   ## Feature\n"
+    "   - feature_id: <the exact ID from start_future_feature>\n"
+    "   - Title, Description, Implementation type (tool|core), Priority\n"
+    "   ## Codebase Analysis\n"
+    "   ### Files to Modify (list each file and what to change)\n"
+    "   ### Key Signatures (paste EXACT output from code_symbol_lookup)\n"
+    "   ### Patterns to Follow (code patterns to replicate)\n"
+    "   ### Mistakes to Avoid (from memory_search)\n"
+    "   ## Implementation Plan (step-by-step)\n\n"
+    "8. task_complete\n\n"
+    "CRITICAL: The scratch file is the ONLY way to pass information to the next phase.\n"
+    "Include exact signatures, exact file paths, and specific line numbers.\n"
+    "If CROSS-FEATURE LEARNINGS are shown below, read them first — they contain\n"
+    "patterns and gotchas from previous evolutions that will save you time.\n\n"
+    "## REFERENCE: CODEBASE MAP\n"
+    "{repo_map}\n"
+)
+
+
+def _run_scout_phase(daemon, feature_id=None):
+    """Phase 1: Explore and plan. Returns (feature_id, scratch_path) or (None, None)."""
+    _log_phase("SCOUT", feature_id, "Starting scout phase")
+
+    engine = _build_phase_engine(daemon)
+    registry = _build_phase_registry(daemon, _SCOUT_TOOLS)
+    repo_map = _get_repo_map(daemon)
+    identity = _build_identity(daemon)
+
+    scratch_path = SCRATCH_DIR / f"{feature_id or 'auto'}.md"
+
+    learnings = _get_learnings_context()
+
+    system_prompt = (
+        identity
+        + _SCOUT_PROMPT
+            .replace("{repo_map}", repo_map)
+            .replace("{scratch_path}", str(scratch_path))
+        + learnings
+    )
+
+    user_msg = "Begin Phase 1: Scout. Find the next feature and write the implementation plan."
+    if feature_id:
+        user_msg = f"Begin Phase 1: Scout for feature {feature_id}."
+
+    max_steps = daemon.cfg.get("scout_max_steps", 30)
+
+    try:
+        result = engine.run(
+            system_prompt=system_prompt,
+            user_message=user_msg,
+            tool_registry=registry,
+            max_steps=max_steps,
+            temperature=0.3,
+            max_tokens=4096,
+        )
+        _log_phase("SCOUT", feature_id, f"Completed in {result.steps} steps")
+    except Exception as exc:
+        _log_phase("SCOUT", feature_id, f"Failed: {exc}")
+        return None, None
+
+    # Find the scratch file (may have been created with feature_id from inside the phase)
+    if scratch_path.exists():
+        resolved_id = _extract_feature_id_from_scratch(scratch_path) or feature_id or "auto"
+        return resolved_id, scratch_path
+
+    # Check for any newly-created scratch files
+    for f in sorted(SCRATCH_DIR.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True):
+        if f.name != "auto.md" and f.stat().st_mtime > time.time() - 120:
+            resolved_id = _extract_feature_id_from_scratch(f) or f.stem
+            return resolved_id, f
+    if scratch_path.exists():
+        resolved_id = _extract_feature_id_from_scratch(scratch_path) or feature_id or "auto"
+        return resolved_id, scratch_path
+
+    _log_phase("SCOUT", feature_id, "No scratch file written — no feature to implement")
+    return None, None
+
+
+# ── Phase 2: IMPLEMENT ──────────────────────────────────────────
+
+_IMPLEMENT_PROMPT = (
+    "You are Ghost's Implementer — Phase 2 of a multi-phase evolution.\n\n"
+    "The Scout phase already explored the codebase and wrote a detailed plan.\n"
+    "Your job: execute the plan. Write code. Run tests.\n\n"
+    "## SCOUT'S PLAN (from scratch file)\n"
+    "{scratch_content}\n\n"
+    "## RULES\n"
+    "- You MUST call evolve_plan first, then evolve_apply at least once.\n"
+    "- You MUST run evolve_test after all changes.\n"
+    "- Do NOT call evolve_submit_pr — that is Phase 3's job.\n"
+    "- BEFORE each evolve_apply with patches: file_read the target file for exact bytes.\n"
+    "  The scratch file has signatures but you need exact current content for patches.\n"
+    "- After evolve_test: write results to the scratch file:\n"
+    "  Append a '## Phase 2 Results' section with evolution_id, branch, and test status.\n"
+    "- If evolve_test fails after 3 fix attempts: write failure details to scratch, task_complete.\n"
+    "- OUTPUT TOKEN LIMIT: ~8K tokens. Split large files with append=True.\n\n"
+    "## TOOLS\n"
+    "- code_symbol_lookup — verify signatures before patching.\n"
+    "- evolve_plan(description, files) — start the evolution.\n"
+    "- evolve_apply(evolution_id, file, patches=[...]) — for existing files.\n"
+    "- evolve_apply(evolution_id, file, content='...') — for new files.\n"
+    "- evolve_test(evolution_id) — validate changes.\n"
+    + _CODE_PATTERNS
+    + "\n\n"
+    "## EXACT SEQUENCE\n"
+    "1. evolve_plan(description, files=[list from scratch])\n"
+    "2. For each file: file_read → evolve_apply (patches for existing, content for new)\n"
+    "3. evolve_test(evolution_id)\n"
+    "4. If test fails: read error, fix with evolve_apply, re-test (max 3 tries)\n"
+    "5. Write '## Phase 2 Results' to scratch file at: {scratch_path}\n"
+    "   Include: evolution_id, branch, test status\n"
+    "6. Write '## Learnings' section to scratch file with:\n"
+    "   - Patterns discovered (e.g. 'this module uses X pattern for Y')\n"
+    "   - Gotchas encountered (e.g. 'must update Z when changing W')\n"
+    "   Only include general, reusable insights — not feature-specific details.\n"
+    "7. task_complete\n\n"
+    "## REFERENCE: CODEBASE MAP\n"
+    "{repo_map}\n"
+)
+
+
+def _run_implement_phase(daemon, feature_id, scratch_path):
+    """Phase 2: Execute the implementation plan. Returns True on success."""
+    _log_phase("IMPLEMENT", feature_id, "Starting implement phase")
+
+    try:
+        scratch_content = scratch_path.read_text(encoding="utf-8")
+    except Exception as exc:
+        _log_phase("IMPLEMENT", feature_id, f"Cannot read scratch: {exc}")
+        return False
+
+    engine = _build_phase_engine(daemon)
+    registry = _build_phase_registry(daemon, _IMPLEMENT_TOOLS)
+    repo_map = _get_repo_map(daemon)
+    identity = _build_identity(daemon)
+    learnings = _get_learnings_context()
+
+    system_prompt = (
+        identity
+        + _IMPLEMENT_PROMPT
+            .replace("{repo_map}", repo_map)
+            .replace("{scratch_content}", _truncate_scratch(scratch_content, keep_end=False))
+            .replace("{scratch_path}", str(scratch_path))
+        + learnings
+    )
+
+    max_steps = daemon.cfg.get("implement_max_steps", 80)
+
+    try:
+        result = engine.run(
+            system_prompt=system_prompt,
+            user_message="Begin Phase 2: Implement the plan from the scratch file.",
+            tool_registry=registry,
+            max_steps=max_steps,
+            temperature=0.3,
+            max_tokens=4096,
+            hook_runner=getattr(daemon, "hooks", None),
+            tool_intent_security=getattr(daemon, "tool_intent_security", None),
+            tool_event_bus=getattr(daemon, "tool_event_bus", None),
+        )
+        _log_phase("IMPLEMENT", feature_id, f"Completed in {result.steps} steps")
+
+        has_evolution = any(
+            tc.get("tool") == "evolve_plan" for tc in (result.tool_calls or [])
+        )
+        has_test = any(
+            tc.get("tool") == "evolve_test" for tc in (result.tool_calls or [])
+        )
+        if not (has_evolution and has_test):
+            return False
+
+        # Verify the test actually passed by checking scratch file for failure markers
+        try:
+            updated_scratch = scratch_path.read_text(encoding="utf-8") if scratch_path.exists() else ""
+            if "test_status: fail" in updated_scratch.lower() or "test failed" in updated_scratch.lower():
+                _log_phase("IMPLEMENT", feature_id, "Test was called but FAILED — not proceeding to VERIFY")
+                return False
+        except Exception:
+            pass
+        return True
+
+    except Exception as exc:
+        _log_phase("IMPLEMENT", feature_id, f"Failed: {exc}")
+        return False
+
+
+# ── Phase 3: VERIFY + SUBMIT ─────────────────────────────────────
+
+_VERIFY_PROMPT = (
+    "You are Ghost's Verifier — Phase 3 of a multi-phase evolution.\n\n"
+    "The Implementer wrote code and ran tests. Your job: verify quality, then submit the PR.\n\n"
+    "## CONTEXT (from scratch file)\n"
+    "{scratch_content}\n\n"
+    "## VERIFICATION CHECKLIST\n"
+    "1. file_read each changed file — verify imports resolve, no syntax issues.\n"
+    "2. For each new import: code_symbol_lookup to verify the method actually exists.\n"
+    "3. Check for: bare except, missing mkdir, thread safety issues, missing **kwargs.\n"
+    "4. If any issues found: evolve_apply patches to fix, then evolve_test again.\n"
+    "5. evolve_submit_pr(evolution_id, title, description, feature_id)\n"
+    "   - evolution_id: from '## Phase 2 Results' in the scratch file\n"
+    "   - feature_id: the feature ID from '## Feature' section\n"
+    "6. If APPROVED: complete_future_feature(id, summary).\n"
+    "7. If BLOCKED: fail_future_feature(id, reason).\n"
+    "8. If REJECTED: Append reviewer feedback to scratch file under '## Reviewer Feedback',\n"
+    "   then task_complete. (The orchestrator handles requeue.)\n\n"
+    "## PRE-PR CHECKLIST\n"
+    + _PRE_PR_CHECKLIST
+    + "\n\nScratch file location: {scratch_path}\n\n"
+    "## REFERENCE: CODEBASE MAP\n"
+    "{repo_map}\n"
+)
+
+
+def _run_verify_phase(daemon, feature_id, scratch_path):
+    """Phase 3: Verify and submit PR. Returns True on success."""
+    _log_phase("VERIFY", feature_id, "Starting verify phase")
+
+    try:
+        scratch_content = scratch_path.read_text(encoding="utf-8")
+    except Exception as exc:
+        _log_phase("VERIFY", feature_id, f"Cannot read scratch: {exc}")
+        return False
+
+    engine = _build_phase_engine(daemon)
+    registry = _build_phase_registry(daemon, _VERIFY_TOOLS)
+    repo_map = _get_repo_map(daemon)
+    identity = _build_identity(daemon)
+
+    system_prompt = (
+        identity
+        + _VERIFY_PROMPT
+            .replace("{repo_map}", repo_map)
+            .replace("{scratch_content}", _truncate_scratch(scratch_content, keep_end=True))
+            .replace("{scratch_path}", str(scratch_path))
+    )
+
+    max_steps = daemon.cfg.get("verify_max_steps", 40)
+
+    try:
+        result = engine.run(
+            system_prompt=system_prompt,
+            user_message="Begin Phase 3: Verify changes and submit PR.",
+            tool_registry=registry,
+            max_steps=max_steps,
+            temperature=0.3,
+            max_tokens=4096,
+            hook_runner=getattr(daemon, "hooks", None),
+            tool_intent_security=getattr(daemon, "tool_intent_security", None),
+            tool_event_bus=getattr(daemon, "tool_event_bus", None),
+        )
+        _log_phase("VERIFY", feature_id, f"Completed in {result.steps} steps")
+
+        submitted = any(
+            tc.get("tool") == "evolve_submit_pr" for tc in (result.tool_calls or [])
+        )
+        completed = any(
+            tc.get("tool") == "complete_future_feature" for tc in (result.tool_calls or [])
+        )
+
+        if completed:
+            try:
+                sc = scratch_path.read_text(encoding="utf-8") if scratch_path.exists() else ""
+                learnings_section = ""
+                if "## Learnings" in sc:
+                    start = sc.index("## Learnings")
+                    rest = sc[start:]
+                    end_idx = rest.find("\n## ", len("## Learnings"))
+                    if end_idx > 0:
+                        learnings_section = rest[:end_idx].strip()
+                    else:
+                        learnings_section = rest.strip()
+                if learnings_section:
+                    _append_learnings(feature_id, learnings_section[:2000])
+            except Exception:
+                pass
+            _archive_scratch(scratch_path)
+
+        return submitted
+
+    except Exception as exc:
+        _log_phase("VERIFY", feature_id, f"Failed: {exc}")
+        return False
+
+
+# ── Phase 2b: FIX (handle PR rejections) ────────────────────────
+
+_FIX_PROMPT = (
+    "You are Ghost's Fixer — handling a PR rejection.\n\n"
+    "The reviewer rejected your PR. Fix ONLY what the reviewer asked for.\n"
+    "Do NOT rewrite entire files. Apply targeted patches.\n\n"
+    "## CONTEXT (from scratch file — includes reviewer feedback)\n"
+    "{scratch_content}\n\n"
+    "## STEPS\n"
+    "1. Call evolve_resume(evolution_id=<from Resume Context section>)\n"
+    "   This restores the branch and previous changes.\n"
+    "2. Read the reviewer feedback carefully.\n"
+    "3. For EACH reviewer concern:\n"
+    "   - file_read the relevant section\n"
+    "   - evolve_apply targeted patch to fix the specific issue\n"
+    "4. evolve_test(evolution_id) — verify fixes don't break anything.\n"
+    "5. evolve_submit_pr(evolution_id, title, description, feature_id)\n"
+    "   Reuse the SAME title from the original PR. Update description to note what was fixed.\n"
+    "   This reuses the same PR automatically.\n"
+    "6. If APPROVED: complete_future_feature(id, summary).\n"
+    "7. If REJECTED again: Append new feedback to scratch, task_complete.\n\n"
+    "Scratch file location: {scratch_path}\n\n"
+    "## REFERENCE: CODEBASE MAP\n"
+    "{repo_map}\n"
+)
+
+
+def _run_fix_phase(daemon, feature_id, scratch_path):
+    """Phase 2b: Fix PR rejection issues. Returns True on success."""
+    _log_phase("FIX", feature_id, "Starting fix phase")
+
+    try:
+        scratch_content = scratch_path.read_text(encoding="utf-8")
+    except Exception as exc:
+        _log_phase("FIX", feature_id, f"Cannot read scratch: {exc}")
+        return False
+
+    engine = _build_phase_engine(daemon)
+    registry = _build_phase_registry(daemon, _FIX_TOOLS)
+    repo_map = _get_repo_map(daemon)
+    identity = _build_identity(daemon)
+
+    system_prompt = (
+        identity
+        + _FIX_PROMPT
+            .replace("{repo_map}", repo_map)
+            .replace("{scratch_content}", _truncate_scratch(scratch_content, keep_end=True))
+            .replace("{scratch_path}", str(scratch_path))
+    )
+
+    max_steps = daemon.cfg.get("fix_max_steps", 40)
+
+    try:
+        result = engine.run(
+            system_prompt=system_prompt,
+            user_message="Begin Phase 2b: Fix the reviewer's concerns and resubmit.",
+            tool_registry=registry,
+            max_steps=max_steps,
+            temperature=0.3,
+            max_tokens=4096,
+            hook_runner=getattr(daemon, "hooks", None),
+            tool_intent_security=getattr(daemon, "tool_intent_security", None),
+            tool_event_bus=getattr(daemon, "tool_event_bus", None),
+        )
+        _log_phase("FIX", feature_id, f"Completed in {result.steps} steps")
+
+        submitted = any(
+            tc.get("tool") == "evolve_submit_pr" for tc in (result.tool_calls or [])
+        )
+        completed = any(
+            tc.get("tool") == "complete_future_feature" for tc in (result.tool_calls or [])
+        )
+
+        if completed:
+            _archive_scratch(scratch_path)
+
+        return submitted
+
+    except Exception as exc:
+        _log_phase("FIX", feature_id, f"Failed: {exc}")
+        return False
+
+
+# ── Scratch file management ──────────────────────────────────────
+
+def _archive_scratch(scratch_path):
+    """Move completed scratch file to archive."""
+    try:
+        SCRATCH_ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+        dest = SCRATCH_ARCHIVE_DIR / scratch_path.name
+        scratch_path.rename(dest)
+        _evo_log.info("Archived scratch file to %s", dest)
+    except Exception as exc:
+        _evo_log.warning("Failed to archive scratch: %s", exc)
+
+
+def cleanup_stale_scratch(max_age_days: int = 7):
+    """Remove scratch files older than max_age_days."""
+    if not SCRATCH_DIR.exists():
+        return 0
+    cutoff = time.time() - (max_age_days * 86400)
+    removed = 0
+    for f in SCRATCH_DIR.glob("*.md"):
+        try:
+            if f.stat().st_mtime < cutoff:
+                f.unlink()
+                removed += 1
+        except Exception:
+            pass
+    return removed

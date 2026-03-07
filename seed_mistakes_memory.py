@@ -71,6 +71,9 @@ MISTAKES = [
             "RIGHT: import ghost_mcp; then use ghost_mcp._mcp_process (live reference). "
             "This applies to ALL mutable module-level state: processes, flags, lists, dicts."
         ),
+        "citations": [
+            {"file": "ghost_autonomy.py", "line": 326, "snippet": "from ghost_foo import _some_var"}
+        ],
     },
     {
         "id": "M-07",
@@ -249,6 +252,7 @@ MISTAKES = [
 
 
 def seed():
+    import json as _json
     db = MemoryDB()
     seeded = 0
     skipped = 0
@@ -256,12 +260,16 @@ def seed():
         if db.has_source(m["id"]):
             skipped += 1
             continue
+        citations = ""
+        if m.get("citations"):
+            citations = _json.dumps(m["citations"])
         db.save(
             content=m["content"],
             type="mistake",
             tags=m["category"],
             source_preview=m["id"],
             source_hash=m["id"],
+            citations=citations,
         )
         seeded += 1
     db.close()
