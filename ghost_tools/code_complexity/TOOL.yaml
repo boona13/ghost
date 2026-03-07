@@ -1,7 +1,0 @@
-name: code_complexity
-version: 1.0.0
-description: "Analyzes Python code complexity using AST \u2014 computes cyclomatic\
-  \ complexity, nesting depth, function/class counts, and identifies long functions.\
-  \ No external dependencies."
-author: ghost
-category: utility
