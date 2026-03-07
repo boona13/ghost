@@ -1,0 +1,8 @@
+name: json_validator
+version: 1.0.0
+description: JSON Schema Validator - validates JSON data against JSON Schema and generates
+  schemas from sample data
+author: ghost
+category: utility
+deps:
+- jsonschema
