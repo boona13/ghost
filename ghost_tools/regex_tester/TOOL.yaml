@@ -1,0 +1,5 @@
+name: regex_tester
+version: 1.0.0
+description: Test regular expressions against input text with match highlighting, capture groups, and pattern explanations.
+author: ghost
+category: utility
