@@ -6,6 +6,7 @@ Credentials are persisted in ~/.ghost/credentials.json as a JSON array.
 """
 
 import json
+import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Dict, Any
