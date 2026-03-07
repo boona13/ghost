@@ -1,0 +1,6 @@
+name: env_inspector
+version: 1.0.0
+description: Inspect Python environment and dependencies - list packages, check specific
+  dependencies, and get system info
+author: ghost
+category: utility
