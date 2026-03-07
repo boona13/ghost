@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 import threading
 import time
 import uuid
@@ -394,6 +395,26 @@ class EvolutionEngine:
         self.reject(evolution_id)
         return False, "Timed out waiting for approval (5 minutes). Evolution cancelled."
 
+    def _atomic_write(self, file_path: Path, content: str):
+        """Atomically write content to file_path using temp file + rename.
+
+        If the write fails, the original file remains intact.
+        Uses os.replace() which is atomic on all platforms including Windows.
+        """
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temp_path = tempfile.mkstemp(dir=file_path.parent, suffix='.tmp')
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                f.write(content)
+            os.replace(temp_path, file_path)
+        except (OSError, IOError) as exc:
+            log.warning("Atomic write failed for %s: %s", file_path, exc)
+            try:
+                os.unlink(temp_path)
+            except FileNotFoundError:
+                pass
+            raise
+
     def apply_change(self, evolution_id, file_path, content=None, patches=None,
                      append=False):
         """Apply a code change to a file.
@@ -517,7 +538,7 @@ class EvolutionEngine:
             )
 
         abs_path.parent.mkdir(parents=True, exist_ok=True)
-        abs_path.write_text(new_content, encoding="utf-8")
+        self._atomic_write(abs_path, new_content)
 
         diff = list(difflib.unified_diff(
             old_content.splitlines(keepends=True),
@@ -587,7 +608,7 @@ class EvolutionEngine:
 
         old_values = {k: old_cfg.get(k, "(unset)") for k in updates}
         new_cfg = {**old_cfg, **updates}
-        config_file.write_text(json.dumps(new_cfg, indent=2), encoding="utf-8")
+        self._atomic_write(config_file, json.dumps(new_cfg, indent=2))
 
         diff_lines = []
         for k, new_val in updates.items():
