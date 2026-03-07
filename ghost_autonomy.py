@@ -1745,6 +1745,26 @@ def _extract_evolution_id_from_tool_calls(tool_calls: list[dict]) -> str | None:
     return None
 
 
+def _ensure_scratch_has_evolution_id(scratch_path: Path, evolution_id: str) -> None:
+    """Append evolution_id to scratch file if the LLM didn't include it.
+
+    The VERIFY phase reads the evolution_id from the scratch file text.
+    If the IMPLEMENT phase's LLM agent forgot to write it, the handoff
+    breaks silently.  This back-stop ensures it's always present.
+    """
+    try:
+        content = scratch_path.read_text(encoding="utf-8") if scratch_path.exists() else ""
+    except Exception:
+        content = ""
+    if _extract_evolution_id_from_scratch_text(content):
+        return
+    try:
+        section = f"\n\n## Phase 2 Results\n**Evolution ID:** {evolution_id}\n"
+        scratch_path.write_text(content + section, encoding="utf-8")
+    except Exception:
+        pass
+
+
 def _latest_test_passed_after_last_change(tool_calls: list[dict]) -> bool:
     """True only if the latest evolve_test passed after the latest mutation."""
     last_change_step = -1
@@ -2199,6 +2219,7 @@ def _run_implement_phase(daemon, feature_id, scratch_path):
 
         evolution_id = _extract_evolution_id_from_tool_calls(result.tool_calls or [])
         if evolution_id:
+            _ensure_scratch_has_evolution_id(scratch_path, evolution_id)
             ready, reason = _active_evolution_ready_for_verify(evolution_id)
             if not ready:
                 _log_phase("IMPLEMENT", feature_id, reason)
