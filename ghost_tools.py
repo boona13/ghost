@@ -184,6 +184,15 @@ def _is_ghost_codebase_path(path_str):
 def _normalize_ghost_repo_path(path_str):
     """Map ~/.ghost mirrored tool paths back into the real repo."""
     expanded = Path(path_str).expanduser()
+    project_markers = {PROJECT_DIR.name.lower(), "ghost", "ghost-0.5"}
+
+    if expanded.is_absolute() and not expanded.exists():
+        lowered_parts = [part.lower() for part in expanded.parts]
+        for idx, part in enumerate(lowered_parts):
+            if part not in project_markers:
+                continue
+            rel = Path(*expanded.parts[idx + 1:]) if idx + 1 < len(expanded.parts) else Path()
+            return (PROJECT_DIR / rel) if rel.parts else PROJECT_DIR
 
     try:
         rel_to_home = expanded.relative_to(GHOST_HOME)

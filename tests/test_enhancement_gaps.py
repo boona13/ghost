@@ -259,6 +259,11 @@ class EnhancementGapTests(unittest.TestCase):
         self.assertEqual(_normalize_ghost_repo_path(str(mirrored)), expected)
         self.assertEqual(_resolve_search_path(str(mirrored)), expected)
 
+    def test_stale_absolute_checkout_paths_map_back_to_repo(self):
+        stale = "/Users/ibrahimboona/Ghost/ghost_tools/file_hasher/tool.py"
+        expected = CODE_TOOLS_PROJECT_DIR / "ghost_tools" / "file_hasher" / "tool.py"
+        self.assertEqual(_normalize_ghost_repo_path(stale), expected)
+
     def test_grep_accepts_path_to_search_alias(self):
         grep_tool = next(tool for tool in build_code_search_tools() if tool["name"] == "grep")
         result = grep_tool["execute"](
