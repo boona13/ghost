@@ -23,7 +23,7 @@ MAX_GLOB_RESULTS = 100
 
 _SKIP_DIRS = {
     ".git", ".hg", ".svn", "__pycache__", "node_modules", "venv", "env",
-    ".venv", ".env", "dist", "build", ".next", ".cache", ".tox",
+    ".venv", ".env", ".ghost", "dist", "build", ".next", ".cache", ".tox",
     "eggs", "*.egg-info", ".mypy_cache", ".pytest_cache",
 }
 
@@ -38,6 +38,19 @@ def _resolve_search_path(path: Optional[str]) -> Path:
     if not path:
         return PROJECT_DIR
     p = Path(path).expanduser()
+    try:
+        rel_to_home = p.relative_to(GHOST_HOME)
+    except Exception:
+        rel_to_home = None
+    if rel_to_home is not None:
+        parts = rel_to_home.parts
+        if parts:
+            if parts[0] == "ghost_tools":
+                rel_tool_path = Path(*parts[1:]) if len(parts) > 1 else Path()
+                return PROJECT_DIR / "ghost_tools" / rel_tool_path
+            candidate = PROJECT_DIR / rel_to_home
+            if candidate.exists() or (len(parts) == 1 and parts[0].startswith("ghost_")):
+                return candidate
     try:
         resolved = p.resolve()
     except Exception:
@@ -296,14 +309,48 @@ def build_code_search_tools(cfg: dict = None) -> List[Dict[str, Any]]:
     """Build grep and glob tools for the Ghost tool registry."""
     cfg = cfg or {}
 
-    def _grep_execute(pattern: str, path: str = "", include: str = ""):
+    def _coerce_search_root(search_path: Path, raw_path: str) -> tuple[Path, str]:
+        include_name = ""
+        candidate = search_path
+        raw = Path(raw_path).expanduser() if raw_path else None
+
+        file_like = False
+        if raw_path:
+            include_name = Path(raw_path).name
+            if Path(raw_path).suffix:
+                file_like = True
+        if candidate.is_file():
+            file_like = True
+
+        if file_like:
+            include_name = include_name or candidate.name
+            parent = candidate.parent
+            while parent != parent.parent and not parent.exists():
+                parent = parent.parent
+            if parent.is_dir():
+                return parent, include_name
+            if "ghost_tools" in candidate.parts:
+                return PROJECT_DIR / "ghost_tools", include_name
+            return PROJECT_DIR, include_name
+
+        return candidate, include_name
+
+    def _grep_execute(
+        pattern: str = "",
+        path: str = "",
+        include: str = "",
+        path_to_search: str = "",
+        directory: str = "",
+        **kwargs,
+    ):
         if not pattern:
             return "Error: pattern is required"
+        if not path:
+            path = path_to_search or directory
         search_path = _resolve_search_path(path)
-
-        if search_path.is_file():
-            search_path = search_path.parent
-            include = Path(path).name
+        search_path, include_name = _coerce_search_root(search_path, path)
+        if include_name and not include:
+            include = include_name
 
         if not search_path.is_dir():
             return f"Error: not a directory: {search_path}"
@@ -315,12 +362,19 @@ def build_code_search_tools(cfg: dict = None) -> List[Dict[str, Any]]:
             matches = _grep_python(pattern, search_path, include)
             return _format_python_results(matches)
 
-    def _glob_execute(pattern: str, path: str = ""):
+    def _glob_execute(
+        pattern: str = "",
+        path: str = "",
+        path_to_search: str = "",
+        directory: str = "",
+        **kwargs,
+    ):
         if not pattern:
             return "Error: pattern is required"
+        if not path:
+            path = path_to_search or directory
         search_path = _resolve_search_path(path)
-        if search_path.is_file():
-            search_path = search_path.parent
+        search_path, _ = _coerce_search_root(search_path, path)
         if not search_path.is_dir():
             return f"Error: not a directory: {search_path}"
 

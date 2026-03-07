@@ -13,7 +13,11 @@ from ghost_autonomy import (
     _latest_test_passed_after_last_change,
     _phase_wrote_scratch_file,
 )
-from ghost_code_tools import PROJECT_DIR as CODE_TOOLS_PROJECT_DIR, _resolve_search_path
+from ghost_code_tools import (
+    PROJECT_DIR as CODE_TOOLS_PROJECT_DIR,
+    _resolve_search_path,
+    build_code_search_tools,
+)
 from ghost_evolve import EvolutionEngine
 from ghost_loop import _check_incomplete_workflows
 from ghost_memory import MemoryDB, STALE_MEMORY_PURGE_THRESHOLD
@@ -161,6 +165,12 @@ class EnhancementGapTests(unittest.TestCase):
         """
         self.assertEqual(_extract_evolution_id_from_scratch_text(scratch), "7846805b725d")
 
+        scratch = """
+        ## Phase 2 Results
+        **evolution_id:** 4f59135743ec
+        """
+        self.assertEqual(_extract_evolution_id_from_scratch_text(scratch), "4f59135743ec")
+
     def test_new_changes_invalidate_prior_test_results(self):
         evo = {"approved": True, "status": "tested_pass", "test_results": {"passed": True}}
         EvolutionEngine._invalidate_test_state(evo)
@@ -242,6 +252,20 @@ class EnhancementGapTests(unittest.TestCase):
         expected = CODE_TOOLS_PROJECT_DIR / "ghost_tools" / "regex_tool" / "tool.py"
         self.assertEqual(_normalize_ghost_repo_path(str(mirrored)), expected)
         self.assertEqual(_resolve_search_path(str(mirrored)), expected)
+
+    def test_root_ghost_source_paths_map_back_to_repo(self):
+        mirrored = Path.home() / ".ghost" / "ghost_evolve.py"
+        expected = CODE_TOOLS_PROJECT_DIR / "ghost_evolve.py"
+        self.assertEqual(_normalize_ghost_repo_path(str(mirrored)), expected)
+        self.assertEqual(_resolve_search_path(str(mirrored)), expected)
+
+    def test_grep_accepts_path_to_search_alias(self):
+        grep_tool = next(tool for tool in build_code_search_tools() if tool["name"] == "grep")
+        result = grep_tool["execute"](
+            pattern="def submit_pr",
+            path_to_search=str(CODE_TOOLS_PROJECT_DIR / "ghost_evolve.py"),
+        )
+        self.assertIn("ghost_evolve.py", result)
 
 
 if __name__ == "__main__":

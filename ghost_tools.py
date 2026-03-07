@@ -22,6 +22,17 @@ PLAT = platform.system()
 GHOST_HOME = Path.home() / ".ghost"
 PROJECT_DIR = Path(__file__).resolve().parent
 GHOST_TOOLS_MIRROR_DIR = (GHOST_HOME / "ghost_tools").resolve()
+_GHOST_STATE_DIRS = {
+    "backups",
+    "channels",
+    "cron",
+    "evolve",
+    "logs",
+    "memory",
+    "prs",
+    "sessions",
+    "tmp",
+}
 
 
 def get_user_projects_dir(cfg=None):
@@ -172,12 +183,30 @@ def _is_ghost_codebase_path(path_str):
 
 def _normalize_ghost_repo_path(path_str):
     """Map ~/.ghost mirrored tool paths back into the real repo."""
+    expanded = Path(path_str).expanduser()
+
     try:
-        resolved = Path(path_str).expanduser().resolve()
+        rel_to_home = expanded.relative_to(GHOST_HOME)
+    except Exception:
+        rel_to_home = None
+
+    if rel_to_home is not None:
+        parts = rel_to_home.parts
+        if parts:
+            if parts[0] == "ghost_tools":
+                rel_tool_path = Path(*parts[1:]) if len(parts) > 1 else Path()
+                return PROJECT_DIR / "ghost_tools" / rel_tool_path
+            if parts[0] not in _GHOST_STATE_DIRS:
+                candidate = PROJECT_DIR / rel_to_home
+                if candidate.exists() or (len(parts) == 1 and parts[0].startswith("ghost_")):
+                    return candidate
+
+    try:
+        resolved = expanded.resolve()
         rel_to_mirror = resolved.relative_to(GHOST_TOOLS_MIRROR_DIR)
         return (PROJECT_DIR / "ghost_tools" / rel_to_mirror).resolve()
     except Exception:
-        return Path(path_str).expanduser()
+        return expanded
 
 
 def _check_command_allowed(command, allowed_commands, blocked_commands):

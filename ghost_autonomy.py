@@ -1720,6 +1720,7 @@ def _extract_evolution_id_from_scratch_text(scratch_content: str) -> str | None:
         return None
     patterns = [
         r"\*\*Evolution ID:\*\*\s*([a-f0-9]{8,})",
+        r"\*\*evolution_id:\*\*\s*([a-f0-9]{8,})",
         r"evolution_id\s*[:=]\s*([a-f0-9]{8,})",
     ]
     for pattern in patterns:
