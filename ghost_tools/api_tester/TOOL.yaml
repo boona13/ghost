@@ -1,0 +1,8 @@
+name: api_tester
+version: 1.0.0
+description: HTTP/REST API testing tool for making requests, health checks, and comparing
+  endpoint responses
+author: ghost
+category: utility
+deps:
+- requests

@@ -1235,26 +1235,50 @@ class EvolutionEngine:
         both disk and git.
         """
         evo = self._active_evolutions.get(evolution_id, {})
-        changed = evo.get("changes", [])
         tool_dirs_to_remove = set()
-        for change in changed:
+
+        # Source 1: files tracked in evolve_apply changes
+        for change in evo.get("changes", []):
             fpath = change.get("file", "")
             if fpath.startswith("ghost_tools/"):
                 parts = fpath.split("/")
                 if len(parts) >= 2 and parts[1] not in ("_example", ".gitkeep"):
                     tool_dirs_to_remove.add(f"ghost_tools/{parts[1]}")
 
-        if not tool_dirs_to_remove:
-            # Also check diff against main for files added by auto-commit
+        # Source 2: files on the feature branch diff (tools_create files
+        # are auto-committed to main by create_branch, then also appear
+        # on the feature branch). Check which tool dirs were added.
+        branch = evo.get("git_branch", "")
+        if branch:
             try:
-                branch = evo.get("git_branch", "")
-                if branch:
-                    diff_files = ghost_git.get_changed_files("main~1", "main")
-                    for f in diff_files:
-                        if f.startswith("ghost_tools/"):
-                            parts = f.split("/")
-                            if len(parts) >= 2 and parts[1] not in ("_example", ".gitkeep"):
-                                tool_dirs_to_remove.add(f"ghost_tools/{parts[1]}")
+                branch_files = ghost_git.get_changed_files("main~1", branch)
+                for f in branch_files:
+                    if f.startswith("ghost_tools/"):
+                        parts = f.split("/")
+                        if len(parts) >= 2 and parts[1] not in ("_example", ".gitkeep"):
+                            tool_dirs_to_remove.add(f"ghost_tools/{parts[1]}")
+            except Exception:
+                pass
+
+        # Source 3: check recent commits on main for auto-committed tool files
+        if not tool_dirs_to_remove:
+            try:
+                diff_files = ghost_git.get_changed_files("main~1", "main")
+                for f in diff_files:
+                    if f.startswith("ghost_tools/"):
+                        parts = f.split("/")
+                        if len(parts) >= 2 and parts[1] not in ("_example", ".gitkeep"):
+                            tool_dirs_to_remove.add(f"ghost_tools/{parts[1]}")
+            except Exception:
+                pass
+
+        # Source 4: feature description may reference a tool name
+        if not tool_dirs_to_remove:
+            try:
+                desc = evo.get("description", "")
+                for d in (PROJECT_DIR / "ghost_tools").iterdir():
+                    if d.is_dir() and d.name != "_example" and d.name in desc:
+                        tool_dirs_to_remove.add(f"ghost_tools/{d.name}")
             except Exception:
                 pass
 
@@ -1271,16 +1295,16 @@ class EvolutionEngine:
 
         if removed:
             try:
-                import subprocess as _sp
-                _sp.run(
+                subprocess.run(
                     ["git", "add", "-A"],
                     cwd=str(PROJECT_DIR), capture_output=True, timeout=10,
                 )
-                _sp.run(
+                subprocess.run(
                     ["git", "commit", "-m",
                      f"cleanup: remove rejected tool files ({', '.join(removed)})"],
                     cwd=str(PROJECT_DIR), capture_output=True, timeout=10,
                 )
+                log.info("Committed removal of rejected tools: %s", removed)
             except Exception:
                 pass
         return removed
