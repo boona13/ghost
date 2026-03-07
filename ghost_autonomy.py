@@ -18,6 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from ghost_implementation_auditor_filters import build_implementation_auditor_candidate_report
+from ghost_future_features import FutureFeaturesStore
 
 GHOST_HOME = Path.home() / ".ghost"
 ACTION_ITEMS_FILE = GHOST_HOME / "action_items.json"
@@ -1976,6 +1977,7 @@ def run_phased_evolution(daemon, feature_id=None):
         scratch_content = scratch_path.read_text(encoding="utf-8")
     except Exception:
         _log_phase("ORCHESTRATOR", feature_id, "Failed to read scratch file")
+        FutureFeaturesStore().mark_failed(feature_id, "Failed to read scratch file")
         return
 
     if "## Resume Context" in scratch_content:
@@ -1988,11 +1990,17 @@ def run_phased_evolution(daemon, feature_id=None):
     if not success:
         _log_phase("ORCHESTRATOR", feature_id, "Implementation failed — stopping")
         _cleanup_incomplete_evolutions()
+        FutureFeaturesStore().mark_failed(feature_id, "Implementation phase failed — see logs for details")
         return
 
     # Phase 3: VERIFY + SUBMIT
     _log_phase("ORCHESTRATOR", feature_id, "Running VERIFY phase")
-    _run_verify_phase(daemon, feature_id, scratch_path)
+    verify_success = _run_verify_phase(daemon, feature_id, scratch_path)
+    if not verify_success:
+        _log_phase("ORCHESTRATOR", feature_id, "Verification/PR submission failed")
+        FutureFeaturesStore().mark_failed(feature_id, "Verification/PR submission phase failed")
+        _cleanup_incomplete_evolutions()
+        return
 
     _cleanup_incomplete_evolutions()
     _log_phase("ORCHESTRATOR", feature_id, "Phased evolution complete")
