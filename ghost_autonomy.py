@@ -1831,6 +1831,29 @@ def _extract_feature_id_from_scratch(scratch_path):
     return None
 
 
+def _resolve_verify_scratch_path(feature_id: str | None, scratch_path: Path) -> tuple[Path, str]:
+    """Prefer a feature-specific scratch file when auto.md lacks verify metadata."""
+    try:
+        scratch_content = scratch_path.read_text(encoding="utf-8")
+    except Exception:
+        return scratch_path, ""
+
+    if _extract_evolution_id_from_scratch_text(scratch_content):
+        return scratch_path, scratch_content
+
+    if feature_id:
+        feature_scratch = SCRATCH_DIR / f"{feature_id}.md"
+        if feature_scratch != scratch_path and feature_scratch.exists():
+            try:
+                feature_content = feature_scratch.read_text(encoding="utf-8")
+            except Exception:
+                return scratch_path, scratch_content
+            if _extract_evolution_id_from_scratch_text(feature_content):
+                return feature_scratch, feature_content
+
+    return scratch_path, scratch_content
+
+
 ATTEMPT_COUNTS_FILE = SCRATCH_DIR / "attempt_counts.json"
 
 
@@ -2247,11 +2270,9 @@ def _build_verify_changeset(max_chars: int = 12000) -> str:
 def _run_verify_phase(daemon, feature_id, scratch_path):
     """Phase 3: Verify and submit PR. Returns True on success."""
     _log_phase("VERIFY", feature_id, "Starting verify phase")
-
-    try:
-        scratch_content = scratch_path.read_text(encoding="utf-8")
-    except Exception as exc:
-        _log_phase("VERIFY", feature_id, f"Cannot read scratch: {exc}")
+    scratch_path, scratch_content = _resolve_verify_scratch_path(feature_id, scratch_path)
+    if not scratch_content:
+        _log_phase("VERIFY", feature_id, f"Cannot read scratch: {scratch_path}")
         return False
 
     evolution_id = _extract_evolution_id_from_scratch_text(scratch_content)

@@ -12,6 +12,7 @@ from ghost_autonomy import (
     _extract_evolution_id_from_scratch_text,
     _latest_test_passed_after_last_change,
     _phase_wrote_scratch_file,
+    _resolve_verify_scratch_path,
 )
 from ghost_code_tools import (
     PROJECT_DIR as CODE_TOOLS_PROJECT_DIR,
@@ -271,6 +272,20 @@ class EnhancementGapTests(unittest.TestCase):
             path_to_search=str(CODE_TOOLS_PROJECT_DIR / "ghost_evolve.py"),
         )
         self.assertIn("ghost_evolve.py", result)
+
+    def test_verify_prefers_feature_specific_scratch_with_evolution_id(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            scratch_dir = Path(tmp_dir)
+            auto = scratch_dir / "auto.md"
+            feature = scratch_dir / "0492615b0b.md"
+            auto.write_text("## Feature\n- feature_id: 0492615b0b\n", encoding="utf-8")
+            feature.write_text("## Phase 2 Results\n**Evolution ID:** 6013245cc680\n", encoding="utf-8")
+
+            with patch("ghost_autonomy.SCRATCH_DIR", scratch_dir):
+                resolved_path, content = _resolve_verify_scratch_path("0492615b0b", auto)
+
+            self.assertEqual(resolved_path, feature)
+            self.assertIn("6013245cc680", content)
 
 
 if __name__ == "__main__":
