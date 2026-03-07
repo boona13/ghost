@@ -7,6 +7,12 @@ from unittest.mock import patch
 
 import ghost_code_index
 from ghost_code_index import CodeIndex
+from ghost_autonomy import (
+    _active_evolution_ready_for_verify,
+    _extract_evolution_id_from_scratch_text,
+    _latest_test_passed_after_last_change,
+)
+from ghost_evolve import EvolutionEngine
 from ghost_memory import MemoryDB, STALE_MEMORY_PURGE_THRESHOLD
 
 
@@ -105,6 +111,57 @@ class EnhancementGapTests(unittest.TestCase):
             self.assertEqual(len(results), 1)
             self.assertTrue(results[0]["_citation_valid"])
             self.assertEqual(results[0]["_citation_status"], " [VERIFIED]")
+
+    def test_latest_test_must_pass_after_last_change(self):
+        self.assertTrue(
+            _latest_test_passed_after_last_change([
+                {"tool": "evolve_apply", "step": 1, "result": "Applied"},
+                {"tool": "evolve_test", "step": 2, "result": "Tests PASSED"},
+            ])
+        )
+        self.assertFalse(
+            _latest_test_passed_after_last_change([
+                {"tool": "evolve_apply", "step": 1, "result": "Applied"},
+                {"tool": "evolve_test", "step": 2, "result": "Tests PASSED"},
+                {"tool": "evolve_apply", "step": 3, "result": "Applied again"},
+            ])
+        )
+        self.assertFalse(
+            _latest_test_passed_after_last_change([
+                {"tool": "evolve_apply", "step": 1, "result": "Applied"},
+                {"tool": "evolve_test", "step": 2, "result": "Tests FAILED"},
+            ])
+        )
+
+    def test_verify_readiness_requires_active_tested_pass_evolution(self):
+        fake_engine = type("FakeEngine", (), {
+            "_active_evolutions": {
+                "abc12345": {"status": "tested_pass", "test_results": {"passed": True}},
+                "def67890": {"status": "approved", "test_results": None},
+            }
+        })()
+
+        with patch("ghost_evolve.get_engine", return_value=fake_engine):
+            ready, reason = _active_evolution_ready_for_verify("abc12345")
+            self.assertTrue(ready)
+            self.assertEqual(reason, "")
+
+            ready, reason = _active_evolution_ready_for_verify("def67890")
+            self.assertFalse(ready)
+            self.assertIn("not verify-ready", reason)
+
+    def test_extract_evolution_id_from_scratch_text(self):
+        scratch = """
+        ## Phase 2 Results
+        **Evolution ID:** 7846805b725d
+        """
+        self.assertEqual(_extract_evolution_id_from_scratch_text(scratch), "7846805b725d")
+
+    def test_new_changes_invalidate_prior_test_results(self):
+        evo = {"approved": True, "status": "tested_pass", "test_results": {"passed": True}}
+        EvolutionEngine._invalidate_test_state(evo)
+        self.assertEqual(evo["status"], "approved")
+        self.assertIsNone(evo["test_results"])
 
 
 if __name__ == "__main__":

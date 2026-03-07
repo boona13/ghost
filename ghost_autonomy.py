@@ -1548,7 +1548,6 @@ _VERIFY_TOOLS = [
     "file_read", "file_write",
     "code_symbol_lookup", "code_symbol_list",
     "grep", "glob",
-    "delegate_task",
     "memory_save", "memory_search",
     "complete_future_feature", "fail_future_feature",
     "task_complete",
@@ -1713,6 +1712,80 @@ def _truncate_scratch(content: str, max_chars: int = 12000, keep_end: bool = Fal
             + content[-half:]
         )
     return content[:max_chars] + "\n\n... [TRUNCATED at 12K chars]"
+
+
+def _extract_evolution_id_from_scratch_text(scratch_content: str) -> str | None:
+    """Extract the latest evolution ID from scratch content."""
+    if not scratch_content:
+        return None
+    patterns = [
+        r"\*\*Evolution ID:\*\*\s*([a-f0-9]{8,})",
+        r"evolution_id\s*[:=]\s*([a-f0-9]{8,})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, scratch_content, re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _extract_evolution_id_from_tool_calls(tool_calls: list[dict]) -> str | None:
+    """Recover the evolution ID used during a phase from tool logs."""
+    for tc in reversed(tool_calls or []):
+        args = tc.get("args") or {}
+        evo_id = args.get("evolution_id")
+        if evo_id:
+            return str(evo_id)
+        if tc.get("tool") == "evolve_plan":
+            result = str(tc.get("result", ""))
+            match = re.search(r"Evolution planned:\s*([a-f0-9]{8,})", result)
+            if match:
+                return match.group(1)
+    return None
+
+
+def _latest_test_passed_after_last_change(tool_calls: list[dict]) -> bool:
+    """True only if the latest evolve_test passed after the latest mutation."""
+    last_change_step = -1
+    last_test_step = -1
+    last_test_result = ""
+    for tc in tool_calls or []:
+        step = int(tc.get("step", -1))
+        if tc.get("tool") in {"evolve_apply", "evolve_apply_config", "evolve_delete"}:
+            last_change_step = max(last_change_step, step)
+        if tc.get("tool") == "evolve_test":
+            last_test_step = step
+            last_test_result = str(tc.get("result", ""))
+    if last_test_step < 0:
+        return False
+    if last_test_step < last_change_step:
+        return False
+    return "Tests PASSED" in last_test_result
+
+
+def _phase_called_task_complete(tool_calls: list[dict]) -> bool:
+    return any(tc.get("tool") == "task_complete" for tc in (tool_calls or []))
+
+
+def _active_evolution_ready_for_verify(evolution_id: str) -> tuple[bool, str]:
+    """Check whether the active evolution is safe to hand off to VERIFY."""
+    try:
+        from ghost_evolve import get_engine
+        evo = get_engine()._active_evolutions.get(evolution_id)
+    except Exception as exc:
+        return False, f"Could not inspect evolution {evolution_id}: {exc}"
+
+    if not evo:
+        return False, f"Evolution {evolution_id} is no longer active."
+
+    status = evo.get("status", "")
+    test_results = evo.get("test_results") or {}
+    if status != "tested_pass" or not test_results.get("passed", False):
+        return False, (
+            f"Evolution {evolution_id} is not verify-ready (status={status or 'unknown'}). "
+            "The latest change set has not passed evolve_test yet."
+        )
+    return True, ""
 
 
 def _extract_feature_id_from_scratch(scratch_path):
@@ -2058,20 +2131,28 @@ def _run_implement_phase(daemon, feature_id, scratch_path):
         has_evolution = any(
             tc.get("tool") == "evolve_plan" for tc in (result.tool_calls or [])
         )
-        has_test = any(
-            tc.get("tool") == "evolve_test" for tc in (result.tool_calls or [])
-        )
-        if not (has_evolution and has_test):
+        if not has_evolution:
+            _log_phase("IMPLEMENT", feature_id, "No evolve_plan call recorded")
             return False
 
-        # Verify the test actually passed by checking scratch file for failure markers
-        try:
-            updated_scratch = scratch_path.read_text(encoding="utf-8") if scratch_path.exists() else ""
-            if "test_status: fail" in updated_scratch.lower() or "test failed" in updated_scratch.lower():
-                _log_phase("IMPLEMENT", feature_id, "Test was called but FAILED — not proceeding to VERIFY")
+        if not _latest_test_passed_after_last_change(result.tool_calls or []):
+            _log_phase(
+                "IMPLEMENT",
+                feature_id,
+                "Latest evolve_test did not pass after the latest change — not proceeding to VERIFY",
+            )
+            return False
+
+        if not _phase_called_task_complete(result.tool_calls or []):
+            _log_phase("IMPLEMENT", feature_id, "Implement phase ended without task_complete")
+            return False
+
+        evolution_id = _extract_evolution_id_from_tool_calls(result.tool_calls or [])
+        if evolution_id:
+            ready, reason = _active_evolution_ready_for_verify(evolution_id)
+            if not ready:
+                _log_phase("IMPLEMENT", feature_id, reason)
                 return False
-        except Exception:
-            pass
         return True
 
     except Exception as exc:
@@ -2144,6 +2225,16 @@ def _run_verify_phase(daemon, feature_id, scratch_path):
         scratch_content = scratch_path.read_text(encoding="utf-8")
     except Exception as exc:
         _log_phase("VERIFY", feature_id, f"Cannot read scratch: {exc}")
+        return False
+
+    evolution_id = _extract_evolution_id_from_scratch_text(scratch_content)
+    if not evolution_id:
+        _log_phase("VERIFY", feature_id, "Scratch file is missing an evolution_id — skipping VERIFY")
+        return False
+
+    ready, reason = _active_evolution_ready_for_verify(evolution_id)
+    if not ready:
+        _log_phase("VERIFY", feature_id, reason)
         return False
 
     engine = _build_phase_engine(daemon)

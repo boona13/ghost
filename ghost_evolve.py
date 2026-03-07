@@ -158,6 +158,13 @@ class EvolutionEngine:
         max_per_hour = limit if limit is not None else MAX_EVOLUTIONS_PER_HOUR
         return recent < max_per_hour
 
+    @staticmethod
+    def _invalidate_test_state(evo):
+        """Any new change invalidates prior test results until evolve_test re-runs."""
+        evo["test_results"] = None
+        if evo.get("approved"):
+            evo["status"] = "approved"
+
     def _classify_level(self, files):
         """Determine modification level from file paths."""
         level = 1
@@ -525,6 +532,7 @@ class EvolutionEngine:
             "diff": diff_text[:5000],
             "timestamp": datetime.now().isoformat(),
         })
+        self._invalidate_test_state(evo)
 
         change_count = len(evo["changes"])
         msg = f"Applied change to {rel_path} ({len(new_content)} bytes). [{change_count} file(s) changed] "
@@ -593,6 +601,7 @@ class EvolutionEngine:
             "old_values": old_values,
             "timestamp": datetime.now().isoformat(),
         })
+        self._invalidate_test_state(evo)
 
         change_count = len(evo["changes"])
         msg = (
@@ -1234,6 +1243,8 @@ class EvolutionEngine:
         directories that were part of the evolution and removes them from
         both disk and git.
         """
+        import ghost_git
+
         evo = self._active_evolutions.get(evolution_id, {})
         tool_dirs_to_remove = set()
 
@@ -1782,6 +1793,7 @@ class EvolutionEngine:
             "diff": f"(deleted file, was {len(old_content)} bytes)",
             "timestamp": datetime.now().isoformat(),
         })
+        self._invalidate_test_state(evo)
 
         self._log_intentional_deletion(evolution_id, rel_path)
 
