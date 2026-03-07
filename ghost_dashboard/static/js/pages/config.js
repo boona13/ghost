@@ -4,7 +4,22 @@ const t = (key, params) => window.GhostI18n?.t(key, params) ?? key;
 
 export async function render(container) {
   const { GhostAPI: api, GhostUtils: u } = window;
-  const data = await api.get('/api/config');
+  let data;
+  try {
+    data = await api.get('/api/config');
+  } catch (err) {
+    container.innerHTML = `
+      <h1 class="page-header">${t('config.title')}</h1>
+      <div class="stat-card mt-6">
+        <div class="flex items-center gap-3 text-amber-400 mb-3">
+          <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+          <span class="text-lg font-semibold">Unable to load settings</span>
+        </div>
+        <p class="text-zinc-400 text-sm mb-4">Ghost may still be starting up, or there's a temporary issue with the configuration API.</p>
+        <button onclick="window.location.reload()" class="px-4 py-2 bg-ghost-600 hover:bg-ghost-500 text-white text-sm rounded-lg transition-colors">Retry</button>
+      </div>`;
+    return;
+  }
   const cfg = data.config;
   const defs = data.defaults;
 

@@ -43,6 +43,7 @@ function navigate(page) {
   if (!pages[page]) page = 'overview';
   currentPage = page;
 
+  _ensureSectionVisible(page);
   document.querySelectorAll('.nav-link').forEach(el => {
     el.classList.toggle('active', el.dataset.page === page);
   });
@@ -88,6 +89,45 @@ sidebarToggle.addEventListener('click', () => {
   const isCollapsed = sidebar.classList.contains('collapsed');
   localStorage.setItem('ghost-sidebar-collapsed', isCollapsed ? '1' : '0');
   sidebarToggle.title = isCollapsed ? i18n.t('sidebar.expand') : i18n.t('sidebar.collapse');
+});
+
+/* ── Collapsible nav sections ─────────────────────────────────── */
+document.querySelectorAll('.nav-section-toggle').forEach(toggle => {
+  const section = toggle.dataset.section;
+  const body = document.querySelector(`[data-section-body="${section}"]`);
+  if (!body) return;
+  const storageKey = `ghost-nav-${section}`;
+  const isExpanded = localStorage.getItem(storageKey) === '1';
+  if (isExpanded) {
+    body.style.display = '';
+    toggle.classList.add('expanded');
+  }
+  toggle.addEventListener('click', () => {
+    const nowExpanded = body.style.display === 'none';
+    body.style.display = nowExpanded ? '' : 'none';
+    toggle.classList.toggle('expanded', nowExpanded);
+    localStorage.setItem(storageKey, nowExpanded ? '1' : '0');
+  });
+});
+
+/* When navigating to a page inside a collapsed section, expand it */
+const _origNavigate = navigate;
+function _ensureSectionVisible(page) {
+  const link = document.querySelector(`.nav-link[data-page="${page}"]`);
+  if (!link) return;
+  const body = link.closest('.nav-section-body');
+  if (body && body.style.display === 'none') {
+    body.style.display = '';
+    const section = body.dataset.sectionBody;
+    const toggle = document.querySelector(`.nav-section-toggle[data-section="${section}"]`);
+    if (toggle) toggle.classList.add('expanded');
+    localStorage.setItem(`ghost-nav-${section}`, '1');
+  }
+}
+
+const origNavLinks = document.querySelectorAll('.nav-link');
+origNavLinks.forEach(el => {
+  el.addEventListener('click', () => _ensureSectionVisible(el.dataset.page));
 });
 
 async function updateSidebarStatus() {
@@ -183,20 +223,22 @@ async function updateUsageStatus() {
   
   if (!providerEl || !modelEl || !tokensEl) return;
   
+  const tooltipEl = document.getElementById('status-provider-tooltip');
   try {
     const usage = await window.GhostAPI.get('/api/usage/live');
-    
+
+    const modelName = (usage.model || '—').split('/').pop();
     providerEl.textContent = usage.provider || '—';
-    modelEl.textContent = usage.model || '—';
+    modelEl.textContent = modelName;
     tokensEl.textContent = usage.session_tokens?.toLocaleString() || '0';
-    
+    if (tooltipEl) tooltipEl.textContent = `${usage.provider || ''}/${usage.model || ''}`;
+
     if (usage.active) {
       activeDotEl?.classList.remove('hidden');
     } else {
       activeDotEl?.classList.add('hidden');
     }
   } catch (err) {
-    // Silent fail - status bar is non-critical
     providerEl.textContent = '—';
     modelEl.textContent = '—';
     activeDotEl?.classList.add('hidden');

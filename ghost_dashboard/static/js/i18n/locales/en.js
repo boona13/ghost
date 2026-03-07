@@ -2,17 +2,17 @@
 export default {
   nav: {
     chat: "Chat", overview: "Overview", feed: "Activity Feed", console: "Console",
-    soul: "Soul", user: "User Profile", memory: "Memory", projects: "Projects",
-    models: "Models", skills: "Skills", autonomy: "Autonomy", evolve: "Evolution",
-    prs: "Pull Requests", future_features: "Future Features", channels: "Channels",
+    soul: "Personality", user: "User Profile", memory: "Memory", projects: "Projects",
+    models: "Models", skills: "Skills", autonomy: "Growth & Tasks", evolve: "Self-Improvement",
+    prs: "Pull Requests", future_features: "Roadmap", channels: "Channels",
     webhooks: "Webhooks", integrations: "Integrations",
     langfuse: "Observability", browser_use: "AI Browser", accounts: "Accounts",
-    config: "Configuration", cron: "Cron Jobs", security: "Security", pairing: "Device Pairing",
-    nodes: "AI Nodes", gallery: "Media Gallery",
+    config: "Settings", cron: "Scheduled Tasks", security: "Security", pairing: "Device Pairing",
+    nodes: "AI Nodes", gallery: "Media Gallery", audit: "Audit Log",
   },
   sections: {
-    monitor: "Monitor", intelligence: "Intelligence", capabilities: "Capabilities",
-    connections: "Connections", system: "System",
+    monitor: "Monitor", intelligence: "Intelligence", capabilities: "Tools",
+    connections: "Connections", system: "System", advanced: "Advanced",
   },
   sidebar: {
     subtitle: "Autonomous AI Agent", collapse: "Collapse sidebar", expand: "Expand sidebar",
@@ -45,7 +45,7 @@ export default {
   },
   status: {
     connected: "Connected", disconnected: "Disconnected", checking: "Checking...",
-    currentModel: "Current Model", sessionTokens: "Session Tokens",
+    currentModel: "Model", sessionTokens: "tokens",
     ready: "Ready", idle: "Idle", running: "Running",
     paused: "PAUSED", stopped: "STOPPED", runningStatus: "RUNNING",
     runningPid: "Running (PID {pid})", restarting: "Restarting...",

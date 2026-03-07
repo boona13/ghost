@@ -2,17 +2,18 @@
 export default {
   nav: {
     chat: "聊天", overview: "概览", feed: "动态", console: "控制台",
-    soul: "灵魂", user: "用户资料", memory: "记忆", projects: "项目",
-    models: "模型", skills: "技能", autonomy: "自主性", evolve: "进化",
-    prs: "拉取请求", future_features: "未来功能", channels: "频道",
+    soul: "个性", user: "用户资料", memory: "记忆", projects: "项目",
+    models: "模型", skills: "技能", autonomy: "成长与任务", evolve: "自我改进",
+    prs: "拉取请求", future_features: "路线图", channels: "频道",
     webhooks: "Webhooks", integrations: "集成",
     langfuse: "可观测性", browser_use: "AI 浏览器", accounts: "账户",
-    config: "配置", cron: "定时任务", security: "安全", pairing: "设备配对",
+    config: "设置", cron: "定时任务", security: "安全", pairing: "设备配对",
+    audit: "审计日志",
     nodes: "AI 节点", gallery: "媒体库",
   },
   sections: {
-    monitor: "监控", intelligence: "智能", capabilities: "能力",
-    connections: "连接", system: "系统",
+    monitor: "监控", intelligence: "智能", capabilities: "工具",
+    connections: "连接", system: "系统", advanced: "高级",
   },
   sidebar: {
     subtitle: "自主 AI 代理", collapse: "收起侧栏", expand: "展开侧栏",
@@ -45,7 +46,7 @@ export default {
   },
   status: {
     connected: "已连接", disconnected: "已断开", checking: "检查中...",
-    currentModel: "当前模型", sessionTokens: "会话令牌",
+    currentModel: "模型", sessionTokens: "令牌",
     ready: "就绪", idle: "空闲", running: "运行中",
     paused: "已暂停", stopped: "已停止", runningStatus: "运行中",
     runningPid: "运行中 (PID {pid})", restarting: "重启中...",

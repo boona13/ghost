@@ -2,17 +2,17 @@
 export default {
   nav: {
     chat: "Chat", overview: "Visão Geral", feed: "Feed de Atividades", console: "Console",
-    soul: "Alma", user: "Perfil do Usuário", memory: "Memória", projects: "Projetos",
-    models: "Modelos", skills: "Habilidades", autonomy: "Autonomia", evolve: "Evolução",
-    prs: "Pull Requests", future_features: "Funcionalidades Futuras", channels: "Canais",
+    soul: "Personalidade", user: "Perfil do Usuário", memory: "Memória", projects: "Projetos",
+    models: "Modelos", skills: "Habilidades", autonomy: "Crescimento e Tarefas", evolve: "Autoaperfeiçoamento",
+    prs: "Pull Requests", future_features: "Roteiro", channels: "Canais",
     webhooks: "Webhooks", integrations: "Integrações",
     langfuse: "Observabilidade", browser_use: "Navegador IA", accounts: "Contas",
-    config: "Configuração", cron: "Tarefas Agendadas", security: "Segurança", pairing: "Pareamento de Dispositivo",
-    nodes: "Nós de IA", gallery: "Galeria de Mídia",
+    config: "Configurações", cron: "Tarefas Agendadas", security: "Segurança", pairing: "Pareamento de Dispositivo",
+    nodes: "Nós de IA", gallery: "Galeria de Mídia", audit: "Log de Auditoria",
   },
   sections: {
-    monitor: "Monitor", intelligence: "Inteligência", capabilities: "Capacidades",
-    connections: "Conexões", system: "Sistema",
+    monitor: "Monitor", intelligence: "Inteligência", capabilities: "Ferramentas",
+    connections: "Conexões", system: "Sistema", advanced: "Avançado",
   },
   sidebar: {
     subtitle: "Agente de IA Autônomo", collapse: "Recolher barra lateral", expand: "Expandir barra lateral",
@@ -45,7 +45,7 @@ export default {
   },
   status: {
     connected: "Conectado", disconnected: "Desconectado", checking: "Verificando...",
-    currentModel: "Modelo Atual", sessionTokens: "Tokens da Sessão",
+    currentModel: "Modelo", sessionTokens: "tokens",
     ready: "Pronto", idle: "Ocioso", running: "Em execução",
     paused: "PAUSADO", stopped: "PARADO", runningStatus: "EM EXECUÇÃO",
     runningPid: "Em execução (PID {pid})", restarting: "Reiniciando...",

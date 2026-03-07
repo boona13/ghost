@@ -2,17 +2,17 @@
 export default {
   nav: {
     chat: "محادثة", overview: "نظرة عامة", feed: "سجل النشاط", console: "وحدة التحكم",
-    soul: "الروح", user: "ملف المستخدم", memory: "الذاكرة", projects: "المشاريع",
-    models: "النماذج", skills: "المهارات", autonomy: "الاستقلالية", evolve: "التطور",
-    prs: "طلبات الدمج", future_features: "ميزات مستقبلية", channels: "القنوات",
+    soul: "الشخصية", user: "ملف المستخدم", memory: "الذاكرة", projects: "المشاريع",
+    models: "النماذج", skills: "المهارات", autonomy: "النمو والمهام", evolve: "التطوير الذاتي",
+    prs: "طلبات الدمج", future_features: "خريطة الطريق", channels: "القنوات",
     webhooks: "Webhooks", integrations: "التكاملات",
     langfuse: "المراقبة", browser_use: "متصفح الذكاء الاصطناعي", accounts: "الحسابات",
-    config: "الإعدادات", cron: "المهام المجدولة", security: "الأمان", pairing: "إقران الأجهزة",
+    config: "الإعدادات", cron: "المهام المجدولة", audit: "سجل التدقيق", security: "الأمان", pairing: "إقران الأجهزة",
     nodes: "عُقد الذكاء الاصطناعي", gallery: "معرض الوسائط",
   },
   sections: {
-    monitor: "المراقبة", intelligence: "الذكاء", capabilities: "القدرات",
-    connections: "الاتصالات", system: "النظام",
+    monitor: "المراقبة", intelligence: "الذكاء", capabilities: "الأدوات",
+    connections: "الاتصالات", system: "النظام", advanced: "متقدم",
   },
   sidebar: {
     subtitle: "وكيل ذكاء اصطناعي مستقل", collapse: "طي الشريط الجانبي", expand: "توسيع الشريط الجانبي",
@@ -45,7 +45,7 @@ export default {
   },
   status: {
     connected: "متصل", disconnected: "غير متصل", checking: "جارٍ التحقق...",
-    currentModel: "النموذج الحالي", sessionTokens: "رموز الجلسة",
+    currentModel: "النموذج", sessionTokens: "الرموز",
     ready: "جاهز", idle: "خامل", running: "قيد التشغيل",
     paused: "متوقف مؤقتاً", stopped: "متوقف", runningStatus: "يعمل",
     runningPid: "يعمل (PID {pid})", restarting: "جارٍ إعادة التشغيل...",
