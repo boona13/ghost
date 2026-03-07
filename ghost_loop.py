@@ -2027,6 +2027,12 @@ class ToolLoopEngine:
                                 "tool_call_id": tc_id,
                                 "content": tool_result,
                             })
+                            tool_calls_log.append({
+                                "step": step,
+                                "tool": "task_complete",
+                                "args": fn_args,
+                                "result": tool_result[:3000],
+                            })
                             continue
                         final_text = summary
                         exit_reason = "task_complete"
@@ -2036,6 +2042,12 @@ class ToolLoopEngine:
                             "role": "tool",
                             "tool_call_id": tc_id,
                             "content": "OK, task complete.",
+                        })
+                        tool_calls_log.append({
+                            "step": step,
+                            "tool": "task_complete",
+                            "args": fn_args,
+                            "result": "OK, task complete.",
                         })
                         if on_step:
                             try:

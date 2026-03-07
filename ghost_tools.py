@@ -21,6 +21,7 @@ from datetime import datetime
 PLAT = platform.system()
 GHOST_HOME = Path.home() / ".ghost"
 PROJECT_DIR = Path(__file__).resolve().parent
+GHOST_TOOLS_MIRROR_DIR = (GHOST_HOME / "ghost_tools").resolve()
 
 
 def get_user_projects_dir(cfg=None):
@@ -167,6 +168,16 @@ def _is_ghost_codebase_path(path_str):
         return resolved == codebase or codebase in resolved.parents
     except Exception:
         return False
+
+
+def _normalize_ghost_repo_path(path_str):
+    """Map ~/.ghost mirrored tool paths back into the real repo."""
+    try:
+        resolved = Path(path_str).expanduser().resolve()
+        rel_to_mirror = resolved.relative_to(GHOST_TOOLS_MIRROR_DIR)
+        return (PROJECT_DIR / "ghost_tools" / rel_to_mirror).resolve()
+    except Exception:
+        return Path(path_str).expanduser()
 
 
 def _check_command_allowed(command, allowed_commands, blocked_commands):
@@ -538,7 +549,7 @@ def make_file_read(cfg):
             )
         if not _check_path_allowed(path, allowed_roots):
             return f"DENIED: Path '{path}' is outside allowed roots"
-        p = Path(path).expanduser()
+        p = _normalize_ghost_repo_path(path)
         if not p.exists():
             proj_p = PROJECT_DIR / Path(path).expanduser().name if len(Path(path).parts) <= 1 else PROJECT_DIR / path
             if proj_p.exists() and _check_path_allowed(str(proj_p), allowed_roots):
@@ -595,7 +606,8 @@ def make_file_write(cfg):
             )
         if not _check_path_allowed(path, allowed_roots):
             return f"DENIED: Path '{path}' is outside allowed roots"
-        if _is_ghost_codebase_path(path):
+        normalized_path = _normalize_ghost_repo_path(path)
+        if _is_ghost_codebase_path(str(normalized_path)):
             return (
                 f"BLOCKED: Cannot write to '{path}' — it is inside Ghost's own codebase "
                 f"({PROJECT_DIR}). Self-modification must go through the evolution pipeline: "
@@ -603,7 +615,7 @@ def make_file_write(cfg):
                 f"evolve_deploy to apply them safely with backup and rollback. "
                 f"For user project files, use workspace_write instead."
             )
-        p = Path(path).expanduser()
+        p = normalized_path
         try:
             p.parent.mkdir(parents=True, exist_ok=True)
             if append:

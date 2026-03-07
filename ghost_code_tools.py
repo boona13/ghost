@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 PROJECT_DIR = Path(__file__).resolve().parent
+GHOST_HOME = Path.home() / ".ghost"
+GHOST_TOOLS_MIRROR_DIR = (GHOST_HOME / "ghost_tools").resolve()
 MAX_LINE_LENGTH = 2000
 MAX_MATCHES = 100
 MAX_GLOB_RESULTS = 100
@@ -36,6 +38,15 @@ def _resolve_search_path(path: Optional[str]) -> Path:
     if not path:
         return PROJECT_DIR
     p = Path(path).expanduser()
+    try:
+        resolved = p.resolve()
+    except Exception:
+        resolved = p
+    try:
+        rel_to_mirror = resolved.relative_to(GHOST_TOOLS_MIRROR_DIR)
+        return (PROJECT_DIR / "ghost_tools" / rel_to_mirror).resolve()
+    except ValueError:
+        pass
     if not p.is_absolute():
         p = (PROJECT_DIR / p).resolve()
     elif not p.exists():

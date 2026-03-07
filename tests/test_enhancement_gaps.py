@@ -17,6 +17,7 @@ from ghost_code_tools import PROJECT_DIR as CODE_TOOLS_PROJECT_DIR, _resolve_sea
 from ghost_evolve import EvolutionEngine
 from ghost_loop import _check_incomplete_workflows
 from ghost_memory import MemoryDB, STALE_MEMORY_PURGE_THRESHOLD
+from ghost_tools import _normalize_ghost_repo_path
 
 
 def _write(path, content):
@@ -235,6 +236,12 @@ class EnhancementGapTests(unittest.TestCase):
                 scratch_path,
             )
         )
+
+    def test_mirrored_ghost_tool_paths_map_back_to_repo(self):
+        mirrored = Path.home() / ".ghost" / "ghost_tools" / "regex_tool" / "tool.py"
+        expected = CODE_TOOLS_PROJECT_DIR / "ghost_tools" / "regex_tool" / "tool.py"
+        self.assertEqual(_normalize_ghost_repo_path(str(mirrored)), expected)
+        self.assertEqual(_resolve_search_path(str(mirrored)), expected)
 
 
 if __name__ == "__main__":
