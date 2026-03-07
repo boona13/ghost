@@ -1580,6 +1580,26 @@ def _log_phase(phase_name, feature_id, msg):
     _evo_log.info("[%s] feature=%s: %s", phase_name, feature_id or "?", msg)
 
 
+def _make_phase_step_logger(phase_name):
+    """Create an on_step callback that logs tool calls for a phase.
+
+    Mirrors the terminal_step format so phased evolution steps are visible.
+    """
+    from datetime import datetime
+    import sys
+
+    DIM, RST, YEL, GRN = "\033[2m", "\033[0m", "\033[33m", "\033[32m"
+
+    def _on_step(step, tool_name, tool_result):
+        now = datetime.now().strftime("%H:%M:%S")
+        preview = (tool_result or "")[:120].replace("\n", " ")
+        print(f"  {DIM}{now}{RST}  {YEL}\u26a1 Step {step}{RST}  {GRN}{tool_name}{RST}  {DIM}[{phase_name}]{RST}")
+        print(f"  {DIM}\u2192 {preview}{'\u2026' if len(tool_result or '') > 120 else ''}{RST}")
+        sys.stdout.flush()
+
+    return _on_step
+
+
 def _truncate_scratch(content: str, max_chars: int = 12000, keep_end: bool = False) -> str:
     """Truncate scratch content for prompt injection.
 
@@ -1825,6 +1845,7 @@ def _run_scout_phase(daemon, feature_id=None):
             max_steps=max_steps,
             temperature=0.3,
             max_tokens=4096,
+            on_step=_make_phase_step_logger("SCOUT"),
         )
         _log_phase("SCOUT", feature_id, f"Completed in {result.steps} steps")
     except Exception as exc:
@@ -1927,6 +1948,7 @@ def _run_implement_phase(daemon, feature_id, scratch_path):
             max_steps=max_steps,
             temperature=0.3,
             max_tokens=4096,
+            on_step=_make_phase_step_logger("IMPLEMENT"),
             hook_runner=getattr(daemon, "hooks", None),
             tool_intent_security=getattr(daemon, "tool_intent_security", None),
             tool_event_bus=getattr(daemon, "tool_event_bus", None),
@@ -2017,6 +2039,7 @@ def _run_verify_phase(daemon, feature_id, scratch_path):
             max_steps=max_steps,
             temperature=0.3,
             max_tokens=4096,
+            on_step=_make_phase_step_logger("VERIFY"),
             hook_runner=getattr(daemon, "hooks", None),
             tool_intent_security=getattr(daemon, "tool_intent_security", None),
             tool_event_bus=getattr(daemon, "tool_event_bus", None),
@@ -2115,6 +2138,7 @@ def _run_fix_phase(daemon, feature_id, scratch_path):
             max_steps=max_steps,
             temperature=0.3,
             max_tokens=4096,
+            on_step=_make_phase_step_logger("FIX"),
             hook_runner=getattr(daemon, "hooks", None),
             tool_intent_security=getattr(daemon, "tool_intent_security", None),
             tool_event_bus=getattr(daemon, "tool_event_bus", None),
