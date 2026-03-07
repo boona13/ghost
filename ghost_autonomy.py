@@ -1593,9 +1593,10 @@ def _guard_evolve_plan_once(registry):
         if _plan_called["count"] > 0:
             return (
                 f"BLOCKED: evolve_plan already called (evolution {_plan_called['evo_id']}). "
-                "You MUST NOT call evolve_plan again. Use the existing evolution_id. "
-                "If tests passed, write '## Phase 2 Results' to the scratch file "
-                "and call task_complete IMMEDIATELY."
+                "Do NOT call evolve_plan again. Your next steps are:\n"
+                "1. file_write results to the scratch file (## Phase 2 Results section)\n"
+                "2. task_complete\n"
+                "That's it. Do nothing else."
             )
         result = original_exec(**kwargs)
         _plan_called["count"] += 1
@@ -1924,26 +1925,27 @@ def _run_scout_phase(daemon, feature_id=None):
 _IMPLEMENT_PROMPT = (
     "You are Ghost's Implementer — Phase 2 of a multi-phase evolution.\n\n"
     "The Scout phase already explored the codebase and wrote a detailed plan.\n"
-    "Your job: execute the plan. Write code. Run tests. Then STOP.\n\n"
+    "Your ONLY job: execute the plan. Write code. Run tests. Write results. Call task_complete.\n\n"
+    "⚠️ YOU HAVE A STRICT STEP BUDGET (~15 steps). Do not waste steps exploring, "
+    "searching, or trying to submit PRs. Another phase handles PR submission.\n\n"
     "## SCOUT'S PLAN (from scratch file)\n"
     "{scratch_content}\n\n"
-    "## CRITICAL RULES\n"
-    "- Call evolve_plan EXACTLY ONCE. NEVER call evolve_plan a second time.\n"
-    "- Do NOT call evolve_submit_pr — you do not have that tool. Phase 3 handles PR submission.\n"
-    "- Do NOT try to submit PRs via shell_exec — it will not work.\n"
-    "- BEFORE each evolve_apply with patches: file_read the target file for exact bytes.\n"
-    "- OUTPUT TOKEN LIMIT: ~8K tokens. Split large files with append=True.\n"
-    "- After evolve_test PASSES: write results to scratch, then call task_complete IMMEDIATELY.\n"
-    "  Do NOT do anything else after writing results. Just task_complete.\n\n"
     "## EXACT SEQUENCE (follow this precisely, do not deviate)\n"
     "1. evolve_plan(description, files=[list from scratch])\n"
     "2. For each file: file_read → evolve_apply (patches for existing, content for new)\n"
     "3. evolve_test(evolution_id)\n"
     "4. If test fails: read error, fix with evolve_apply, re-test (max 3 tries)\n"
     "5. file_write to scratch file at: {scratch_path}\n"
-    "   Write a '## Phase 2 Results' section with: evolution_id, branch, test status\n"
+    "   Write a '## Phase 2 Results' section with: evolution_id, test status\n"
     "   Write a '## Learnings' section with reusable insights (not feature-specific)\n"
-    "6. task_complete  ← THIS IS YOUR FINAL STEP. STOP HERE.\n\n"
+    "6. task_complete ← MANDATORY FINAL STEP. Call this immediately after file_write.\n\n"
+    "## CRITICAL RULES\n"
+    "- evolve_plan: call EXACTLY ONCE. A second call will be blocked.\n"
+    "- evolve_submit_pr: DO NOT call. You do not have this tool. Phase 3 handles PRs.\n"
+    "- shell_exec: DO NOT use for PR submission or git operations.\n"
+    "- After evolve_test PASSES → file_write results → task_complete. Nothing else.\n"
+    "- BEFORE each evolve_apply with patches: file_read the target file for exact bytes.\n"
+    "- OUTPUT TOKEN LIMIT: ~8K tokens. Split large files with append=True.\n\n"
     "## TOOLS\n"
     "- code_symbol_lookup — verify signatures before patching.\n"
     "- evolve_plan(description, files) — start the evolution (CALL ONCE ONLY).\n"
@@ -1985,7 +1987,7 @@ def _run_implement_phase(daemon, feature_id, scratch_path):
         + learnings
     )
 
-    max_steps = daemon.cfg.get("implement_max_steps", 50)
+    max_steps = daemon.cfg.get("implement_max_steps", 20)
 
     try:
         result = engine.run(
@@ -2077,7 +2079,7 @@ def _run_verify_phase(daemon, feature_id, scratch_path):
             .replace("{scratch_path}", str(scratch_path))
     )
 
-    max_steps = daemon.cfg.get("verify_max_steps", 40)
+    max_steps = daemon.cfg.get("verify_max_steps", 25)
 
     try:
         result = engine.run(
@@ -2177,7 +2179,7 @@ def _run_fix_phase(daemon, feature_id, scratch_path):
             .replace("{scratch_path}", str(scratch_path))
     )
 
-    max_steps = daemon.cfg.get("fix_max_steps", 40)
+    max_steps = daemon.cfg.get("fix_max_steps", 25)
 
     try:
         result = engine.run(
