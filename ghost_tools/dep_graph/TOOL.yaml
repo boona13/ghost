@@ -1,0 +1,7 @@
+name: dep_graph
+version: 1.0.0
+description: Python Import Dependency Graph - analyze import dependencies in Python projects
+category: development
+enabled: true
+tools:
+  - python_dep_graph
