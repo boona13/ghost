@@ -714,9 +714,10 @@ KNOWN_POLL_TOOLS = {"shell_exec", "browser"}
 KNOWN_POLL_ACTIONS = {"snapshot", "content", "screenshot", "poll", "log", "status"}
 WARNING_BUCKET_SIZE = 10
 
-def _check_incomplete_workflows(tool_calls_log: list) -> str | None:
+def _check_incomplete_workflows(tool_calls_log: list, available_tools: set[str] | None = None) -> str | None:
     """Check if any tool workflows are incomplete. Returns a message if so, None if OK."""
     tools_used = {tc["tool"] for tc in tool_calls_log}
+    available_tools = set(available_tools or [])
 
     started_feature = "start_future_feature" in tools_used
     used_evolve_plan = "evolve_plan" in tools_used
@@ -725,8 +726,10 @@ def _check_incomplete_workflows(tool_calls_log: list) -> str | None:
     used_evolve_apply = "evolve_apply" in tools_used
     used_evolve_deploy = "evolve_deploy" in tools_used or "evolve_submit_pr" in tools_used
     used_fail = "fail_future_feature" in tools_used
+    can_plan_in_this_phase = not available_tools or "evolve_plan" in available_tools or "evolve_resume" in available_tools
+    can_submit_in_this_phase = not available_tools or "evolve_submit_pr" in available_tools or "evolve_deploy" in available_tools
 
-    if used_evolve_start and not used_evolve_deploy and not used_fail:
+    if used_evolve_start and not used_evolve_deploy and not used_fail and can_submit_in_this_phase:
         if not used_evolve_apply:
             verb = "evolve_resume" if used_evolve_resume else "evolve_plan"
             return (
@@ -740,7 +743,7 @@ def _check_incomplete_workflows(tool_calls_log: list) -> str | None:
             "Do NOT call task_complete until evolve_submit_pr succeeds."
         )
 
-    if started_feature and not used_evolve_start and not used_fail:
+    if started_feature and not used_evolve_start and not used_fail and can_plan_in_this_phase:
         return (
             "You called start_future_feature but never called evolve_plan. "
             "You MUST implement the feature NOW. Call evolve_plan, then "
@@ -2008,7 +2011,10 @@ class ToolLoopEngine:
 
                     if fn_name == "task_complete":
                         summary = fn_args.get("summary", "")
-                        workflow_issue = _check_incomplete_workflows(tool_calls_log)
+                        workflow_issue = _check_incomplete_workflows(
+                            tool_calls_log,
+                            set(tool_registry.names()) if tool_registry else None,
+                        )
                         if workflow_issue:
                             tool_result = (
                                 f"REJECTED — you cannot complete yet. {workflow_issue} "
@@ -2207,13 +2213,12 @@ class ToolLoopEngine:
                         "content": tool_result[:result_limit],
                     })
 
-                    if "__parse_error" in fn_args and fn_name == "evolve_apply":
+                    if "__parse_error" in fn_args and fn_name in {"evolve_apply", "file_write"}:
                         _malformed_json_count = getattr(
                             self, "_malformed_json_count", 0) + 1
                         self._malformed_json_count = _malformed_json_count
-                        messages.append({
-                            "role": "user",
-                            "content": (
+                        if fn_name == "evolve_apply":
+                            retry_message = (
                                 f"⛔ MALFORMED JSON (attempt {_malformed_json_count}/3). "
                                 "Your output was truncated because the file content exceeded "
                                 "your output token limit. You MUST use CHUNKED WRITES:\n"
@@ -2221,16 +2226,34 @@ class ToolLoopEngine:
                                 "  2. evolve_apply(evo_id, file_path, content='<next ~80 lines>', append=True)\n"
                                 "  3. Repeat with append=True for remaining chunks.\n"
                                 "Keep each chunk under 80 lines. Do NOT retry with full content."
-                            ),
+                            )
+                            terminal_message = (
+                                "⛔ 3 MALFORMED JSON FAILURES. You keep exceeding the output limit. "
+                                "Call fail_future_feature(feature_id, 'Output token limit exceeded — "
+                                "file too large for single tool call') then task_complete."
+                            )
+                        else:
+                            retry_message = (
+                                f"⛔ MALFORMED JSON (attempt {_malformed_json_count}/3). "
+                                "Your file_write arguments were truncated. Retry with a SHORTER payload.\n"
+                                "If you are writing a scratch/report file, write only the required summary "
+                                "sections instead of the whole plan. If you are writing a large user file, "
+                                "split it into chunks and use append=True.\n"
+                                "Do NOT switch to writing Ghost source files directly just because file_write failed."
+                            )
+                            terminal_message = (
+                                "⛔ 3 MALFORMED JSON FAILURES on file_write. "
+                                "Write a shorter scratch/report update, then call task_complete. "
+                                "Do NOT fall back to writing source files directly."
+                            )
+                        messages.append({
+                            "role": "user",
+                            "content": retry_message,
                         })
                         if _malformed_json_count >= 3:
                             messages.append({
                                 "role": "user",
-                                "content": (
-                                    "⛔ 3 MALFORMED JSON FAILURES. You keep exceeding the output limit. "
-                                    "Call fail_future_feature(feature_id, 'Output token limit exceeded — "
-                                    "file too large for single tool call') then task_complete."
-                                ),
+                                "content": terminal_message,
                             })
 
                 if exit_reason in ("task_complete", "cancelled",
@@ -2295,7 +2318,10 @@ class ToolLoopEngine:
                     if consecutive_text == 3 and len(messages) > 22:
                         messages = self._compact_messages(messages, step=step)
 
-                    workflow_issue = _check_incomplete_workflows(tool_calls_log)
+                    workflow_issue = _check_incomplete_workflows(
+                        tool_calls_log,
+                        set(tool_registry.names()) if tool_registry else None,
+                    )
 
                     if consecutive_text >= 5:
                         pushback = (
@@ -2559,6 +2585,15 @@ class ToolRegistry:
         try:
             if "__parse_error" in args:
                 raw_len = args.get("__raw_len", 0)
+                if name == "file_write":
+                    return (
+                        f"Tool error ({name}): MALFORMED JSON — your output was TRUNCATED "
+                        f"(raw length: {raw_len} chars). Keep file_write payloads small.\n"
+                        "If you are updating a scratch/report file, write only the required summary "
+                        "sections. If you are writing a large user file, split it into smaller chunks "
+                        "and retry with append=True.\n"
+                        "Do NOT switch to writing Ghost source files directly just because this call failed."
+                    )
                 return (
                     f"Tool error ({name}): MALFORMED JSON — your output was TRUNCATED "
                     f"(raw length: {raw_len} chars). Your output token limit is ~8K tokens "

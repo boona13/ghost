@@ -38,6 +38,10 @@ def _resolve_search_path(path: Optional[str]) -> Path:
     p = Path(path).expanduser()
     if not p.is_absolute():
         p = (PROJECT_DIR / p).resolve()
+    elif not p.exists():
+        project_markers = {PROJECT_DIR.name.lower(), "ghost", "ghost-0.5"}
+        if any(part.lower() in project_markers for part in p.parts):
+            return PROJECT_DIR
     return p
 
 
@@ -68,6 +72,9 @@ def _grep_ripgrep(pattern: str, search_path: Path, include: str = "") -> str:
             glob = glob.strip()
             if glob:
                 args.extend(["--glob", glob])
+    for skipped in sorted(_SKIP_DIRS):
+        if "*" not in skipped:
+            args.extend(["--glob", f"!**/{skipped}/**"])
 
     args.extend(["--regexp", pattern, str(search_path)])
 
@@ -215,11 +222,27 @@ def _glob_ripgrep(pattern: str, search_path: Path) -> List[str]:
     if not rg:
         return []
 
-    args = [rg, "--files", "--hidden", "--no-messages", "--glob", pattern, str(search_path)]
+    args = [rg, "--files", "--hidden", "--no-messages"]
+    for skipped in sorted(_SKIP_DIRS):
+        if "*" not in skipped:
+            args.extend(["--glob", f"!**/{skipped}/**"])
+    args.extend(["--glob", pattern, str(search_path)])
     try:
         result = subprocess.run(args, capture_output=True, text=True, timeout=15)
         if result.returncode in (0, 1):
-            return [p for p in result.stdout.strip().split("\n") if p]
+            filtered = []
+            for raw_path in result.stdout.strip().split("\n"):
+                if not raw_path:
+                    continue
+                candidate = Path(raw_path)
+                try:
+                    rel = candidate.relative_to(search_path)
+                except ValueError:
+                    rel = candidate
+                if not candidate.is_file() or _should_skip(rel):
+                    continue
+                filtered.append(str(candidate))
+            return filtered
         return []
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         return []

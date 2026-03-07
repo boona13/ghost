@@ -587,6 +587,12 @@ def make_file_write(cfg):
     allowed_roots = cfg.get("allowed_roots", DEFAULT_ALLOWED_ROOTS)
 
     def execute(path, content, append=False):
+        stripped = (path or "").strip()
+        if stripped in {"", ".", ",", ";", ":"}:
+            return (
+                f"ERROR: Invalid path '{path}'. Provide a full absolute path "
+                "to the target file."
+            )
         if not _check_path_allowed(path, allowed_roots):
             return f"DENIED: Path '{path}' is outside allowed roots"
         if _is_ghost_codebase_path(path):

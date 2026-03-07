@@ -1767,6 +1767,25 @@ def _phase_called_task_complete(tool_calls: list[dict]) -> bool:
     return any(tc.get("tool") == "task_complete" for tc in (tool_calls or []))
 
 
+def _phase_wrote_scratch_file(tool_calls: list[dict], scratch_path: Path) -> bool:
+    """Check whether a phase successfully wrote the expected scratch file."""
+    target = str(scratch_path.expanduser().resolve())
+    for tc in tool_calls or []:
+        if tc.get("tool") != "file_write":
+            continue
+        args = tc.get("args") or {}
+        raw_path = str(args.get("path", "")).strip()
+        if not raw_path:
+            continue
+        try:
+            resolved = str(Path(raw_path).expanduser().resolve())
+        except Exception:
+            continue
+        if resolved == target and "OK: wrote" in str(tc.get("result", "")):
+            return True
+    return False
+
+
 def _active_evolution_ready_for_verify(evolution_id: str) -> tuple[bool, str]:
     """Check whether the active evolution is safe to hand off to VERIFY."""
     try:
@@ -2143,9 +2162,16 @@ def _run_implement_phase(daemon, feature_id, scratch_path):
             )
             return False
 
+        wrote_scratch = _phase_wrote_scratch_file(result.tool_calls or [], scratch_path)
         if not _phase_called_task_complete(result.tool_calls or []):
-            _log_phase("IMPLEMENT", feature_id, "Implement phase ended without task_complete")
-            return False
+            if not wrote_scratch:
+                _log_phase("IMPLEMENT", feature_id, "Implement phase ended without task_complete")
+                return False
+            _log_phase(
+                "IMPLEMENT",
+                feature_id,
+                "Implement phase ended without task_complete, but tests passed and scratch results were written",
+            )
 
         evolution_id = _extract_evolution_id_from_tool_calls(result.tool_calls or [])
         if evolution_id:

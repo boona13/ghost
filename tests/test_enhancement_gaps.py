@@ -11,8 +11,11 @@ from ghost_autonomy import (
     _active_evolution_ready_for_verify,
     _extract_evolution_id_from_scratch_text,
     _latest_test_passed_after_last_change,
+    _phase_wrote_scratch_file,
 )
+from ghost_code_tools import PROJECT_DIR as CODE_TOOLS_PROJECT_DIR, _resolve_search_path
 from ghost_evolve import EvolutionEngine
+from ghost_loop import _check_incomplete_workflows
 from ghost_memory import MemoryDB, STALE_MEMORY_PURGE_THRESHOLD
 
 
@@ -162,6 +165,76 @@ class EnhancementGapTests(unittest.TestCase):
         EvolutionEngine._invalidate_test_state(evo)
         self.assertEqual(evo["status"], "approved")
         self.assertIsNone(evo["test_results"])
+
+    def test_incomplete_workflow_respects_phase_toolset(self):
+        implement_tools = {"evolve_plan", "evolve_apply", "evolve_test", "file_write", "task_complete"}
+        self.assertIsNone(
+            _check_incomplete_workflows(
+                [
+                    {"tool": "evolve_plan"},
+                    {"tool": "evolve_apply"},
+                    {"tool": "evolve_test", "result": "Tests PASSED"},
+                ],
+                implement_tools,
+            )
+        )
+
+        scout_tools = {"start_future_feature", "file_write", "task_complete"}
+        self.assertIsNone(
+            _check_incomplete_workflows(
+                [
+                    {"tool": "start_future_feature"},
+                    {"tool": "file_write"},
+                ],
+                scout_tools,
+            )
+        )
+
+        self.assertIn(
+            "never called evolve_submit_pr",
+            _check_incomplete_workflows(
+                [
+                    {"tool": "evolve_plan"},
+                    {"tool": "evolve_apply"},
+                    {"tool": "evolve_test", "result": "Tests PASSED"},
+                ],
+                {"evolve_plan", "evolve_apply", "evolve_test", "evolve_submit_pr", "task_complete"},
+            ) or "",
+        )
+
+    def test_resolve_search_path_falls_back_from_stale_ghost_checkout(self):
+        resolved = _resolve_search_path("/Users/ibrahimboona/Desktop/Ghost-0.5")
+        self.assertEqual(resolved, CODE_TOOLS_PROJECT_DIR)
+
+        resolved = _resolve_search_path("/Users/ibrahimboona/Ghost")
+        self.assertEqual(resolved, CODE_TOOLS_PROJECT_DIR)
+
+    def test_phase_wrote_expected_scratch_file(self):
+        scratch_path = Path("/tmp/example-scratch.md")
+        self.assertTrue(
+            _phase_wrote_scratch_file(
+                [
+                    {
+                        "tool": "file_write",
+                        "args": {"path": str(scratch_path)},
+                        "result": f"OK: wrote 42 chars to {scratch_path}",
+                    }
+                ],
+                scratch_path,
+            )
+        )
+        self.assertFalse(
+            _phase_wrote_scratch_file(
+                [
+                    {
+                        "tool": "file_write",
+                        "args": {"path": str(scratch_path)},
+                        "result": "Tool error (file_write): MALFORMED JSON",
+                    }
+                ],
+                scratch_path,
+            )
+        )
 
 
 if __name__ == "__main__":
