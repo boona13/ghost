@@ -5,6 +5,7 @@ import logging
 import threading
 import time
 from flask import Blueprint, jsonify, request, send_file
+from ghost_dashboard.rate_limiter import rate_limit
 
 log = logging.getLogger(__name__)
 
@@ -72,6 +73,7 @@ def disable_node(name):
 
 
 @bp.route("/api/nodes/install", methods=["POST"])
+@rate_limit(requests_per_minute=10)
 def install_node():
     daemon = _get_daemon()
     if not daemon or not hasattr(daemon, "node_manager") or not daemon.node_manager:

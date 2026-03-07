@@ -4,6 +4,7 @@ import os
 import shutil
 import platform
 from flask import Blueprint, jsonify, request
+from ghost_dashboard.rate_limiter import rate_limit
 
 import sys
 from pathlib import Path
@@ -225,6 +226,7 @@ def registry_get_skill(name):
 
 
 @bp.route("/api/skills/registry/<name>/install", methods=["POST"])
+@rate_limit(requests_per_minute=10)
 def registry_install(name):
     """Install a skill from the registry."""
     data = request.get_json(silent=True) or {}
