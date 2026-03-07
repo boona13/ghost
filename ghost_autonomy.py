@@ -1628,8 +1628,10 @@ def _extract_feature_id_from_scratch(scratch_path):
     import re
     try:
         text = scratch_path.read_text(encoding="utf-8")[:3000]
-        # Look for feature ID patterns (feat-XXXX, feature-XXXX, etc.)
-        m = re.search(r"(?:feature.?id|id)\s*[:=]\s*['\"]?(feat[_-][\w-]+|feature[_-][\w-]+|[a-f0-9]{8,})", text, re.IGNORECASE)
+        m = re.search(
+            r"feature.?id\*{0,2}\s*[:=]\s*['\"]?(feat[_-][\w-]+|feature[_-][\w-]+|[a-f0-9]{8,})",
+            text, re.IGNORECASE,
+        )
         if m:
             return m.group(1)
         m = re.search(r"start_future_feature\(['\"]?([\w-]+)", text)
