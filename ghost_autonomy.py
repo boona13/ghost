@@ -2079,7 +2079,7 @@ def _run_verify_phase(daemon, feature_id, scratch_path):
             .replace("{scratch_path}", str(scratch_path))
     )
 
-    max_steps = daemon.cfg.get("verify_max_steps", 25)
+    max_steps = daemon.cfg.get("verify_max_steps", 30)
 
     try:
         result = engine.run(
