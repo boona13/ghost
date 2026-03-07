@@ -28,6 +28,7 @@ log = logging.getLogger("ghost.code_index")
 PROJECT_DIR = Path(__file__).resolve().parent
 GHOST_HOME = Path.home() / ".ghost"
 CACHE_PATH = GHOST_HOME / "code_index.json"
+LOOKUP_STATS_PATH = GHOST_HOME / "code_index_lookup_stats.json"
 
 INDEX_GLOBS = [
     "ghost_*.py",
@@ -52,6 +53,7 @@ class SymbolEntry:
     returns: str = ""
     is_async: bool = False
     is_public: bool = True
+    qualified_name: str = ""
     symbol_id: str = ""  # stable ID: file::QualifiedName#kind (jCodeMunch pattern)
     byte_offset: int = 0  # start byte in source file (for O(1) seeking)
     byte_length: int = 0  # byte length of symbol source
@@ -65,6 +67,9 @@ class CodeIndex:
         self._project_dir = project_dir.resolve()
         self._symbols: Dict[str, List[SymbolEntry]] = {}  # file -> symbols
         self._all_symbols: List[SymbolEntry] = []
+        self._symbol_id_index: Dict[str, SymbolEntry] = {}
+        self._qualified_name_index: Dict[str, List[SymbolEntry]] = {}
+        self._simple_name_index: Dict[str, List[SymbolEntry]] = {}
         self._file_mtimes: Dict[str, float] = {}
         self._file_imports: Dict[str, Set[str]] = {}  # file -> set of imported module names
         self._file_ranks: Dict[str, float] = {}  # file -> importance score
@@ -90,6 +95,7 @@ class CodeIndex:
                 self._file_imports = {
                     k: set(v) for k, v in cached.get("imports", {}).items()
                 }
+                self._rebuild_lookup_indexes()
                 self._compute_reference_ranks()
                 self._built = True
                 log.info("CodeIndex loaded from cache: %d symbols", len(self._all_symbols))
@@ -97,6 +103,9 @@ class CodeIndex:
 
             self._symbols = {}
             self._all_symbols = []
+            self._symbol_id_index = {}
+            self._qualified_name_index = {}
+            self._simple_name_index = {}
             self._file_mtimes = {}
             self._file_imports = {}
 
@@ -111,6 +120,7 @@ class CodeIndex:
                 except Exception as exc:
                     log.warning("CodeIndex: failed to parse %s: %s", fpath, exc)
 
+            self._rebuild_lookup_indexes()
             self._compute_reference_ranks()
 
             self._built = True
@@ -152,7 +162,13 @@ class CodeIndex:
             for sym in public_symbols:
                 if sym.kind == "class":
                     section_lines.append(f"  class {sym.signature}")
-                    methods = [s for s in symbols if s.parent_class == sym.name and s.is_public]
+                    parent_qname = sym.qualified_name or sym.name
+                    methods = [
+                        s for s in symbols
+                        if s.kind == "method"
+                        and s.is_public
+                        and self._parent_qualified_name(s) == parent_qname
+                    ]
                     for m in methods:
                         section_lines.append(f"    {m.signature}")
                 elif sym.kind == "function":
@@ -180,9 +196,12 @@ class CodeIndex:
 
         # Support lookup by stable symbol_id (jCodeMunch pattern)
         if "::" in symbol_name and "#" in symbol_name:
-            for sym in self._all_symbols:
-                if sym.symbol_id == symbol_name:
-                    return self._read_symbol_source(sym, verify=verify)
+            sym = self._symbol_id_index.get(symbol_name.lower())
+            if sym:
+                code = self._read_symbol_source(sym, verify=verify)
+                if code:
+                    self._record_lookup_stats(symbol_name, [sym], len(code))
+                return code
             return None
 
         matches = self._find_symbol(symbol_name, file)
@@ -195,7 +214,11 @@ class CodeIndex:
             if src:
                 results.append(src)
 
-        return "\n\n".join(results) if results else None
+        if not results:
+            return None
+        joined = "\n\n".join(results)
+        self._record_lookup_stats(symbol_name, matches[:3], len(joined))
+        return joined
 
     def _read_symbol_source(self, sym: SymbolEntry, verify: bool = False) -> Optional[str]:
         """Read symbol source, preferring O(1) byte-offset seek."""
@@ -351,6 +374,7 @@ class CodeIndex:
             signature=sig, docstring_first_line=first_line,
             parent_class=parent,
             is_public=not node.name.startswith("_"),
+            qualified_name=qname,
             symbol_id=self._make_symbol_id(rel, qname, "class"),
             byte_offset=b_off, byte_length=b_len, content_hash=c_hash,
         )
@@ -381,6 +405,7 @@ class CodeIndex:
             args=args, returns=returns,
             is_async=isinstance(node, ast.AsyncFunctionDef),
             is_public=not node.name.startswith("_"),
+            qualified_name=qualified,
             symbol_id=self._make_symbol_id(rel, qualified, "method"),
             byte_offset=b_off, byte_length=b_len, content_hash=c_hash,
         )
@@ -407,6 +432,7 @@ class CodeIndex:
             args=args, returns=returns,
             is_async=isinstance(node, ast.AsyncFunctionDef),
             is_public=not node.name.startswith("_"),
+            qualified_name=node.name,
             symbol_id=self._make_symbol_id(rel, node.name, "function"),
             byte_offset=b_off, byte_length=b_len, content_hash=c_hash,
         )
@@ -490,35 +516,42 @@ class CodeIndex:
 
     def _find_symbol(self, name: str, file: Optional[str] = None) -> List[SymbolEntry]:
         """Find symbols matching a name, optionally scoped to a file."""
-        results = []
-        search = name.lower()
+        search = name.strip().lower()
+        if not search:
+            return []
 
-        if "." in name:
-            parts = name.split(".", 1)
-            class_name, method_name = parts[0], parts[1]
-            for sym in self._all_symbols:
-                if file and file not in sym.file:
-                    continue
-                if sym.kind == "method" and sym.parent_class.lower() == class_name.lower() and sym.name.lower() == method_name.lower():
-                    results.append(sym)
-            if results:
-                return results
+        exact_qualified = self._filter_symbols(
+            self._qualified_name_index.get(search, []),
+            file,
+        )
+        if exact_qualified:
+            return self._sort_symbols(exact_qualified)
 
+        exact_simple = self._filter_symbols(
+            self._simple_name_index.get(search, []),
+            file,
+        )
+        if exact_simple:
+            return self._sort_symbols(exact_simple)
+
+        if "." in search:
+            suffix = f".{search}"
+            suffix_matches = []
+            for qualified_name, matches in self._qualified_name_index.items():
+                if qualified_name.endswith(suffix):
+                    suffix_matches.extend(self._filter_symbols(matches, file))
+            if suffix_matches:
+                return self._sort_symbols(suffix_matches)
+
+        partial_matches = []
         for sym in self._all_symbols:
             if file and file not in sym.file:
                 continue
-            if sym.name.lower() == search:
-                results.append(sym)
+            qualified = (sym.qualified_name or sym.name).lower()
+            if search in sym.name.lower() or search in qualified:
+                partial_matches.append(sym)
 
-        if not results:
-            for sym in self._all_symbols:
-                if file and file not in sym.file:
-                    continue
-                if search in sym.name.lower():
-                    results.append(sym)
-
-        results.sort(key=lambda s: (0 if s.kind == "class" else 1, s.file))
-        return results
+        return self._sort_symbols(partial_matches)
 
     def _any_files_changed(self) -> bool:
         for rel, mtime in self._file_mtimes.items():
@@ -539,28 +572,45 @@ class CodeIndex:
     def _compute_reference_ranks(self):
         """Compute file importance scores based on cross-file import references.
 
-        Implements a simplified version of Aider's PageRank: files that are
-        imported by many other files rank higher. This replaces the crude
-        3-level static priority with data-driven relevance.
+        Uses iterative PageRank over the internal import graph so files can
+        gain importance from transitive references, not just raw in-degree.
         """
-        indexed_modules: Dict[str, str] = {}
-        for rel in self._symbols:
-            stem = Path(rel).stem
-            indexed_modules[stem] = rel
+        files = sorted(self._symbols)
+        if not files:
+            self._file_ranks = {}
+            return
 
-        in_degree: Dict[str, int] = defaultdict(int)
+        indexed_modules: Dict[str, str] = {
+            Path(rel).stem: rel for rel in files
+        }
+        graph: Dict[str, Set[str]] = {rel: set() for rel in files}
         for rel, imports in self._file_imports.items():
             for imp in imports:
                 target = indexed_modules.get(imp)
                 if target and target != rel:
-                    in_degree[target] += 1
+                    graph.setdefault(rel, set()).add(target)
 
-        max_refs = max(in_degree.values()) if in_degree else 1
+        damping = 0.85
+        count = len(files)
+        ranks = {rel: 1.0 / count for rel in files}
+        for _ in range(20):
+            next_ranks = {rel: (1.0 - damping) / count for rel in files}
+            dangling_total = sum(ranks[rel] for rel, targets in graph.items() if not targets)
+            dangling_share = damping * dangling_total / count
+            for rel in files:
+                next_ranks[rel] += dangling_share
+            for rel, targets in graph.items():
+                if not targets:
+                    continue
+                share = damping * ranks[rel] / len(targets)
+                for target in targets:
+                    next_ranks[target] += share
+            ranks = next_ranks
+
+        max_rank = max(ranks.values()) if ranks else 1.0
         self._file_ranks = {}
-        for rel in self._symbols:
-            refs = in_degree.get(rel, 0)
-            base_score = refs / max_refs if max_refs > 0 else 0
-
+        for rel in files:
+            base_score = ranks.get(rel, 0.0) / max_rank if max_rank > 0 else 0.0
             symbols = self._symbols[rel]
             has_build_tools = any(
                 s.kind == "function" and s.name.startswith("build_") and s.name.endswith("_tools")
@@ -606,6 +656,91 @@ class CodeIndex:
             CACHE_PATH.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except Exception as exc:
             log.warning("CodeIndex: failed to save cache: %s", exc)
+
+    def _rebuild_lookup_indexes(self):
+        self._symbol_id_index = {}
+        qualified_name_index: Dict[str, List[SymbolEntry]] = defaultdict(list)
+        simple_name_index: Dict[str, List[SymbolEntry]] = defaultdict(list)
+        for sym in self._all_symbols:
+            if not sym.qualified_name:
+                sym.qualified_name = self._infer_qualified_name(sym)
+            if sym.symbol_id:
+                self._symbol_id_index[sym.symbol_id.lower()] = sym
+            if sym.qualified_name:
+                qualified_name_index[sym.qualified_name.lower()].append(sym)
+            simple_name_index[sym.name.lower()].append(sym)
+        self._qualified_name_index = dict(qualified_name_index)
+        self._simple_name_index = dict(simple_name_index)
+
+    @staticmethod
+    def _infer_qualified_name(sym: SymbolEntry) -> str:
+        if sym.symbol_id and "::" in sym.symbol_id and "#" in sym.symbol_id:
+            return sym.symbol_id.split("::", 1)[1].rsplit("#", 1)[0]
+        if sym.kind == "method" and sym.parent_class:
+            return f"{sym.parent_class}.{sym.name}"
+        return sym.name
+
+    @staticmethod
+    def _parent_qualified_name(sym: SymbolEntry) -> str:
+        qualified = sym.qualified_name or sym.name
+        if "." not in qualified:
+            return ""
+        return qualified.rsplit(".", 1)[0]
+
+    @staticmethod
+    def _filter_symbols(symbols: List[SymbolEntry], file: Optional[str]) -> List[SymbolEntry]:
+        if not file:
+            return list(symbols)
+        return [sym for sym in symbols if file in sym.file]
+
+    @staticmethod
+    def _sort_symbols(symbols: List[SymbolEntry]) -> List[SymbolEntry]:
+        seen = set()
+        ordered = []
+        for sym in sorted(symbols, key=lambda s: (0 if s.kind == "class" else 1, s.file, s.line_start)):
+            key = sym.symbol_id or f"{sym.file}:{sym.line_start}:{sym.name}"
+            if key in seen:
+                continue
+            seen.add(key)
+            ordered.append(sym)
+        return ordered
+
+    def _record_lookup_stats(self, query: str, matches: List[SymbolEntry], returned_chars: int):
+        unique_files = sorted({sym.file for sym in matches})
+        estimated_full_file_tokens = 0
+        for rel in unique_files:
+            fpath = self._project_dir / rel
+            if fpath.exists():
+                estimated_full_file_tokens += (fpath.stat().st_size + 3) // 4
+        estimated_symbol_tokens = max(1, (returned_chars + 3) // 4)
+        estimated_tokens_saved = max(0, estimated_full_file_tokens - estimated_symbol_tokens)
+        payload = {
+            "lookups": 1,
+            "estimated_symbol_tokens": estimated_symbol_tokens,
+            "estimated_full_file_tokens": estimated_full_file_tokens,
+            "estimated_tokens_saved": estimated_tokens_saved,
+            "last_query": query,
+            "last_lookup_at": time.time(),
+        }
+        try:
+            LOOKUP_STATS_PATH.parent.mkdir(parents=True, exist_ok=True)
+            if LOOKUP_STATS_PATH.exists():
+                existing = json.loads(LOOKUP_STATS_PATH.read_text(encoding="utf-8"))
+                payload["lookups"] += int(existing.get("lookups", 0))
+                payload["estimated_symbol_tokens"] += int(existing.get("estimated_symbol_tokens", 0))
+                payload["estimated_full_file_tokens"] += int(existing.get("estimated_full_file_tokens", 0))
+                payload["estimated_tokens_saved"] += int(existing.get("estimated_tokens_saved", 0))
+            LOOKUP_STATS_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except Exception as exc:
+            log.debug("CodeIndex: failed to record lookup stats: %s", exc)
+        else:
+            log.info(
+                "code_symbol_lookup[%s]: saved ~%d tokens (%d returned vs %d full-file)",
+                query,
+                estimated_tokens_saved,
+                estimated_symbol_tokens,
+                estimated_full_file_tokens,
+            )
 
 
 # ═══════════════════════════════════════════════════════════════

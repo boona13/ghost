@@ -10,6 +10,8 @@ Provides:
 """
 
 import json
+import re
+import subprocess
 import time
 import uuid
 from datetime import datetime
@@ -353,40 +355,17 @@ _CODE_PATTERNS = (
     "(3) 'required' list matches the non-defaulted params.\n"
 )
 
-_GHOST_SYSTEM_MAP_DASHBOARD = (
+_DASHBOARD_SYSTEM_MAP_GUIDANCE = (
     "\n### Ghost Tools (ghost_tools/<name>/)\n"
     "Isolated LLM-callable tools. Each has TOOL.yaml + tool.py with register(api).\n"
     "Use tools_create/tools_install_github to add new tools.\n"
     "ToolAPI provides: register_tool, register_hook, register_cron, register_setting,\n"
     "get_setting, set_setting, read_data, write_data, log, memory_save, memory_search.\n"
     "NO UI methods (no register_page, no register_route). Tools are backend-only.\n\n"
-    "### Dashboard Routes (ghost_dashboard/routes/)\n"
-    "chat.py, status.py, config.py, models.py, identity.py, skills.py,\n"
-    "cron.py, memory.py, feed.py, daemon.py, evolve.py, integrations.py,\n"
-    "autonomy.py, mcp.py, webhooks.py, setup.py, accounts.py\n"
-    "Register new blueprints in routes/__init__.py\n\n"
-    "### Frontend Pages (ghost_dashboard/static/js/pages/)\n"
-    "chat.js (#chat), overview.js (#overview), models.js (#models),\n"
-    "config.js (#config), soul.js (#soul), skills.js (#skills),\n"
-    "cron.js (#cron), memory.js (#memory), feed.js (#feed),\n"
-    "evolve.js (#evolve), integrations.js (#integrations),\n"
-    "autonomy.js (#autonomy), mcp.js (#mcp), webhooks.js (#webhooks)\n"
-    "Each page exports render(container). Router is in app.js.\n\n"
-    "### Core JS (ghost_dashboard/static/js/)\n"
-    "app.js  — SPA router, sidebar, navigate(), updateSidebarStatus()\n"
-    "api.js  — window.GhostAPI: get/post/put/patch/del wrappers\n"
-    "utils.js — window.GhostUtils: escapeHtml, formatDate, toast\n\n"
-    "### CSS Classes (ghost_dashboard/static/css/dashboard.css)\n"
-    "Layout: page-header, page-desc, stat-card, stat-value, stat-label\n"
-    "Buttons: btn, btn-primary, btn-ghost, btn-danger, btn-sm\n"
-    "Forms: form-input, form-group, toggle-switch\n"
-    "Cards: model-card, skill-card, cron-card\n"
-    "Status: badge, badge-success, badge-warning, badge-danger\n"
-    "Nav: nav-link, nav-link active\n"
-    "Colors: bg #0a0a14 (darkest), #10101c (cards), #161625 (inputs)\n"
-    "        ghost-purple #8b5cf6 (primary), #a78bfa (hover)\n"
-    "        text #ffffff (headings), #d4d4d8 (body), #a1a1aa (muted)\n"
-    "ALWAYS dark theme. NEVER use Tailwind light/dark classes.\n\n"
+    "### Dashboard Conventions\n"
+    "Register new blueprints in routes/__init__.py.\n"
+    "Each page in ghost_dashboard/static/js/pages/ exports render(container).\n"
+    "Router is in app.js. ALWAYS keep the dashboard in the dark theme.\n\n"
     "### Adding a Dashboard Page\n"
     "   1. ghost_dashboard/routes/<page>.py — Flask blueprint\n"
     "   2. Register in routes/__init__.py\n"
@@ -397,6 +376,77 @@ _GHOST_SYSTEM_MAP_DASHBOARD = (
     "code_symbol_lookup('ClassName.method') to see exact current signatures.\n"
     "ghost_supervisor.py — Process supervisor (PROTECTED — cannot modify)\n"
 )
+
+
+def _list_module_files(directory: Path, suffix: str, *, exclude: tuple[str, ...] = ()) -> list[str]:
+    if not directory.exists():
+        return []
+    return sorted(
+        path.name
+        for path in directory.iterdir()
+        if path.is_file() and path.suffix == suffix and path.name not in exclude
+    )
+
+
+def _extract_dashboard_css_classes(css_path: Path) -> list[str]:
+    if not css_path.exists():
+        return []
+    try:
+        content = css_path.read_text(encoding="utf-8")
+    except Exception:
+        return []
+    allow_prefixes = (
+        "page-", "stat-", "btn", "form-", "toggle", "model-", "skill-",
+        "cron-", "badge", "nav-", "feed-", "sidebar",
+    )
+    names = {
+        match.group(1)
+        for match in re.finditer(r"(?m)^\.(?:[A-Za-z0-9_\-\[\]=\"']+\s+)*([A-Za-z0-9_-]+)", content)
+    }
+    return sorted(name for name in names if name.startswith(allow_prefixes))
+
+
+def _build_dashboard_system_map() -> str:
+    dashboard_dir = PROJECT_DIR / "ghost_dashboard"
+    routes_dir = dashboard_dir / "routes"
+    pages_dir = dashboard_dir / "static" / "js" / "pages"
+    js_dir = dashboard_dir / "static" / "js"
+    css_path = dashboard_dir / "static" / "css" / "dashboard.css"
+
+    route_files = _list_module_files(routes_dir, ".py", exclude=("__init__.py",))
+    page_files = _list_module_files(pages_dir, ".js")
+    js_files = _list_module_files(js_dir, ".js")
+    prioritized = ["app.js", "api.js", "utils.js", "three-viewer.js"]
+    core_js = [name for name in prioritized if name in js_files]
+    core_js.extend(name for name in js_files if name not in set(prioritized))
+    css_classes = _extract_dashboard_css_classes(css_path)
+
+    sections = [_DASHBOARD_SYSTEM_MAP_GUIDANCE]
+    if route_files:
+        sections.append(
+            "### Dashboard Routes (auto-generated)\n"
+            + ", ".join(route_files)
+            + "\n"
+        )
+    if page_files:
+        sections.append(
+            "### Frontend Pages (auto-generated)\n"
+            + ", ".join(page_files)
+            + "\n"
+        )
+    if core_js:
+        sections.append(
+            "### Core JS (auto-generated)\n"
+            + ", ".join(core_js)
+            + "\n"
+        )
+    if css_classes:
+        sections.append(
+            "### CSS Classes (auto-generated from dashboard.css)\n"
+            + ", ".join(css_classes[:40])
+            + ("\n" if len(css_classes) <= 40 else ", ...\n")
+        )
+    return "\n".join(sections)
 
 
 def get_ghost_system_map(token_budget: int = 3000) -> str:
@@ -410,7 +460,7 @@ def get_ghost_system_map(token_budget: int = 3000) -> str:
         idx = get_code_index()
         idx.build()
         dynamic_map = idx.generate_repo_map(token_budget=token_budget)
-        return dynamic_map + _GHOST_SYSTEM_MAP_DASHBOARD
+        return dynamic_map + _build_dashboard_system_map()
     except Exception:
         pass
 
@@ -418,7 +468,7 @@ def get_ghost_system_map(token_budget: int = 3000) -> str:
         "\n\n## GHOST SYSTEM MAP (static fallback — code index unavailable)\n"
         "Use code_symbol_lookup('ClassName') to verify exact method signatures.\n"
         "Use code_symbol_list('filename.py') to see all symbols in a module.\n"
-        + _GHOST_SYSTEM_MAP_DASHBOARD
+        + _build_dashboard_system_map()
     )
 
 
@@ -1564,7 +1614,7 @@ def _get_repo_map(daemon):
         from ghost_code_index import get_code_index
         idx = get_code_index()
         idx.build()
-        return idx.generate_repo_map(token_budget=budget) + _GHOST_SYSTEM_MAP_DASHBOARD
+        return idx.generate_repo_map(token_budget=budget) + _build_dashboard_system_map()
     except Exception:
         return _GHOST_SYSTEM_MAP
 
@@ -2036,8 +2086,10 @@ _VERIFY_PROMPT = (
     "The Implementer wrote code and ran tests. Your job: verify quality, then submit the PR.\n\n"
     "## CONTEXT (from scratch file)\n"
     "{scratch_content}\n\n"
+    "## CHANGESET (git status + diff)\n"
+    "{git_diff}\n\n"
     "## VERIFICATION CHECKLIST\n"
-    "1. file_read each changed file — verify imports resolve, no syntax issues.\n"
+    "1. Review the explicit git changeset first, then file_read each changed file to verify imports resolve and logic is correct.\n"
     "2. For each new import: code_symbol_lookup to verify the method actually exists.\n"
     "3. Check for: bare except, missing mkdir, thread safety issues, missing **kwargs.\n"
     "4. If any issues found: evolve_apply patches to fix, then evolve_test again.\n"
@@ -2056,6 +2108,34 @@ _VERIFY_PROMPT = (
 )
 
 
+def _build_verify_changeset(max_chars: int = 12000) -> str:
+    """Return a compact git status + diff snapshot for VERIFY."""
+    try:
+        status_proc = subprocess.run(
+            ["git", "-C", str(PROJECT_DIR), "status", "--short", "--untracked-files=all"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        diff_proc = subprocess.run(
+            ["git", "-C", str(PROJECT_DIR), "diff", "--no-ext-diff", "--unified=3"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except Exception as exc:
+        return f"Git changeset unavailable: {exc}"
+
+    status_text = (status_proc.stdout or "").strip() or "(clean status output)"
+    diff_text = (diff_proc.stdout or "").strip() or "(no unstaged diff output)"
+    combined = f"git status --short\n{status_text}\n\ngit diff --no-ext-diff --unified=3\n{diff_text}"
+    if len(combined) > max_chars:
+        return combined[:max_chars] + "\n... [truncated]"
+    return combined
+
+
 def _run_verify_phase(daemon, feature_id, scratch_path):
     """Phase 3: Verify and submit PR. Returns True on success."""
     _log_phase("VERIFY", feature_id, "Starting verify phase")
@@ -2069,12 +2149,14 @@ def _run_verify_phase(daemon, feature_id, scratch_path):
     engine = _build_phase_engine(daemon)
     registry = _build_phase_registry(daemon, _VERIFY_TOOLS)
     repo_map = _get_repo_map(daemon)
+    git_diff = _build_verify_changeset()
     identity = _build_identity(daemon)
 
     system_prompt = (
         identity
         + _VERIFY_PROMPT
             .replace("{repo_map}", repo_map)
+            .replace("{git_diff}", git_diff)
             .replace("{scratch_content}", _truncate_scratch(scratch_content, keep_end=True))
             .replace("{scratch_path}", str(scratch_path))
     )

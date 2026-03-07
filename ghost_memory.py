@@ -17,6 +17,7 @@ from typing import Optional
 
 GHOST_HOME = Path.home() / ".ghost"
 MEMORY_DB_PATH = GHOST_HOME / "memory.db"
+STALE_MEMORY_PURGE_THRESHOLD = 3
 
 
 class MemoryDB:
@@ -86,6 +87,17 @@ class MemoryDB:
             self.conn.commit()
         except sqlite3.OperationalError:
             pass
+
+        for statement in (
+            "ALTER TABLE memories ADD COLUMN stale_verification_count INTEGER DEFAULT 0",
+            "ALTER TABLE memories ADD COLUMN last_verified_at TEXT DEFAULT ''",
+            "ALTER TABLE memories ADD COLUMN last_citation_status TEXT DEFAULT ''",
+        ):
+            try:
+                c.execute(statement)
+                self.conn.commit()
+            except sqlite3.OperationalError:
+                pass
 
         self.conn.commit()
 
@@ -218,15 +230,20 @@ class MemoryDB:
 
     def search(self, query, limit=10, type_filter=None):
         """Full-text search across memories. Returns list of dicts."""
+        return self._search(query, limit=limit, type_filter=type_filter, verify=False)
+
+    def _search(self, query, limit=10, type_filter=None, verify=False):
+        """Internal search helper with optional citation verification."""
         c = self.conn.cursor()
         fts_query = self._sanitize_fts_query(query)
         if not fts_query.strip():
-            return self._fallback_search(query, limit, type_filter)
+            return self._fallback_search(query, limit, type_filter, verify=verify)
         try:
             if type_filter:
                 c.execute("""
                     SELECT m.id, m.timestamp, m.type, m.content, m.source_preview,
                            m.tags, m.skill, m.tools_used, m.citations,
+                           m.stale_verification_count, m.last_verified_at, m.last_citation_status,
                            rank
                     FROM memories_fts f
                     JOIN memories m ON m.id = f.rowid
@@ -239,6 +256,7 @@ class MemoryDB:
                 c.execute("""
                     SELECT m.id, m.timestamp, m.type, m.content, m.source_preview,
                            m.tags, m.skill, m.tools_used, m.citations,
+                           m.stale_verification_count, m.last_verified_at, m.last_citation_status,
                            rank
                     FROM memories_fts f
                     JOIN memories m ON m.id = f.rowid
@@ -247,13 +265,15 @@ class MemoryDB:
                     LIMIT ?
                 """, (fts_query, limit))
             results = [dict(row) for row in c.fetchall()]
+            if verify:
+                results = self._verify_rows(results)
             if results:
                 return results
-            return self._fallback_search(query, limit, type_filter)
+            return self._fallback_search(query, limit, type_filter, verify=verify)
         except sqlite3.OperationalError:
-            return self._fallback_search(query, limit, type_filter)
+            return self._fallback_search(query, limit, type_filter, verify=verify)
 
-    def _fallback_search(self, query, limit, type_filter=None):
+    def _fallback_search(self, query, limit, type_filter=None, verify=False):
         """Fallback LIKE search when FTS5 fails or returns nothing."""
         import re
         c = self.conn.cursor()
@@ -274,33 +294,37 @@ class MemoryDB:
             params.append(type_filter)
 
         c.execute(f"""
-            SELECT id, timestamp, type, content, source_preview, tags, skill, tools_used, citations
+            SELECT id, timestamp, type, content, source_preview, tags, skill, tools_used, citations,
+                   stale_verification_count, last_verified_at, last_citation_status
             FROM memories
             WHERE {conditions}
             ORDER BY timestamp DESC
             LIMIT ?
         """, params + [limit])
-        return [dict(row) for row in c.fetchall()]
+        rows = [dict(row) for row in c.fetchall()]
+        if verify:
+            rows = self._verify_rows(rows)
+        return rows
 
     def get_recent(self, limit=20, type_filter=None, verify=False):
         """Get the most recent memories, optionally verifying citations."""
         c = self.conn.cursor()
         if type_filter:
             c.execute("""
-                SELECT id, timestamp, type, content, source_preview, tags, skill, tools_used, citations
+                SELECT id, timestamp, type, content, source_preview, tags, skill, tools_used, citations,
+                       stale_verification_count, last_verified_at, last_citation_status
                 FROM memories WHERE type = ?
                 ORDER BY timestamp DESC LIMIT ?
             """, (type_filter, limit))
         else:
             c.execute("""
-                SELECT id, timestamp, type, content, source_preview, tags, skill, tools_used, citations
+                SELECT id, timestamp, type, content, source_preview, tags, skill, tools_used, citations,
+                       stale_verification_count, last_verified_at, last_citation_status
                 FROM memories ORDER BY timestamp DESC LIMIT ?
             """, (limit,))
         rows = [dict(row) for row in c.fetchall()]
         if verify:
-            for row in rows:
-                _, note = self.verify_citations(row.get("citations", ""))
-                row["_citation_status"] = note
+            rows = self._verify_rows(rows)
         return rows
 
     def get_by_id(self, memory_id):
@@ -311,9 +335,7 @@ class MemoryDB:
 
     def recent(self, limit=20):
         """Return the most recent memory entries."""
-        c = self.conn.cursor()
-        c.execute("SELECT * FROM memories ORDER BY timestamp DESC LIMIT ?", (limit,))
-        return [dict(row) for row in c.fetchall()]
+        return self.get_recent(limit=limit, verify=False)
 
     def delete(self, memory_id):
         """Delete a single memory entry by ID."""
@@ -321,6 +343,47 @@ class MemoryDB:
         c.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
         self.conn.commit()
         return c.rowcount > 0
+
+    def search_verified(self, query, limit=10, type_filter=None):
+        """Search and verify citation-backed memories in real time."""
+        return self._search(query, limit=limit, type_filter=type_filter, verify=True)
+
+    def _verify_rows(self, rows):
+        verified = []
+        for row in rows:
+            normalized = dict(row)
+            valid, note = self.verify_citations(normalized.get("citations", ""))
+            normalized["_citation_valid"] = valid
+            normalized["_citation_status"] = note
+            normalized["_citation_checked"] = bool(normalized.get("citations"))
+            next_stale_count = 0 if valid else int(normalized.get("stale_verification_count") or 0) + 1
+            normalized["stale_verification_count"] = next_stale_count
+            if normalized.get("id"):
+                self._record_verification_result(normalized["id"], valid, note, next_stale_count)
+            if not valid and next_stale_count >= STALE_MEMORY_PURGE_THRESHOLD:
+                self.delete(normalized["id"])
+                continue
+            verified.append(normalized)
+        return verified
+
+    def _record_verification_result(self, memory_id, valid, note, stale_count):
+        c = self.conn.cursor()
+        c.execute(
+            """
+            UPDATE memories
+            SET stale_verification_count = ?,
+                last_verified_at = ?,
+                last_citation_status = ?
+            WHERE id = ?
+            """,
+            (
+                0 if valid else stale_count,
+                datetime.now().isoformat(),
+                note,
+                memory_id,
+            ),
+        )
+        self.conn.commit()
 
     def count(self, type_filter=None):
         c = self.conn.cursor()
@@ -384,27 +447,23 @@ class MemoryDB:
 def make_memory_search(memory_db):
     """Create memory_search tool that uses the memory DB."""
     def execute(query, limit=5, type_filter=None):
-        results = memory_db.search(query, limit=limit, type_filter=type_filter)
+        results = memory_db.search_verified(query, limit=limit, type_filter=type_filter)
         if not results:
             return "No memories found matching that query."
         parts = []
-        has_stale = False
         for r in results:
             ts = r["timestamp"][:19].replace("T", " ")
-            citations_raw = r.get("citations", "")
-            valid, verify_note = memory_db.verify_citations(citations_raw)
-            if not valid:
-                has_stale = True
+            verify_note = r.get("_citation_status", "")
             parts.append(
                 f"[{ts}] ({r['type']}) {r['content'][:300]}{verify_note}"
             )
         result = "\n---\n".join(parts)
-        if has_stale:
+        if any(not r.get("_citation_valid", True) for r in results):
             result += (
                 "\n\n⚠ STALE MEMORIES DETECTED: Some memories have citations that no "
                 "longer match the current codebase. If you use information from a "
-                "[STALE] memory, verify it first. Consider saving a corrected version "
-                "with memory_save (include updated citations)."
+                "[STALE] memory, verify it first. Ghost will automatically discard "
+                "repeatedly stale memories after several failed verifications."
             )
         return result
 

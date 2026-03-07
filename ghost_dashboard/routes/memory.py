@@ -39,7 +39,7 @@ def memory_search():
     limit = int(request.args.get("limit", 50))
     if not q:
         return jsonify({"results": [], "query": ""})
-    results = db.search(q, limit=limit)
+    results = db.search_verified(q, limit=limit)
     return jsonify({"results": results, "query": q})
 
 
@@ -47,7 +47,7 @@ def memory_search():
 def memory_recent():
     db = _get_db()
     limit = int(request.args.get("limit", 20))
-    results = db.recent(limit=limit)
+    results = db.get_recent(limit=limit, verify=True)
     return jsonify({"results": results})
 
 

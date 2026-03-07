@@ -250,15 +250,15 @@ CONFIG_SCHEMA = {
     },
     "implement_max_steps": {
         "type": "integer",
-        "description": "Max steps for the Implement phase in phased evolution (default: 80)",
+        "description": "Max steps for the Implement phase in phased evolution (default: 20)",
     },
     "verify_max_steps": {
         "type": "integer",
-        "description": "Max steps for the Verify+Submit phase in phased evolution (default: 40)",
+        "description": "Max steps for the Verify+Submit phase in phased evolution (default: 30)",
     },
     "fix_max_steps": {
         "type": "integer",
-        "description": "Max steps for the Fix phase (PR rejection handling) in phased evolution (default: 40)",
+        "description": "Max steps for the Fix phase (PR rejection handling) in phased evolution (default: 25)",
     },
     "repo_map_token_budget": {
         "type": "integer",

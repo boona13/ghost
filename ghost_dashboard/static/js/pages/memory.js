@@ -85,13 +85,26 @@ function renderEntries(entries, u) {
         <span class="badge badge-${u.TYPE_COLORS[e.type] || 'zinc'}">${e.type || '?'}</span>
         <span class="text-[10px] text-zinc-600">${e.timestamp || ''}</span>
         ${e.tokens_used ? `<span class="text-[10px] text-zinc-600">${e.tokens_used} ${t('common.tokens')}</span>` : ''}
+        ${renderCitationBadge(e)}
         <button class="btn btn-ghost btn-sm ml-auto text-red-400 hover:text-red-300" data-mem-del="${e.id}">${t('common.delete')}</button>
       </div>
       ${e.source_preview ? `<div class="text-[11px] text-zinc-500 mb-1">${t('memory.source')} ${u.escapeHtml(e.source_preview)}</div>` : ''}
       <div class="text-xs text-zinc-300">${u.escapeHtml((e.content || '').slice(0, 300))}</div>
+      ${e._citation_status ? `<div class="text-[11px] text-zinc-500 mt-1">${u.escapeHtml(e._citation_status.replace(/^\s+/, ''))}</div>` : ''}
       ${e.skill ? `<span class="badge badge-purple mt-1">${e.skill}</span>` : ''}
     </div>
   `).join('');
+}
+
+function renderCitationBadge(entry) {
+  if (!entry._citation_status) return '';
+  if (entry._citation_valid === false) {
+    return `<span class="badge badge-yellow">stale</span>`;
+  }
+  if (entry._citation_valid === true && entry._citation_checked) {
+    return `<span class="badge badge-green">verified</span>`;
+  }
+  return '';
 }
 
 function bindDeletes(container, api, u) {
