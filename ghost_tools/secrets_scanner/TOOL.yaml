@@ -1,6 +1,0 @@
-name: secrets_scanner
-version: 1.0.0
-description: Scans code for accidentally committed secrets like API keys, tokens,
-  and passwords
-author: ghost
-category: utility

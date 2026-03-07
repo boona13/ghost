@@ -1224,6 +1224,67 @@ class EvolutionEngine:
 
         return issues
 
+    def _cleanup_rejected_tool_files(self, evolution_id):
+        """Remove ghost_tools/ directories created by a rejected/blocked evolution.
+
+        When tools_create runs before evolve_plan, the auto-commit in
+        create_branch() sweeps those files onto main. If the PR is then
+        rejected or blocked, those unapproved tool files remain on main
+        and Ghost loads them on every restart. This method identifies tool
+        directories that were part of the evolution and removes them from
+        both disk and git.
+        """
+        evo = self._active_evolutions.get(evolution_id, {})
+        changed = evo.get("changes", [])
+        tool_dirs_to_remove = set()
+        for change in changed:
+            fpath = change.get("file", "")
+            if fpath.startswith("ghost_tools/"):
+                parts = fpath.split("/")
+                if len(parts) >= 2 and parts[1] not in ("_example", ".gitkeep"):
+                    tool_dirs_to_remove.add(f"ghost_tools/{parts[1]}")
+
+        if not tool_dirs_to_remove:
+            # Also check diff against main for files added by auto-commit
+            try:
+                branch = evo.get("git_branch", "")
+                if branch:
+                    diff_files = ghost_git.get_changed_files("main~1", "main")
+                    for f in diff_files:
+                        if f.startswith("ghost_tools/"):
+                            parts = f.split("/")
+                            if len(parts) >= 2 and parts[1] not in ("_example", ".gitkeep"):
+                                tool_dirs_to_remove.add(f"ghost_tools/{parts[1]}")
+            except Exception:
+                pass
+
+        removed = []
+        for tool_rel in tool_dirs_to_remove:
+            tool_abs = PROJECT_DIR / tool_rel
+            if tool_abs.exists() and tool_abs.is_dir():
+                try:
+                    shutil.rmtree(tool_abs)
+                    removed.append(tool_rel)
+                    log.info("Cleaned up rejected tool: %s", tool_rel)
+                except Exception as e:
+                    log.warning("Failed to remove %s: %s", tool_rel, e)
+
+        if removed:
+            try:
+                import subprocess as _sp
+                _sp.run(
+                    ["git", "add", "-A"],
+                    cwd=str(PROJECT_DIR), capture_output=True, timeout=10,
+                )
+                _sp.run(
+                    ["git", "commit", "-m",
+                     f"cleanup: remove rejected tool files ({', '.join(removed)})"],
+                    cwd=str(PROJECT_DIR), capture_output=True, timeout=10,
+                )
+            except Exception:
+                pass
+        return removed
+
     def resume_evolution(self, evolution_id):
         """Resume a review_rejected evolution for fix-and-resubmit.
 
@@ -1496,6 +1557,7 @@ class EvolutionEngine:
 
         elif verdict == "blocked":
             ghost_git.stash_and_checkout("main")
+            self._cleanup_rejected_tool_files(evolution_id)
             ghost_git.delete_branch(branch_name)
             try:
                 from ghost_future_features import FutureFeaturesStore
@@ -1514,6 +1576,7 @@ class EvolutionEngine:
 
         else:  # rejected — keep branch alive for fix-and-resubmit
             ghost_git.stash_and_checkout("main")
+            self._cleanup_rejected_tool_files(evolution_id)
 
             # Preserve the branch + evolution for the next attempt (GitHub-style)
             evo["status"] = "review_rejected"
