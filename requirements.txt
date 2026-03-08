@@ -5,10 +5,6 @@ requests>=2.31,<3.0
 pyyaml>=6.0,<7.0
 croniter>=2.0,<7.0
 
-# FastAPI and ASGI server (used by dashboard API and webhooks)
-fastapi>=0.110,<1.0
-uvicorn[standard]>=0.27,<1.0
-
 # Web content extraction (used by ghost_web_fetch.py)
 readability-lxml>=0.8,<1.0
 html2text>=2024.2,<2026.0
@@ -25,23 +21,48 @@ edge-tts>=6.1,<8.0
 sounddevice>=0.4.6,<0.6.0
 numpy>=1.26,<3.0
 soundfile>=0.12,<1.0
-# Optional: vosk>=0.3.45           # Offline speech recognition (no API key needed)
+
+# QR code generation (used by WhatsApp channel for pairing QR codes)
+segno>=1.6
+
+# HuggingFace Hub (model downloads for GhostNodes, HF OAuth in dashboard)
+huggingface-hub>=0.23
+
+# Optional: offline speech recognition (no API key needed)
+# vosk>=0.3.45
+
+# Optional: on-device speech-to-text (Moonshine — fast, offline, free)
+# moonshine-onnx>=0.1
 
 # Optional: browser automation (install separately — requires system browsers)
 # playwright>=1.40
 
+# Optional: browser-use agent framework
+# browser-use>=0.1
+
+# Optional: observability (Langfuse tracing)
+# langfuse>=2.0
+
+# Optional: document parsing (LlamaParse)
+# llama-cloud>=0.1
+
 # Optional: channel-specific SDKs (ghost_channels/ — install only what you need)
 neonize>=0.3.14           # WhatsApp Web (QR code linking via whatsmeow)
-# slack_sdk>=3.27         # Slack Socket Mode (bidirectional)
-# discord.py>=2.3         # Discord gateway (bidirectional)
-# matrix-nio>=0.24        # Matrix E2EE support
-# websocket-client>=1.7   # Mattermost/Nostr inbound
+# slack-sdk>=3.27          # Slack Socket Mode (bidirectional)
+# discord.py>=2.3          # Discord gateway (bidirectional)
+# matrix-nio>=0.24         # Matrix E2EE support
+# websocket-client>=1.7    # Mattermost/Nostr inbound
+
+# Optional: depth estimation colormap visualization
+# matplotlib>=3.8
 
 # ── GhostNodes — local AI node dependencies ──────────────────────────
 # Core ML frameworks
+# NOTE: `pip install torch` gives CPU-only on Windows/Linux. For GPU (CUDA):
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
 torch>=2.4                # PyTorch — required by most AI nodes
 diffusers>=0.33           # Hugging Face Diffusers — image/video generation pipelines (>=0.33 for Wan2.1)
-ftfy>=6.1                 # Unicode text fixing — required by Wan2.1 text encoder
+ftfy>=6.1                 # Unicode text fixing — runtime dep of diffusers CLIP tokenizer
 transformers>=4.56,<5     # Hugging Face Transformers — 4.56+ for surya, <5 for MusicGen compat
 accelerate>=1.0           # Hugging Face Accelerate — device placement & mixed precision
 safetensors>=0.4          # Fast model weight loading
@@ -55,11 +76,11 @@ Pillow>=12.0              # Image processing (used by most vision nodes)
 # Background removal (background-remove node)
 rembg>=2.0                # U2-Net background removal
 
-# Text-to-speech (bark-tts node)
-suno-bark>=0.1            # Suno Bark — expressive multilingual TTS
-
 # Speech-to-text (whisper-stt node)
-openai-whisper>=20240930  # OpenAI Whisper — 99-language transcription
+# NOTE: openai-whisper depends on triton which only has Linux wheels.
+# On Windows/macOS, install from git to skip triton:
+#   pip install git+https://github.com/openai/whisper.git
+openai-whisper>=20240930; sys_platform == "linux"  # Linux only (triton dep has no Windows/macOS wheels)
 
 # Document OCR (surya-ocr node)
 surya-ocr>=0.17           # Surya — 90+ language document OCR (Predictor API)
@@ -76,9 +97,7 @@ scipy>=1.12               # Audio processing / wav file writing
 # Depth estimation (depth-estimation node) — uses transformers DepthAnythingV2
 # Models: Depth-Anything-V2-{Small,Base,Large}-hf (auto-download, 100MB-1.3GB)
 
-# Style transfer (style-transfer node) — uses torchvision VGG19
-torchvision>=0.19            # VGG19 pre-trained features for neural style transfer
-
+# Style transfer (style-transfer node) — now uses diffusers SDXL + IP-Adapter (no torchvision needed)
 # Image inpainting (image-inpaint node) — uses diffusers StableDiffusionInpaintPipeline
 # Models: runwayml/stable-diffusion-inpainting (~4GB auto-download)
 
@@ -111,8 +130,16 @@ imageio-ffmpeg>=0.4          # FFmpeg backend for imageio
 PyJWT>=2.8,<3.0              # JWT token generation (Kling access_key + secret_key → Bearer token)
 
 # Video composition (video-composer node) — clip concat, audio merge, transitions
+# NOTE: moviepy needs ffmpeg on PATH. imageio-ffmpeg (above) bundles it, but
+# moviepy may not find the bundled binary. Install system ffmpeg if video-composer fails:
+#   macOS: brew install ffmpeg  |  Linux: apt install ffmpeg  |  Windows: choco install ffmpeg
 moviepy>=2.0                 # Programmatic video editing (wraps ffmpeg internally)
 
 # Voice cloning (voice-clone node) — OpenVoice V2 (optional, manual install):
 # pip install git+https://github.com/myshell-ai/OpenVoice.git
 # pip install git+https://github.com/myshell-ai/MeloTTS.git
+
+# Optional: macOS Apple Silicon ML acceleration
+# mlx; sys_platform == "darwin"
+# mlx-flux; sys_platform == "darwin"
+# pyobjc-framework-Cocoa; sys_platform == "darwin"

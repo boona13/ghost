@@ -7,22 +7,18 @@ let providerData = [];
 let activeTab = 'openrouter';
 let providerModels = {};
 let primaryProvider = 'openrouter';
-let responsesCapabilities = {
-  enable_responses_skills: false,
-  enable_hosted_shell: false,
-  enable_container_networking: false,
-};
+const MODELS_PAGE_SIZE = 12;
+let modelsVisibleCount = MODELS_PAGE_SIZE;
 
 export async function render(container) {
   const { GhostAPI: api, GhostUtils: u } = window;
 
-  const [modelsResp, providersResp, chainResp, primaryResp, configResp, responsesCapsResp] = await Promise.all([
+  const [modelsResp, providersResp, chainResp, primaryResp, configResp] = await Promise.all([
     api.get('/api/models'),
     api.get('/api/providers').catch(() => ({ providers: [] })),
     api.get('/api/fallback-chain').catch(() => ({ chain: [], active: '' })),
     api.get('/api/primary-provider').catch(() => ({ primary_provider: 'openrouter' })),
     api.get('/api/config').catch(() => ({ config: {} })),
-    api.get('/api/responses-capabilities').catch(() => ({ responses_capabilities: {} })),
   ]);
   primaryProvider = primaryResp.primary_provider || 'openrouter';
   const cfg = configResp.config || configResp || {};
@@ -30,10 +26,6 @@ export async function render(container) {
 
   allModels = modelsResp.models || [];
   providerData = providersResp.providers || [];
-  responsesCapabilities = {
-    ...responsesCapabilities,
-    ...(responsesCapsResp.responses_capabilities || {}),
-  };
   const current = modelsResp.current;
   const chain = chainResp;
 
@@ -56,173 +48,19 @@ export async function render(container) {
       <button class="provider-tab add-provider-tab" id="btn-add-provider">${t('models.addBtn')}</button>
     </div>
 
-    <!-- Current Model & Chain -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-      <div class="stat-card">
-        <div class="flex items-center justify-between">
-          <div>
-            <div class="text-xs text-zinc-500 mb-1">${t('models.activeModel')}</div>
-            <div class="text-lg font-bold text-white font-mono">${u.escapeHtml(chain.active || current)}</div>
-          </div>
-          <div class="text-right">
-            <div class="text-xs text-zinc-500 mb-1">${t('models.apiKey')}</div>
-            <div class="text-sm ${modelsResp.has_api_key ? 'text-emerald-400' : 'text-red-400'}">${modelsResp.has_api_key ? t('models.connectedDot') : t('models.notSet')}</div>
-            ${modelsResp.api_key_masked ? `<div class="text-[10px] text-zinc-600 font-mono">${modelsResp.api_key_masked}</div>` : ''}
-          </div>
-        </div>
+    <!-- Active Model Status Bar (compact) -->
+    <div class="models-status-bar mb-6">
+      <div class="models-status-item">
+        <span class="text-xs text-zinc-500">${t('models.activeModel')}</span>
+        <span class="text-sm font-semibold text-white font-mono">${u.escapeHtml(chain.active || current)}</span>
       </div>
-
-      <div class="stat-card">
-        <div class="chain-card-header">
-          <div>
-            <div class="text-xs text-zinc-500 mb-0.5">${t('models.fallbackOrder')}</div>
-            <div class="text-[10px] text-zinc-600">${t('models.fallbackOrderDesc')}</div>
-          </div>
-          <button class="btn btn-primary btn-sm" id="btn-save-provider-order" style="font-size:10px;padding:3px 10px">${t('models.saveOrder')}</button>
-        </div>
-        <div class="chain-list" id="llm-provider-chain">
-          ${(() => {
-            const chainProviders = (chain.chain || []).map(e => e.split(':')[0]);
-            const allProvIds = providerData.map(p => p.id);
-            const seen = new Set();
-            const ordered = [];
-            for (const pid of chainProviders) { if (!seen.has(pid) && allProvIds.includes(pid)) { seen.add(pid); ordered.push(pid); } }
-            for (const pid of allProvIds) { if (!seen.has(pid)) { seen.add(pid); ordered.push(pid); } }
-            return ordered.map((pid, i) => {
-              const prov = providerData.find(p => p.id === pid);
-              const name = prov ? prov.name : pid;
-              const configured = prov ? prov.configured : false;
-              const isPrimary = pid === primaryProvider;
-              const activeEntry = (chain.chain || []).find(e => e.startsWith(pid + ':'));
-              const activeModel = activeEntry ? activeEntry.split(':').slice(1).join(':') : '';
-              const failed = chain.failures ? Object.entries(chain.failures).find(([k]) => k.startsWith(pid + ':')) : null;
-              return '<div class="chain-item' + (configured ? '' : ' disabled') + '" draggable="true" data-provider="' + pid + '">' +
-                '<span class="grip">⠿</span>' +
-                '<span class="pos">' + (i + 1) + '</span>' +
-                '<span class="provider-name" style="text-decoration:none">' +
-                  (isPrimary ? '<span style="color:#a78bfa;margin-inline-end:4px">★</span>' : '') +
-                  u.escapeHtml(name) +
-                  (configured ? '<span style="color:#34d399;margin-inline-start:6px;font-size:9px">●</span>' : '<span style="color:rgba(255,255,255,0.2);margin-inline-start:6px;font-size:9px">○</span>') +
-                '</span>' +
-                (activeModel ? '<span style="font-size:9px;color:rgba(255,255,255,0.25);font-family:monospace;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + u.escapeHtml(activeModel) + '">' + u.escapeHtml(activeModel) + '</span>' : '') +
-                (failed ? '<span style="font-size:9px;color:rgba(239,68,68,0.5)">' + t('common.fail') + '</span>' : '') +
-                '</div>';
-            }).join('');
-          })()}
-        </div>
+      <div class="models-status-item">
+        <span class="text-xs text-zinc-500">${t('models.apiKey')}</span>
+        <span class="text-sm ${modelsResp.has_api_key ? 'text-emerald-400' : 'text-red-400'}">${modelsResp.has_api_key ? t('models.connectedDot') : t('models.notSet')}</span>
       </div>
     </div>
 
-    <!-- OpenRouter Model Fallback Chain -->
-    <div class="stat-card mb-6" id="or-fallback-section">
-      <div class="chain-card-header">
-        <div>
-          <div class="text-xs text-zinc-500 mb-0.5">${t('models.orFallbackChain')}</div>
-          <div class="text-[10px] text-zinc-600">${t('models.orFallbackChainDesc')}</div>
-        </div>
-        <button class="btn btn-primary btn-sm" id="btn-save-or-fallback" style="font-size:10px;padding:3px 10px">${t('common.save')}</button>
-      </div>
-      <div class="chain-list" id="or-model-chain">
-        ${(() => {
-          const orChainEntries = (chain.chain || []).filter(e => e.startsWith('openrouter:'));
-          const orPrimary = orChainEntries.length > 0
-            ? orChainEntries[0].split(':').slice(1).join(':')
-            : (providerModels['openrouter'] || cfg.model || current || '');
-          const fbModels = cfg.fallback_models || [];
-          const allOrModels = [orPrimary, ...fbModels.filter(m => m !== orPrimary)];
-          return allOrModels.map((mid, i) => {
-            const isPrimary = i === 0;
-            const isActive = chain.active && chain.active.startsWith('openrouter:') && chain.active.split(':').slice(1).join(':') === mid;
-            const hasFail = chain.failures ? Object.keys(chain.failures).some(k => k === 'openrouter:' + mid) : false;
-            return '<div class="chain-item" draggable="true" data-model="' + u.escapeHtml(mid) + '">' +
-              '<span class="grip">⠿</span>' +
-              '<span class="pos">' + (i + 1) + '</span>' +
-              '<span class="provider-name" style="text-decoration:none;font-family:ui-monospace,monospace;font-size:11px">' +
-                (isPrimary ? '<span style="color:#a78bfa;margin-inline-end:4px">★</span>' : '') +
-                u.escapeHtml(mid) +
-                (isActive ? '<span style="color:#34d399;margin-inline-start:6px;font-size:9px">' + t('common.activeDot') + '</span>' : '') +
-                (hasFail ? '<span style="color:rgba(239,68,68,0.5);margin-inline-start:6px;font-size:9px">' + t('common.fail') + '</span>' : '') +
-              '</span>' +
-              (i > 0 ? '<button class="or-remove-model" data-model="' + u.escapeHtml(mid) + '" style="background:none;border:none;color:rgba(255,255,255,0.2);cursor:pointer;font-size:14px;padding:0 4px;line-height:1" title="' + t('common.remove') + '">×</button>' : '') +
-              '</div>';
-          }).join('');
-        })()}
-      </div>
-      <div class="flex gap-2 mt-3">
-        <input id="or-add-model-input" type="text" class="form-input flex-1 font-mono" style="font-size:11px" placeholder="${t('models.addModelPlaceholder')}">
-        <button id="btn-or-add-model" class="btn btn-ghost btn-sm" style="font-size:10px">${t('models.addBtn')}</button>
-      </div>
-    </div>
-
-    <!-- Model Selection -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-      <div>
-        <label class="form-label">${t('models.customModelId')}</label>
-        <div class="flex gap-2">
-          <input id="custom-model" type="text" class="form-input flex-1 font-mono" placeholder="${t('models.modelNamePlaceholder')}" value="${u.escapeHtml(current)}">
-          <button id="btn-set-model" class="btn btn-primary">${t('models.set')}</button>
-        </div>
-      </div>
-      <div>
-        <label class="form-label">${t('models.orApiKey')}</label>
-        <div class="flex gap-2">
-          <input id="api-key-input" type="password" class="form-input flex-1 font-mono" placeholder="${t('models.orApiKeyPlaceholder')}">
-          <button id="btn-toggle-key" class="btn btn-ghost btn-sm">${t('models.show')}</button>
-          <button id="btn-save-key" class="btn btn-secondary">${t('common.save')}</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Provider Key Management -->
-    <div id="provider-keys-section" class="stat-card mb-6 hidden">
-      <h3 class="text-sm font-semibold text-white mb-3" id="provider-keys-title">${t('models.manageKeys')}</h3>
-      <div id="provider-keys-content"></div>
-    </div>
-
-    <!-- Responses Capabilities -->
-    <div class="stat-card mb-6" id="responses-capabilities-section">
-      <div class="flex items-start justify-between gap-3 mb-3">
-        <div>
-          <h3 class="text-sm font-semibold text-white">${t('models.responsesCapabilities')}</h3>
-          <p class="text-xs text-zinc-500 mt-1">${t('models.responsesCapabilitiesDesc')}</p>
-          <div class="mt-1"><span class="badge badge-purple">${t('models.appliesGlobally')}</span></div>
-        </div>
-        <button id="btn-save-responses-capabilities" class="btn btn-primary btn-sm">${t('models.saveCapabilities')}</button>
-      </div>
-      <div class="space-y-3">
-        <div class="flex items-center justify-between gap-3 py-2 border-b border-surface-600/30">
-          <div>
-            <label class="form-label !mb-0">${t('models.enableResponsesSkills')}</label>
-            <div class="text-[11px] text-zinc-500">${t('models.enableResponsesSkillsDesc')}</div>
-          </div>
-          <button class="toggle ${responsesCapabilities.enable_responses_skills ? 'on' : ''}" id="toggle-enable-responses-skills" type="button" role="switch" aria-checked="${responsesCapabilities.enable_responses_skills ? 'true' : 'false'}">
-            <span class="toggle-dot"></span>
-          </button>
-        </div>
-
-        <div class="flex items-center justify-between gap-3 py-2 border-b border-surface-600/30">
-          <div>
-            <label class="form-label !mb-0">${t('models.enableHostedShell')}</label>
-            <div class="text-[11px] text-zinc-500">${t('models.enableHostedShellDesc')}</div>
-          </div>
-          <button class="toggle ${responsesCapabilities.enable_hosted_shell ? 'on' : ''}" id="toggle-enable-hosted-shell" type="button" role="switch" aria-checked="${responsesCapabilities.enable_hosted_shell ? 'true' : 'false'}">
-            <span class="toggle-dot"></span>
-          </button>
-        </div>
-
-        <div class="flex items-center justify-between gap-3 py-2">
-          <div>
-            <label class="form-label !mb-0">${t('models.enableContainerNetworking')}</label>
-            <div class="text-[11px] text-zinc-500">${t('models.enableContainerNetworkingDesc')}</div>
-          </div>
-          <button class="toggle ${responsesCapabilities.enable_container_networking ? 'on' : ''}" id="toggle-enable-container-networking" type="button" role="switch" aria-checked="${responsesCapabilities.enable_container_networking ? 'true' : 'false'}">
-            <span class="toggle-dot"></span>
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Filters -->
+    <!-- Model Browser (primary action area) -->
     <div class="flex flex-wrap gap-3 mb-4">
       <input id="model-search" type="text" class="form-input flex-1" style="min-width:200px" placeholder="${t('models.searchModels')}">
       <select id="model-provider" class="form-input" style="width:150px">
@@ -234,64 +72,157 @@ export async function render(container) {
         ${tiers.map(ti => `<option value="${ti}">${ti}</option>`).join('')}
       </select>
     </div>
-
     <div class="text-xs text-zinc-500 mb-3" id="results-count"></div>
     <div id="models-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3"></div>
+    <div id="models-show-more-wrap" class="flex justify-center mt-4" style="display:none">
+      <button id="btn-show-more-models" class="btn btn-ghost">${t('models.showMore')}</button>
+    </div>
+    <div style="height:1.5rem"></div>
+
+    <!-- Advanced: Provider Fallback Order -->
+    <div class="collapsible-section mb-4">
+      <button class="collapsible-header" data-collapse-target="section-provider-order">
+        <svg class="collapsible-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+        <div class="collapsible-header-text">
+          <span class="collapsible-title">${t('models.fallbackOrder')}</span>
+          <span class="collapsible-desc">${t('models.fallbackOrderDesc')}</span>
+        </div>
+      </button>
+      <div class="collapsible-body" id="section-provider-order">
+        <div class="stat-card">
+          <div class="chain-card-header">
+            <div></div>
+            <button class="btn btn-primary btn-sm" id="btn-save-provider-order" style="font-size:10px;padding:3px 10px">${t('models.saveOrder')}</button>
+          </div>
+          <div class="chain-list" id="llm-provider-chain">
+            ${(() => {
+              const chainProviders = (chain.chain || []).map(e => e.split(':')[0]);
+              const allProvIds = providerData.map(p => p.id);
+              const seen = new Set();
+              const ordered = [];
+              for (const pid of chainProviders) { if (!seen.has(pid) && allProvIds.includes(pid)) { seen.add(pid); ordered.push(pid); } }
+              for (const pid of allProvIds) { if (!seen.has(pid)) { seen.add(pid); ordered.push(pid); } }
+              return ordered.map((pid, i) => {
+                const prov = providerData.find(p => p.id === pid);
+                const name = prov ? prov.name : pid;
+                const configured = prov ? prov.configured : false;
+                const isPrimary = pid === primaryProvider;
+                const activeEntry = (chain.chain || []).find(e => e.startsWith(pid + ':'));
+                const activeModel = activeEntry ? activeEntry.split(':').slice(1).join(':') : '';
+                const failed = chain.failures ? Object.entries(chain.failures).find(([k]) => k.startsWith(pid + ':')) : null;
+                return '<div class="chain-item' + (configured ? '' : ' disabled') + '" draggable="true" data-provider="' + pid + '">' +
+                  '<span class="grip">⠿</span>' +
+                  '<span class="pos">' + (i + 1) + '</span>' +
+                  '<span class="provider-name" style="text-decoration:none">' +
+                    (isPrimary ? '<span style="color:#a78bfa;margin-inline-end:4px">★</span>' : '') +
+                    u.escapeHtml(name) +
+                    (configured ? '<span style="color:#34d399;margin-inline-start:6px;font-size:9px">●</span>' : '<span style="color:rgba(255,255,255,0.2);margin-inline-start:6px;font-size:9px">○</span>') +
+                  '</span>' +
+                  (activeModel ? '<span style="font-size:9px;color:rgba(255,255,255,0.25);font-family:monospace;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + u.escapeHtml(activeModel) + '">' + u.escapeHtml(activeModel) + '</span>' : '') +
+                  (failed ? '<span style="font-size:9px;color:rgba(239,68,68,0.5)">' + t('common.fail') + '</span>' : '') +
+                  '</div>';
+              }).join('');
+            })()}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Advanced: Provider Configuration -->
+    <div class="collapsible-section mb-4">
+      <button class="collapsible-header" data-collapse-target="section-provider-config">
+        <svg class="collapsible-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+        <div class="collapsible-header-text">
+          <span class="collapsible-title">${t('models.advProviderConfig')}</span>
+          <span class="collapsible-desc">${t('models.advProviderConfigDesc')}</span>
+        </div>
+      </button>
+      <div class="collapsible-body" id="section-provider-config">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          <div>
+            <label class="form-label">${t('models.customModelId')}</label>
+            <div class="flex gap-2">
+              <input id="custom-model" type="text" class="form-input flex-1 font-mono" placeholder="${t('models.modelNamePlaceholder')}" value="${u.escapeHtml(current)}">
+              <button id="btn-set-model" class="btn btn-primary">${t('models.set')}</button>
+            </div>
+          </div>
+          <div>
+            <label class="form-label">${t('models.orApiKey')}</label>
+            <div class="flex gap-2">
+              <input id="api-key-input" type="password" class="form-input flex-1 font-mono" placeholder="${t('models.orApiKeyPlaceholder')}">
+              <button id="btn-toggle-key" class="btn btn-ghost btn-sm">${t('models.show')}</button>
+              <button id="btn-save-key" class="btn btn-secondary">${t('common.save')}</button>
+            </div>
+          </div>
+        </div>
+        <div id="provider-keys-section" class="stat-card hidden">
+          <h3 class="text-sm font-semibold text-white mb-3" id="provider-keys-title">${t('models.manageKeys')}</h3>
+          <div id="provider-keys-content"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Advanced: OpenRouter Model Fallback Chain -->
+    <div class="collapsible-section mb-4" id="or-fallback-collapsible" style="${activeTab === 'openrouter' ? '' : 'display:none'}">
+      <button class="collapsible-header" data-collapse-target="section-or-fallback">
+        <svg class="collapsible-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+        <div class="collapsible-header-text">
+          <span class="collapsible-title">${t('models.orFallbackChain')}</span>
+          <span class="collapsible-desc">${t('models.orFallbackChainDesc')}</span>
+        </div>
+      </button>
+      <div class="collapsible-body" id="section-or-fallback">
+        <div class="stat-card" id="or-fallback-section">
+          <div class="chain-card-header">
+            <div></div>
+            <button class="btn btn-primary btn-sm" id="btn-save-or-fallback" style="font-size:10px;padding:3px 10px">${t('common.save')}</button>
+          </div>
+          <div class="chain-list" id="or-model-chain">
+            ${(() => {
+              const orChainEntries = (chain.chain || []).filter(e => e.startsWith('openrouter:'));
+              const orPrimary = orChainEntries.length > 0
+                ? orChainEntries[0].split(':').slice(1).join(':')
+                : (providerModels['openrouter'] || cfg.model || current || '');
+              const fbModels = cfg.fallback_models || [];
+              const allOrModels = [orPrimary, ...fbModels.filter(m => m !== orPrimary)];
+              return allOrModels.map((mid, i) => {
+                const isPrimary = i === 0;
+                const isActive = chain.active && chain.active.startsWith('openrouter:') && chain.active.split(':').slice(1).join(':') === mid;
+                const hasFail = chain.failures ? Object.keys(chain.failures).some(k => k === 'openrouter:' + mid) : false;
+                return '<div class="chain-item" draggable="true" data-model="' + u.escapeHtml(mid) + '">' +
+                  '<span class="grip">⠿</span>' +
+                  '<span class="pos">' + (i + 1) + '</span>' +
+                  '<span class="provider-name" style="text-decoration:none;font-family:ui-monospace,monospace;font-size:11px">' +
+                    (isPrimary ? '<span style="color:#a78bfa;margin-inline-end:4px">★</span>' : '') +
+                    u.escapeHtml(mid) +
+                    (isActive ? '<span style="color:#34d399;margin-inline-start:6px;font-size:9px">' + t('common.activeDot') + '</span>' : '') +
+                    (hasFail ? '<span style="color:rgba(239,68,68,0.5);margin-inline-start:6px;font-size:9px">' + t('common.fail') + '</span>' : '') +
+                  '</span>' +
+                  (i > 0 ? '<button class="or-remove-model" data-model="' + u.escapeHtml(mid) + '" style="background:none;border:none;color:rgba(255,255,255,0.2);cursor:pointer;font-size:14px;padding:0 4px;line-height:1" title="' + t('common.remove') + '">×</button>' : '') +
+                  '</div>';
+              }).join('');
+            })()}
+          </div>
+          <div class="flex gap-2 mt-3">
+            <input id="or-add-model-input" type="text" class="form-input flex-1 font-mono" style="font-size:11px" placeholder="${t('models.addModelPlaceholder')}">
+            <button id="btn-or-add-model" class="btn btn-ghost btn-sm" style="font-size:10px">${t('models.addBtn')}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
   `;
 
-  const capsMap = [
-    { id: 'toggle-enable-responses-skills', key: 'enable_responses_skills' },
-    { id: 'toggle-enable-hosted-shell', key: 'enable_hosted_shell' },
-    { id: 'toggle-enable-container-networking', key: 'enable_container_networking' },
-  ];
-
-  capsMap.forEach(({ id, key }) => {
-    const btn = document.getElementById(id);
-    if (!btn) return;
-    btn.addEventListener('click', () => {
-      const nextVal = !responsesCapabilities[key];
-      responsesCapabilities[key] = nextVal;
-      btn.classList.toggle('on', nextVal);
-      btn.setAttribute('aria-checked', nextVal ? 'true' : 'false');
-
-      if (key === 'enable_hosted_shell' && !nextVal && responsesCapabilities.enable_container_networking) {
-        responsesCapabilities.enable_container_networking = false;
-        const netBtn = document.getElementById('toggle-enable-container-networking');
-        if (netBtn) {
-          netBtn.classList.remove('on');
-          netBtn.setAttribute('aria-checked', 'false');
-        }
-      }
+  // Collapsible section toggles
+  container.querySelectorAll('.collapsible-header').forEach(header => {
+    header.addEventListener('click', () => {
+      const targetId = header.dataset.collapseTarget;
+      const body = document.getElementById(targetId);
+      if (!body) return;
+      const section = header.closest('.collapsible-section');
+      const isOpen = section.classList.toggle('open');
+      body.style.maxHeight = isOpen ? body.scrollHeight + 'px' : '0';
     });
-  });
-
-  document.getElementById('btn-save-responses-capabilities')?.addEventListener('click', async (evt) => {
-    const saveBtn = evt.currentTarget;
-    const payload = {
-      responses_capabilities: {
-        enable_responses_skills: !!responsesCapabilities.enable_responses_skills,
-        enable_hosted_shell: !!responsesCapabilities.enable_hosted_shell,
-        enable_container_networking: !!responsesCapabilities.enable_container_networking,
-      },
-    };
-
-    saveBtn.disabled = true;
-    const oldText = saveBtn.textContent;
-    saveBtn.textContent = t('common.saving');
-
-    try {
-      const resp = await api.put('/api/responses-capabilities', payload);
-      responsesCapabilities = {
-        ...responsesCapabilities,
-        ...((resp && resp.responses_capabilities) || {}),
-      };
-      u.toast(t('models.capabilitiesSaved'));
-    } catch (e) {
-      u.toast(t('models.failedSaveCapabilities', {error: e.message}), 'error');
-    } finally {
-      saveBtn.disabled = false;
-      saveBtn.textContent = oldText;
-    }
   });
 
   // Provider tabs
@@ -534,6 +465,12 @@ async function loadProviderModels(providerId, current, container, u, api) {
   }
 
   section.classList.remove('hidden');
+
+  const orCollapsible = document.getElementById('or-fallback-collapsible');
+  if (orCollapsible) {
+    orCollapsible.style.display = providerId === 'openrouter' ? '' : 'none';
+  }
+
   const title = document.getElementById('provider-keys-title');
   title.textContent = t('models.configFor', { provider: prov?.name || providerId });
   const content = document.getElementById('provider-keys-content');
@@ -681,16 +618,45 @@ function applyFilters(current, container, u, api) {
   renderModels(filtered, current, container, u, api);
 }
 
+let _lastFilteredModels = [];
+let _lastCurrent = '';
+
 function renderModels(models, current, container, u, api) {
+  _lastFilteredModels = models;
+  _lastCurrent = current;
+  modelsVisibleCount = MODELS_PAGE_SIZE;
+  _renderModelPage(models, current, container, u, api);
+}
+
+function _renderModelPage(models, current, container, u, api) {
   const grid = document.getElementById('models-grid');
   const count = document.getElementById('results-count');
+  const moreWrap = document.getElementById('models-show-more-wrap');
   if (!grid) return;
 
   count.textContent = models.length + ' ' + t('models.title').toLowerCase();
 
   if (models.length === 0) {
     grid.innerHTML = '<div class="text-sm text-zinc-600 col-span-3">' + t('models.noModelsMatch') + '</div>';
+    if (moreWrap) moreWrap.style.display = 'none';
     return;
+  }
+
+  const visible = models.slice(0, modelsVisibleCount);
+  const hasMore = models.length > modelsVisibleCount;
+
+  if (moreWrap) {
+    moreWrap.style.display = hasMore ? 'flex' : 'none';
+    const moreBtn = document.getElementById('btn-show-more-models');
+    if (moreBtn) {
+      moreBtn.textContent = t('models.showMore') + ' (' + (models.length - modelsVisibleCount) + ')';
+      const newBtn = moreBtn.cloneNode(true);
+      moreBtn.parentNode.replaceChild(newBtn, moreBtn);
+      newBtn.addEventListener('click', () => {
+        modelsVisibleCount += MODELS_PAGE_SIZE;
+        _renderModelPage(_lastFilteredModels, _lastCurrent, container, u, api);
+      });
+    }
   }
 
   const activeModel = activeTab === 'openrouter'
@@ -704,7 +670,7 @@ function renderModels(models, current, container, u, api) {
     xai: 'red',
   };
 
-  grid.innerHTML = models.map(m => {
+  grid.innerHTML = visible.map(m => {
     const isCurrent = m.id === activeModel;
     const pIn = m.pricing?.prompt_per_m;
     const pOut = m.pricing?.completion_per_m;

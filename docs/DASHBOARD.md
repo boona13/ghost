@@ -1,6 +1,6 @@
 # Ghost Dashboard
 
-The Ghost Dashboard is a web-based control panel for the Ghost daemon. It provides full visibility and control over every aspect of the system — configuration, models, skills, memory, cron jobs, identity, and live monitoring.
+The Ghost Dashboard is a web-based control panel for the Ghost daemon. It provides full visibility and control over every aspect of the system — configuration, models, skills, memory, cron jobs, identity, messaging channels, autonomous growth, self-evolution, and live monitoring.
 
 **URL:** [http://localhost:3333](http://localhost:3333) (default, configurable via `dashboard_port` in config)
 
@@ -8,7 +8,7 @@ The Ghost Dashboard is a web-based control panel for the Ghost daemon. It provid
 
 ### Embedded Mode (Default)
 
-When Ghost starts normally (`python ghost.py start`), the dashboard runs as a background thread in the same process. This gives it **direct access to the live daemon state** — real-time tool counts, skill lists, memory statistics, and instant config hot-reloading.
+When Ghost starts normally (`bash start.sh`), the dashboard runs as a background thread in the same process. This gives it **direct access to the live daemon state** — real-time tool counts, skill lists, memory statistics, and instant config hot-reloading.
 
 The status API returns `"embedded": true` and includes a `live` object with real-time counters.
 
@@ -18,48 +18,71 @@ Running `python ghost.py dashboard` starts the dashboard as a standalone Flask s
 
 The status API returns `"embedded": false` with no `live` data.
 
-## Pages
+## Pages (29)
+
+### Chat
+
+Real-time messaging interface — the primary way users interact with Ghost.
+
+- **Text messaging** with markdown rendering
+- **File attachments** — drag-and-drop or click to attach files and images
+- **Audio transcription** — record voice and transcribe via mic button
+- **Voice Wake / Talk Mode** — toggle always-on voice from the mic button
+- **Tool step streaming** — watch Ghost's tool calls execute in real-time
+- **Inline evolution approvals** — approve/reject code changes without leaving chat
+- **Canvas panel** — side panel showing rich HTML/CSS/JS visual output
+- **Session management** — conversation history with session persistence
 
 ### Overview
 
 Live dashboard showing daemon health and quick controls.
 
-- **Status card** — Running/Paused/Stopped, PID, current model
+- **Status card** — Running/Paused/Stopped, PID, current model, uptime
 - **Controls** — Pause/Resume, Reload Config (embedded only)
 - **Counters** — Today's actions, total actions, uptime
 - **Live stats** (embedded) — Tool count, skill count, memory entries, cron jobs
 - **Feature toggles** — Click to enable/disable features in real-time
 - **Type breakdown** — Bar chart of action types
 - **Recent activity** — Last 5 feed entries
+- **Platform info** — OS, Python version, Ghost version
 
 ### Models
 
-Browse and select from 300+ models fetched live from the OpenRouter API.
+Multi-provider LLM management with fallback chain visualization.
 
-- **Current model** display + custom model input
-- **API key** management (masked display, save new key)
-- **Search** by model name, ID, or description
-- **Filter** by provider (Google, Anthropic, OpenAI, Meta, etc.) and tier (Free, Fast, Standard, Premium)
-- **Model cards** showing name, provider, context length, pricing per million tokens
-- Click any card to switch models instantly
+- **Provider cards** — Configure API keys/OAuth for each provider (OpenRouter, OpenAI, Codex, Anthropic, Gemini, xAI, Ollama)
+- **Fallback chain** — Visual representation of the provider fallback order
+- **Model browser** — Search 200+ models by name, filter by provider and tier
+- **Model cards** — Name, provider, context length, pricing per million tokens
+- **Connection testing** — Test each provider's connectivity
+- Click any model card to switch instantly
 
-Models are cached for 5 minutes. Tier classification is based on pricing:
-- **Free**: $0/M tokens or `:free` suffix
-- **Fast**: < $0.50/M tokens
-- **Standard**: $0.50 – $3.00/M tokens
-- **Premium**: > $3.00/M tokens
+### Skills
+
+Browse, search, and manage all loaded skills plus the GhostHub public registry.
+
+- **Local Skills tab:**
+  - Stats bar — Total (42), Eligible, Disabled, Missing Requirements
+  - Search by name, description, or trigger
+  - Filter — All / Eligible / Disabled / Missing Requirements
+  - Grouped by source (Bundled, User, Other)
+  - Skill cards with enable/disable toggle, status badges, triggers, tools, requirements
+  - Detail modal — view/edit SKILL.md content, set model override
+- **GhostHub Registry tab:**
+  - Search the public registry
+  - Browse community skills with one-click install
+  - Registry stats (skill count, tags, authors)
 
 ### Configuration
 
-Full control over every Ghost setting.
+Full control over every Ghost setting with hot-reload.
 
-- **General settings** — poll_interval, min_length, rate_limit_seconds, max_input_chars, max_feed_items, tool_loop_max_steps
-- **Feature toggles** — enable_tool_loop, enable_memory_db, enable_plugins, enable_skills, enable_system_tools, enable_browser_tools, enable_cron
-- **Allowed commands** — Whitelist of shell commands the LLM can execute
-- **Allowed roots** — Directory whitelist for file operations
-- **Save / Reset to Defaults** buttons
-
-Changes are saved to `~/.ghost/config.json` and hot-reloaded into the running daemon.
+- **General settings** — poll_interval, rate limits, tool_loop_max_steps, max_input_chars
+- **Feature toggles** — tool_loop, memory, skills, browser, cron, evolve, growth, voice, canvas, integrations
+- **Growth schedules** — Configure intervals for each autonomous routine
+- **Voice controls** — Wake word, STT provider, TTS provider, voice sensitivity
+- **Security** — Allowed commands, allowed roots
+- **Save / Reset to Defaults**
 
 ### Soul (SOUL.md)
 
@@ -67,51 +90,16 @@ Editor for the agent personality file.
 
 - Full-text editor with syntax highlighting
 - Character count
-- Save and Reset to Default buttons
-- Changes take effect on the daemon's next action (mtime-based cache)
+- Save and Reset buttons
+- Changes take effect on the daemon's next action
 
 ### User Profile (USER.md)
 
-Editor for the user profile file.
+Editor for the user profile.
 
 - **Quick Set** form for common fields (Name, "Call me", Pronouns, Timezone)
 - Full-text editor for complete USER.md
-- Save and Reset to Default buttons
-
-### Skills
-
-Browse, search, and manage all loaded skills.
-
-- **Stats bar** — Total, Eligible, Disabled, Missing Requirements
-- **Search** by skill name, description, or trigger keywords
-- **Filter** — All / Eligible / Disabled / Missing Requirements
-- **Grouped** by source (Bundled, User, Other)
-- **Skill cards** showing:
-  - Name, priority, description
-  - Enable/disable toggle
-  - Status badges (eligible, disabled, missing bins/env)
-  - Trigger keywords
-  - Required tools
-  - Binary requirements with ✓/✗ status
-  - Environment variable requirements with ✓/✗ status
-- **Detail panel** — Click a skill to view/edit its full SKILL.md content
-
-### Cron Jobs
-
-Create and manage scheduled tasks.
-
-- **Stats** — Total jobs, enabled count, next wake time
-- **Create job** form:
-  - Name, description
-  - Schedule type: Every (interval), Cron (expression), At (one-shot)
-  - Task type: AI Task (prompt), Notification, Shell command
-  - Delete after run option
-- **Job list** showing:
-  - Enable/disable toggle
-  - Schedule description (human-readable)
-  - Next run / Last run times
-  - Last status and errors
-  - Run Now / Delete buttons
+- Save and Reset buttons
 
 ### Memory
 
@@ -119,30 +107,185 @@ Browse and search the persistent memory database.
 
 - **Stats** — Total entries, total tokens, type breakdown
 - **Search** — Full-text search across all memory entries
-- **Recent** — Last 20 memory entries with delete buttons
+- **Recent** — Latest memory entries with delete buttons
 - **Prune** — Remove old entries, keeping the N most recent
+- **Semantic search** — Vector similarity search (when hybrid memory enabled)
 
 ### Activity Feed
 
 Live feed of Ghost's actions, auto-refreshing every 5 seconds.
 
-- **Type filters** — Click type badges to filter
-- **Entry cards** showing:
-  - Type icon and badge
-  - Skill name (if applicable)
-  - Tools used count
-  - Relative timestamp
-  - Source preview
-  - Result preview
-  - Fix command (for errors)
+- Type filters — Click type badges to filter
+- Entry cards with type icon, skill name, tools used, timestamp, source/result preview
 
-### Logs
+### Console
 
-Full action history with filtering.
+Real-time SSE event stream showing everything Ghost does internally.
 
-- **Type filter** dropdown
-- **Limit** selector (20 / 50 / 100 / 500)
-- **Table** with columns: Time, Type, Input, Output
+- **Category filters** — Filter by event type (tool calls, LLM, cron, evolve, etc.)
+- **Search** — Full-text search across events
+- **Pause/Resume** — Pause the stream while investigating
+- **Export** — Download console output
+
+### Cron Jobs
+
+Create and manage scheduled tasks.
+
+- **Stats** — Total jobs, enabled count, next wake time
+- **Create job** form with schedule type (Every/Cron/At) and task type (AI Task/Notification/Shell)
+- **Job list** — Enable/disable, schedule description, next/last run, status, Run Now / Delete
+
+### Autonomy
+
+Autonomous growth monitoring and action items.
+
+- **Action items** — Things needing user attention (API keys, approvals, config changes)
+- **Growth routines** — Status of each autonomous routine with last run, next run, errors
+- **Growth log** — History of autonomous improvements
+- **Crash reports** — Self-repair history
+
+### Evolution
+
+Self-modification history and controls.
+
+- **Evolution history** — Every code change with diffs, status, timestamps
+- **Approve/Reject** — Pending evolution changes
+- **Rollback** — Revert specific changes
+- **Branch viewer** — Current evolution branch state
+
+### Future Features
+
+Prioritized backlog for autonomous implementation.
+
+- **Feature list** — Pending, in-progress, completed, failed features with priority (P0-P3)
+- **Add feature** — Submit new features with priority and category
+- **Approve/Reject** — Control which features Ghost implements
+- **Stats** — Feature counts by status and category
+- **Filters** — By status, priority, category, source
+
+### Channels
+
+Configure and manage 20+ messaging channels.
+
+- **Channel cards** — Status, message counts, health indicators
+- **Configure** — Per-channel settings, API keys, webhook URLs
+- **Enable/Disable** — Toggle channels on/off
+- **Test** — Send test messages
+- **Onboarding wizards** — Step-by-step setup for each channel
+- **Health monitoring** — Connection status, error rates, last message time
+
+### Integrations
+
+Third-party service configuration.
+
+- **Google Workspace** — OAuth 2.0 flow for Gmail, Calendar, Drive, Docs, Sheets
+- **Web search providers** — Configure Perplexity, Brave, etc.
+- **Image generation** — Provider settings
+- **Vision** — Provider configuration
+- **TTS** — Provider and voice settings
+- **Langfuse** — Observability configuration
+
+### Security
+
+AI-driven security auditing.
+
+- **Run audit** — Trigger a security scan with real-time streaming output
+- **Audit history** — Past scan results and findings
+- **Auto-fix** — One-click remediation for common issues
+
+### Accounts
+
+Credential management.
+
+- **Saved credentials** — View, add, delete service credentials
+- **Organized by service** — Each integration's stored credentials
+
+### Setup
+
+Multi-provider setup wizard.
+
+- **Provider selection** — Choose which LLM providers to configure
+- **API key entry** — Guided configuration for each provider
+- **Connection testing** — Verify each provider works
+- **Fallback chain** — Configure provider priority order
+- **Setup Doctor** — Automated preflight checks and fixes
+
+### Projects
+
+Project management.
+
+- **Project list** — Active projects with context
+- **Create/Update** — Manage project definitions
+- **Context switching** — Switch Ghost's active project context
+
+### PRs
+
+Internal pull request management.
+
+- **PR list** — Evolution PRs with status
+- **Review** — View diffs, comments, approve/reject
+- **History** — Past PR decisions
+
+### Nodes
+
+GhostNode management.
+
+- **Node list** — 23 AI capability nodes with status
+- **GPU status** — VRAM usage, loaded models
+- **Node details** — Configuration, health, usage stats
+
+### Gallery (Media)
+
+Media gallery for generated content.
+
+- **Browse** — Generated images, audio, video
+- **Search** — Find media by metadata
+- **Manage** — Delete, organize generated content
+
+### Doctor
+
+Health diagnostics.
+
+- **System checks** — API connectivity, disk space, dependencies
+- **Repair** — Fix common issues
+- **Recommendations** — Improvement suggestions
+
+### Langfuse
+
+Observability and tracing.
+
+- **Trace viewer** — LLM call traces with token counts and latency
+- **Configuration** — Langfuse connection settings
+
+### Pairing
+
+Device authentication and linking.
+
+- **Pair device** — Link new devices to Ghost
+- **Manage devices** — View and revoke paired devices
+
+### Usage
+
+Usage tracking and statistics.
+
+- **Token usage** — Per-provider token consumption
+- **Cost tracking** — Estimated costs per provider
+- **Trends** — Usage over time
+
+### Audit
+
+Security and configuration audit log.
+
+- **Event log** — All security-relevant events
+- **Filters** — By event type, time range
+- **Export** — Download audit data
+
+### Browser Use
+
+Extended browser automation interface.
+
+- **Live browser** — View browser state
+- **Action history** — Past browser interactions
 
 ---
 
@@ -156,7 +299,6 @@ All endpoints return JSON. The base URL is `http://localhost:3333`.
 
 Returns daemon status, stats, and platform info.
 
-**Response:**
 ```json
 {
   "running": true,
@@ -170,27 +312,39 @@ Returns daemon status, stats, and platform info.
   "type_breakdown": {"code": 30, "url": 25, "error": 15, "long_text": 80},
   "model": "google/gemini-2.0-flash-001",
   "features": {
-    "tool_loop": true,
-    "memory": true,
-    "skills": true,
-    "plugins": true,
-    "browser": true,
-    "cron": true
+    "tool_loop": true, "memory": true, "skills": true,
+    "plugins": true, "browser": true, "cron": true,
+    "evolve": true, "growth": true, "voice": true,
+    "canvas": true, "integrations": true
   },
   "live": {
-    "tools": 18,
-    "tool_names": ["shell_exec", "file_read", "..."],
-    "skills": 25,
-    "memory_entries": 150,
-    "cron_jobs": 3,
-    "cron_enabled": 2
-  },
-  "soul_exists": true,
-  "user_exists": true
+    "tools": 60,
+    "skills": 42,
+    "memory_entries": 500,
+    "cron_jobs": 12,
+    "cron_enabled": 10
+  }
 }
 ```
 
-The `live` field is only present in embedded mode. `uptime_seconds` is only present in embedded mode.
+---
+
+### Chat
+
+#### `POST /api/chat`
+
+Send a message to Ghost via the dashboard chat.
+
+**Request:**
+```json
+{
+  "message": "What's the weather in NYC?",
+  "session_id": "abc123",
+  "attachments": []
+}
+```
+
+**Response:** Server-sent events stream with tool calls, intermediate results, and final text response.
 
 ---
 
@@ -198,35 +352,13 @@ The `live` field is only present in embedded mode. `uptime_seconds` is only pres
 
 #### `GET /api/config`
 
-Returns the current configuration and defaults.
-
-**Response:**
-```json
-{
-  "config": { "model": "...", "poll_interval": 0.5, "..." },
-  "defaults": { "model": "google/gemini-2.0-flash-001", "..." }
-}
-```
+Returns current configuration and defaults.
 
 #### `PUT /api/config`
 
-Updates configuration keys. Merges with existing config, saves to disk, and hot-reloads into the running daemon.
+Updates configuration keys. Merges with existing, saves to disk, hot-reloads.
 
-**Request:**
-```json
-{
-  "poll_interval": 1.0,
-  "enable_skills": false
-}
-```
-
-**Response:**
-```json
-{
-  "ok": true,
-  "config": { "..." }
-}
-```
+**Request:** `{"poll_interval": 1.0, "enable_skills": false}`
 
 ---
 
@@ -234,100 +366,23 @@ Updates configuration keys. Merges with existing config, saves to disk, and hot-
 
 #### `GET /api/models`
 
-Fetches available models from the OpenRouter API (cached 5 minutes).
-
-**Response:**
-```json
-{
-  "current": "google/gemini-2.0-flash-001",
-  "models": [
-    {
-      "id": "google/gemini-2.0-flash-001",
-      "name": "Gemini 2.0 Flash",
-      "provider": "Google",
-      "tier": "fast",
-      "context_length": 1048576,
-      "modality": "text+image->text",
-      "pricing": {
-        "prompt_per_m": 0.10,
-        "completion_per_m": 0.40
-      },
-      "description": "Fast and efficient model..."
-    }
-  ],
-  "total": 337,
-  "has_api_key": true,
-  "api_key_masked": "sk-or-v1...abcd"
-}
-```
+Fetches available models from configured providers (cached 5 minutes).
 
 #### `PUT /api/models`
 
-Sets the active model and/or API key.
-
-**Request:**
-```json
-{
-  "model": "anthropic/claude-3.5-sonnet",
-  "api_key": "sk-or-v1-..."
-}
-```
-
-Both fields are optional. If embedded, the model change takes effect immediately on the running daemon.
-
-**Response:**
-```json
-{
-  "ok": true,
-  "model": "anthropic/claude-3.5-sonnet"
-}
-```
+Sets active model and/or API key. `{"model": "...", "api_key": "..."}`
 
 ---
 
 ### Identity
 
-#### `GET /api/soul`
+#### `GET /api/soul` / `PUT /api/soul` / `POST /api/soul/reset`
 
-**Response:**
-```json
-{
-  "content": "# Ghost Soul\n\nYou are Ghost...",
-  "path": "/Users/you/project/SOUL.md"
-}
-```
+Read, update, or reset SOUL.md.
 
-#### `PUT /api/soul`
+#### `GET /api/user` / `PUT /api/user` / `POST /api/user/reset`
 
-**Request:** `{"content": "new soul content"}`
-**Response:** `{"ok": true, "chars": 1500}`
-
-#### `POST /api/soul/reset`
-
-Resets SOUL.md to the default content.
-
-**Response:** `{"ok": true, "content": "# Ghost Soul\n..."}`
-
-#### `GET /api/user`
-
-**Response:**
-```json
-{
-  "content": "# About the User\n\n**Name:** Alice...",
-  "path": "/Users/you/project/USER.md"
-}
-```
-
-#### `PUT /api/user`
-
-**Request:** `{"content": "new user content"}`
-**Response:** `{"ok": true, "chars": 500}`
-
-#### `POST /api/user/reset`
-
-Resets USER.md to the default content (includes current OS).
-
-**Response:** `{"ok": true, "content": "# About the User\n..."}`
+Read, update, or reset USER.md.
 
 ---
 
@@ -337,278 +392,140 @@ Resets USER.md to the default content (includes current OS).
 
 Lists all skills grouped by source with full status.
 
-**Response:**
-```json
-{
-  "groups": {
-    "bundled": [
-      {
-        "name": "browser",
-        "description": "Browser automation for web tasks",
-        "triggers": ["browse", "website", "url"],
-        "tools": ["browser"],
-        "priority": 5,
-        "os_filter": null,
-        "path": "/path/to/skills/browser/SKILL.md",
-        "source": "bundled",
-        "disabled": false,
-        "eligible": true,
-        "os_ok": true,
-        "requirements": {"bins": ["playwright"], "env": []},
-        "missing": {"bins": [], "env": []}
-      }
-    ],
-    "user": [],
-    "other": []
-  },
-  "stats": {"total": 25, "eligible": 20, "disabled": 2, "missing_reqs": 3},
-  "bundled_dir": "/path/to/skills",
-  "user_dir": "/Users/you/.ghost/skills"
-}
-```
+#### `GET /api/skills/<name>` / `PUT /api/skills/<name>`
 
-#### `GET /api/skills/<name>`
+Get or update a specific skill (content, enabled state, model override).
 
-Returns full skill detail including file content.
+#### `GET /api/skills/model-options`
 
-**Response:** Same as list item, plus `"content": "---\nname: browser\n..."`.
+Available model aliases and providers for skill model override.
 
-#### `PUT /api/skills/<name>`
+#### Registry Endpoints
 
-Update skill content and/or enabled state.
-
-**Request:**
-```json
-{
-  "content": "---\nname: my-skill\n...",
-  "enabled": true
-}
-```
-
-Both fields optional. Content writes to the SKILL.md file and triggers a skill reload. Enabled state updates `disabled_skills` in config.
-
-**Response:** `{"ok": true}`
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/skills/registry/search?q=...` | GET | Search registry skills |
+| `/api/skills/registry/<name>` | GET | Get a registry skill |
+| `/api/skills/registry/<name>/install` | POST | Install a registry skill |
+| `/api/skills/registry/stats` | GET | Registry statistics |
+| `/api/skills/registry/refresh` | POST | Force refresh registry cache |
 
 ---
 
 ### Cron Jobs
 
-#### `GET /api/cron/jobs`
+#### `GET /api/cron/jobs` / `POST /api/cron/jobs`
 
-**Response:**
-```json
-{
-  "jobs": [
-    {
-      "id": "abc123",
-      "name": "Daily Summary",
-      "description": "Summarize the day's activity",
-      "enabled": true,
-      "deleteAfterRun": false,
-      "schedule": {"kind": "cron", "expr": "0 18 * * *"},
-      "schedule_human": "Every day at 6:00 PM",
-      "payload": {"type": "task", "prompt": "Summarize today's actions"},
-      "next_run": "2026-02-24 18:00:00",
-      "last_run": "2026-02-23 18:00:00",
-      "last_status": "ok",
-      "last_error": null,
-      "last_duration_ms": 1250,
-      "consecutive_errors": 0
-    }
-  ]
-}
-```
+List or create cron jobs.
 
-#### `POST /api/cron/jobs`
+#### `PUT /api/cron/jobs/<id>` / `DELETE /api/cron/jobs/<id>`
 
-Create a new cron job.
+Update or delete a job.
 
-**Request:**
-```json
-{
-  "name": "Health Check",
-  "schedule_type": "every",
-  "interval_seconds": 3600,
-  "task_type": "task",
-  "task": "Check system health and notify if issues",
-  "description": "Hourly health check",
-  "delete_after_run": false
-}
-```
-
-Schedule types and their required fields:
-- `"every"` → `interval_seconds` (number)
-- `"cron"` → `cron_expr` (string, e.g. `"0 9 * * *"`)
-- `"at"` → `run_at` (ISO datetime string)
-
-Task types:
-- `"task"` → Runs prompt through tool loop
-- `"notify"` → Sends system notification
-- `"shell"` → Executes shell command
-
-**Response:** `{"ok": true, "job": {...}}` (status 201)
-
-#### `PUT /api/cron/jobs/<job_id>`
-
-Update a job. Send `{"enabled": false}` to disable, or other fields to update.
-
-**Response:** `{"ok": true}`
-
-#### `DELETE /api/cron/jobs/<job_id>`
-
-**Response:** `{"ok": true}`
-
-#### `POST /api/cron/jobs/<job_id>/run`
+#### `POST /api/cron/jobs/<id>/run`
 
 Trigger immediate execution.
 
-**Response:** `{"ok": true, "message": "Job queued"}`
-
 #### `GET /api/cron/status`
 
-**Response:**
-```json
-{
-  "running": true,
-  "total_jobs": 3,
-  "enabled_jobs": 2,
-  "executing": [],
-  "next_wake_ms": 1708765200000,
-  "next_wake": "2026-02-24 18:00:00"
-}
-```
+Scheduler status (running, job counts, next wake).
 
 ---
 
 ### Memory
 
 #### `GET /api/memory/stats`
-
-**Response:**
-```json
-{
-  "total": 150,
-  "total_tokens": 45000,
-  "by_type": {"analysis": 50, "code": 30, "error": 20, "note": 10, "long_text": 40}
-}
-```
-
 #### `GET /api/memory/search?q=<query>&limit=<n>`
-
-Full-text search using FTS5. Default limit: 50.
-
-**Response:**
-```json
-{
-  "results": [
-    {
-      "id": 42,
-      "timestamp": "2026-02-24T10:30:00",
-      "type": "code",
-      "content": "This function implements...",
-      "source_preview": "def calculate_shipping...",
-      "tags": "code-reviewer",
-      "skill": "code-reviewer",
-      "tools_used": "file_read,shell_exec",
-      "rank": -2.5
-    }
-  ],
-  "query": "shipping function"
-}
-```
-
 #### `GET /api/memory/recent?limit=<n>`
-
-Returns the most recent entries. Default limit: 20.
-
-**Response:** `{"results": [...]}`
-
 #### `DELETE /api/memory/<id>`
-
-Delete a single memory entry.
-
-**Response:** `{"ok": true}`
-
 #### `POST /api/memory/prune`
-
-Remove old entries, keeping the N most recent.
-
-**Request:** `{"keep": 1000}`
-
-**Response:** `{"ok": true, "stats": {"total": 1000, "..."}}`
 
 ---
 
 ### Activity Feed & Logs
 
 #### `GET /api/feed`
-
-Returns the activity feed (most recent first, up to 50 entries).
-
-**Response:**
-```json
-{
-  "entries": [
-    {
-      "time": "2026-02-24T10:30:00",
-      "type": "code",
-      "source": "def calculate_shipping(weight)...",
-      "result": "This function calculates shipping cost...",
-      "skill": "code-reviewer",
-      "tools_used": ["file_read"],
-      "fix_command": null
-    }
-  ]
-}
-```
-
 #### `GET /api/logs?limit=<n>`
-
-Returns action log entries (most recent first). Default limit: 100.
-
-**Response:**
-```json
-{
-  "entries": [
-    {
-      "time": "2026-02-24T10:30:00",
-      "type": "code",
-      "input": "def calculate_shipping...",
-      "output": "This function calculates..."
-    }
-  ]
-}
-```
 
 ---
 
 ### Daemon Control
 
-#### `POST /api/ghost/pause`
-
-Pauses clipboard watching. The daemon continues running but skips processing.
-
-**Response:** `{"ok": true, "paused": true}`
-
-#### `POST /api/ghost/resume`
-
-Resumes clipboard watching.
-
-**Response:** `{"ok": true, "paused": false}`
-
+#### `POST /api/ghost/pause` / `POST /api/ghost/resume`
 #### `POST /api/ghost/reload`
 
-Hot-reloads configuration into the running daemon (embedded mode only). Updates config, model references, and reloads skills.
+---
 
-**Response:**
-```json
-{
-  "ok": true,
-  "reloaded": true
-}
-```
+### Evolution
 
-In standalone mode: `{"ok": true, "reloaded": false, "note": "standalone mode"}`
+#### `GET /api/evolve/history`
+#### `POST /api/evolve/approve/<id>` / `POST /api/evolve/reject/<id>`
+#### `POST /api/evolve/rollback/<id>`
+
+---
+
+### Future Features
+
+#### `GET /api/future-features`
+#### `POST /api/future-features`
+#### `PUT /api/future-features/<id>`
+#### `POST /api/future-features/<id>/approve` / `POST /api/future-features/<id>/reject`
+
+---
+
+### Channels
+
+#### `GET /api/channels`
+#### `GET /api/channels/<id>` / `PUT /api/channels/<id>`
+#### `POST /api/channels/<id>/test`
+
+---
+
+### Autonomy
+
+#### `GET /api/autonomy/status`
+#### `GET /api/autonomy/action-items`
+#### `GET /api/autonomy/growth-log`
+
+---
+
+### Webhooks
+
+#### `GET /api/webhooks`
+#### `POST /api/webhooks` / `DELETE /api/webhooks/<id>`
+#### `POST /api/webhooks/<id>/test`
+
+---
+
+### Nodes
+
+#### `GET /api/nodes`
+#### `GET /api/nodes/<id>`
+#### `GET /api/nodes/gpu-status`
+
+---
+
+### Security
+
+#### `POST /api/security/audit`
+#### `GET /api/security/audit/history`
+
+---
+
+### Other Endpoints
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/console/stream` | SSE event stream |
+| `GET /api/usage` | Token usage statistics |
+| `GET /api/doctor` | Health diagnostics |
+| `GET /api/projects` | Project list |
+| `GET /api/media` | Media gallery |
+| `GET /api/audit` | Audit log |
+| `GET /api/langfuse` | Observability config |
+| `POST /api/pairing` | Device pairing |
+| `GET /api/accounts` | Credential management |
+| `GET /api/voice/status` | Voice mode status |
 
 ---
 
@@ -618,11 +535,12 @@ The dashboard is a single-page application with no build step.
 
 ### Tech Stack
 - **HTML**: Single `index.html` template with sidebar + content area
-- **CSS**: Tailwind CSS (CDN) + custom `dashboard.css`
+- **CSS**: Tailwind CSS (CDN) + custom `dashboard.css` (dark theme)
 - **JS**: Vanilla ES modules, no framework
+- **i18n**: 4 languages (English, Arabic, Chinese, Brazilian Portuguese)
 
 ### Routing
-Hash-based routing (`#overview`, `#models`, `#skills`, etc.). The `app.js` module maps hash segments to page modules and calls their `render(container)` function.
+Hash-based routing (`#chat`, `#overview`, `#models`, `#skills`, etc.). The `app.js` module maps hash segments to page modules and calls their `render(container)` function.
 
 ### Page Modules
 Each page in `static/js/pages/` exports a single `async render(container)` function that:
@@ -633,4 +551,6 @@ Each page in `static/js/pages/` exports a single `async render(container)` funct
 
 ### Real-time Updates
 - Sidebar status dot polls `GET /api/status` every 5 seconds
-- Activity Feed page auto-refreshes every 5 seconds when active
+- Chat uses SSE for streaming responses
+- Console page uses SSE for real-time events
+- Activity Feed auto-refreshes every 5 seconds when active

@@ -1,44 +1,42 @@
 # Ghost Configuration
 
-Ghost stores its configuration at `~/.ghost/config.json`. Every setting can be changed through:
+Ghost stores configuration in `~/.ghost/config.json`. All settings can be changed from the dashboard with hot-reload (no restart needed), via the API, or by editing the file directly.
 
-1. **Web Dashboard** — Configuration page at [http://localhost:3333/#config](http://localhost:3333/#config)
-2. **Direct edit** — Edit `~/.ghost/config.json` with any text editor
-3. **API** — `PUT /api/config` with a JSON body
+## Configuration Keys
 
-Changes made via the dashboard or API are hot-reloaded into the running daemon instantly.
-
-## Configuration Reference
-
-### Model & API
+### Core
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `model` | string | `"google/gemini-2.0-flash-001"` | OpenRouter model ID. Browse available models at the dashboard's Models page or [openrouter.ai/models](https://openrouter.ai/models). |
-| `api_key` | string | `""` | OpenRouter API key. Can also be set via `OPENROUTER_API_KEY` environment variable (takes precedence). |
-
-### Polling & Rate Limits
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `poll_interval` | float | `0.5` | How often to check the clipboard, in seconds. Lower = more responsive, higher = less CPU. |
-| `min_length` | int | `30` | Minimum character length for text to be processed. Text shorter than this is skipped. |
-| `rate_limit_seconds` | int | `3` | Minimum seconds between processing actions. Prevents rapid-fire API calls when pasting repeatedly. |
-| `max_input_chars` | int | `4000` | Maximum characters sent to the LLM per request. Longer text is truncated. |
-| `max_feed_items` | int | `50` | Maximum entries kept in the activity feed (`feed.json`). Oldest are removed when exceeded. |
+| `model` | string | `"google/gemini-2.0-flash-001"` | LLM model ID (provider/model format). |
+| `poll_interval` | float | `0.5` | How often the daemon checks for new inputs (seconds). |
+| `min_length` | int | `30` | Minimum input length to process. Shorter inputs are ignored. |
+| `rate_limit_seconds` | int | `3` | Minimum seconds between processing two inputs. Prevents rapid-fire. |
+| `max_input_chars` | int | `4000` | Maximum characters accepted per input. Longer inputs are truncated. |
+| `max_feed_items` | int | `50` | Number of feed entries to keep in `feed.json`. Older entries are pruned. |
 
 ### Feature Toggles
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `enable_tool_loop` | bool | `true` | Enable multi-turn tool use. When `true`, Ghost can call tools and iterate. When `false`, falls back to single-shot LLM calls with no tool access. |
-| `tool_loop_max_steps` | int | `40` | Maximum iterations in the tool loop. Prevents runaway tool chains. The LLM usually finishes in 1-5 steps. |
-| `enable_memory_db` | bool | `true` | Enable persistent memory. When `true`, every action is saved to `~/.ghost/memory.db` and the LLM can search/save memories. |
-| `enable_plugins` | bool | `true` | Enable the plugin system. Plugins can register hooks, tools, and modify behavior. |
-| `enable_skills` | bool | `true` | Enable skill matching. When `true`, clipboard content is matched against SKILL.md files and matching instructions are injected into the system prompt. |
-| `enable_system_tools` | bool | `true` | Enable built-in system tools (shell_exec, file_read, file_write, etc.). |
-| `enable_browser_tools` | bool | `true` | Enable browser automation tool. Requires Playwright. |
+| `enable_tool_loop` | bool | `true` | Enable multi-turn tool execution. If `false`, Ghost uses single-shot LLM calls without tools. |
+| `tool_loop_max_steps` | int | `40` | Maximum tool-loop iterations per task. Prevents infinite loops. |
+| `enable_memory_db` | bool | `true` | Enable persistent SQLite memory. |
+| `enable_plugins` | bool | `true` | Enable the plugin system. |
+| `enable_skills` | bool | `true` | Enable the skill matching system. |
+| `enable_system_tools` | bool | `true` | Enable core system tools (shell_exec, file_read, etc.). |
+| `enable_browser_tools` | bool | `true` | Enable browser automation. Requires Playwright. |
 | `enable_cron` | bool | `true` | Enable the cron scheduler for scheduled tasks. |
+| `enable_evolve` | bool | `true` | Allow self-modification via the evolution engine. |
+| `evolve_auto_approve` | bool | `false` | Skip approval for evolution changes (user approval required if false). |
+| `enable_growth` | bool | `true` | Enable autonomous improvement routines. |
+| `enable_voice` | bool | `true` | Enable Voice Wake + Talk Mode. |
+| `enable_canvas` | bool | `true` | Enable the Canvas visual output panel. |
+| `enable_integrations` | bool | `true` | Enable Google Workspace and third-party integrations. |
+| `enable_webhooks` | bool | `true` | Enable webhook triggers for event-driven automation. |
+| `enable_skill_registry` | bool | `true` | Enable the GhostHub public skill registry. |
+| `enable_channels` | bool | `true` | Enable multi-channel messaging. |
+| `enable_nodes` | bool | `true` | Enable GhostNodes (local AI capabilities). |
 
 ### Security
 
@@ -51,16 +49,21 @@ Changes made via the dashboard or API are hot-reloaded into the running daemon i
 
 ```json
 [
-  "ls", "pwd", "echo", "date", "cat", "head", "tail", "wc",
-  "grep", "find", "which", "whoami", "uname", "df", "du",
+  "ls", "pwd", "cd", "echo", "date", "cat", "head", "tail", "wc",
+  "grep", "find", "which", "whoami", "hostname", "uname",
+  "df", "du", "uptime", "env",
   "mv", "cp", "mkdir", "rm", "rmdir", "touch", "chmod", "chown",
-  "ln", "open", "sort", "uniq", "awk", "sed", "tr", "cut",
-  "xargs", "tee", "diff", "zip", "unzip", "tar", "gzip",
-  "python3", "python", "node", "pip", "npm", "brew",
-  "git", "curl", "wget", "ssh", "scp", "rsync",
-  "ps", "kill", "top", "lsof", "stat", "file", "md5", "shasum",
-  "pbcopy", "pbpaste", "say", "defaults", "sw_vers",
-  "jq", "rg", "fd", "bat", "exa"
+  "ln", "stat", "file", "tree",
+  "sort", "uniq", "awk", "sed", "tr", "cut", "diff", "patch",
+  "xargs", "tee",
+  "zip", "unzip", "tar", "gzip", "bzip2", "xz",
+  "python3", "python", "node", "npm", "npx", "pip", "pip3",
+  "git", "make", "cmake",
+  "curl", "wget", "ssh", "scp", "rsync", "ping", "dig",
+  "ps", "kill", "sleep",
+  "md5", "shasum", "base64", "openssl",
+  "sqlite3", "jq", "rg", "fd", "bat", "exa", "eza",
+  "open", "pbcopy", "pbpaste", "say", "defaults", "sw_vers"
 ]
 ```
 
@@ -75,29 +78,73 @@ Changes made via the dashboard or API are hot-reloaded into the running daemon i
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `disabled_skills` | list | `[]` | List of skill names to exclude from matching. Managed via the dashboard's Skills page. |
+| `skill_model_overrides` | dict | `{}` | Per-skill model overrides. Keys are skill names, values are model IDs. |
+
+### Growth & Autonomy
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `growth_schedules` | dict | *(defaults)* | Interval overrides for each autonomous growth routine. Keys are routine names, values are cron expressions or intervals. |
+| `max_evolutions_per_hour` | int | `3` | Rate limit for self-modification. |
+
+### Voice
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `voice_wake_word` | string | `"ghost"` | Wake word for Voice Wake mode. |
+| `voice_stt_provider` | string | `"moonshine"` | Speech-to-text provider (moonshine, openai, groq, vosk). |
+| `voice_tts_provider` | string | `"edge"` | Text-to-speech provider (edge, openai, elevenlabs). |
+| `voice_tts_voice` | string | `"en-US-AriaNeural"` | TTS voice ID. |
+| `voice_sensitivity` | float | `0.5` | Wake word detection sensitivity (0.0-1.0). |
+
+### Channels
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `channels` | dict | `{}` | Per-channel configuration. Managed via the Channels dashboard page. |
+| `default_alert_channels` | list | `[]` | Channels that receive system alerts and notifications. |
 
 ## Environment Variables
 
 | Variable | Description |
 |---|---|
 | `OPENROUTER_API_KEY` | OpenRouter API key. Overrides `api_key` in config. |
+| `OPENAI_API_KEY` | OpenAI direct API key. |
+| `ANTHROPIC_API_KEY` | Anthropic direct API key. |
+| `GOOGLE_API_KEY` | Google Gemini API key. |
+| `XAI_API_KEY` | xAI/Grok API key. |
+| `DEEPSEEK_API_KEY` | DeepSeek API key. |
+| `ELEVENLABS_API_KEY` | ElevenLabs TTS API key. |
+| `LANGFUSE_PUBLIC_KEY` | Langfuse observability public key. |
+| `LANGFUSE_SECRET_KEY` | Langfuse observability secret key. |
 
 ## File Locations
 
 | Path | Description |
 |---|---|
 | `~/.ghost/config.json` | Main configuration file |
+| `~/.ghost/auth_profiles.json` | Provider API keys and OAuth tokens |
 | `~/.ghost/log.json` | Action history (last 500 entries) |
 | `~/.ghost/feed.json` | Activity feed (last 50 entries) |
 | `~/.ghost/ghost.pid` | Running daemon PID |
 | `~/.ghost/memory.db` | SQLite persistent memory database |
-| `~/.ghost/paused` | Pause flag (file presence = paused) |
-| `~/.ghost/own_copy` | Own-copy flag (skip own clipboard writes) |
-| `~/.ghost/action.json` | Panel-to-daemon communication |
-| `~/.ghost/screenshots/` | Processed screenshot storage |
+| `~/.ghost/future_features.json` | Evolution backlog |
+| `~/.ghost/action_items.json` | User action items |
+| `~/.ghost/growth_log.json` | Autonomous growth history |
+| `~/.ghost/integrations.json` | Google OAuth tokens |
+| `~/.ghost/channels.json` | Channel configurations |
 | `~/.ghost/cron/jobs.json` | Cron job definitions |
-| `~/.ghost/skills/` | User-created skills directory |
-| `~/.ghost/plugins/` | User plugins directory |
+| `~/.ghost/evolve/backups/` | Project backups before self-modifications |
+| `~/.ghost/audio/` | Generated TTS audio files |
+| `~/.ghost/voice/` | Voice capture and STT models |
+| `~/.ghost/canvas/` | Canvas session files |
+| `~/.ghost/generated_images/` | AI-generated images |
+| `~/.ghost/memory/sessions/` | Session summaries |
+| `~/.ghost/skill_registry/` | GhostHub registry cache |
+| `~/.ghost/skills/` | User-created and registry-installed skills |
+| `~/.ghost/plugins/` | User plugins |
+| `~/.ghost/screenshots/` | Processed screenshots |
+| `~/.ghost/state_backups/` | State file backups from repair |
 | `<project>/SOUL.md` | Agent personality definition |
 | `<project>/USER.md` | User profile for personalization |
 
@@ -121,36 +168,36 @@ The full default configuration:
   "enable_system_tools": true,
   "enable_browser_tools": true,
   "enable_cron": true,
+  "enable_evolve": true,
+  "evolve_auto_approve": false,
+  "enable_growth": true,
+  "enable_voice": true,
+  "enable_canvas": true,
+  "enable_integrations": true,
+  "enable_webhooks": true,
+  "enable_skill_registry": true,
+  "enable_channels": true,
+  "enable_nodes": true,
   "allowed_commands": [
-    "ls", "pwd", "echo", "date", "cat", "head", "tail", "wc",
-    "grep", "find", "which", "whoami", "uname", "df", "du",
+    "ls", "pwd", "cd", "echo", "date", "cat", "head", "tail", "wc",
+    "grep", "find", "which", "whoami", "hostname", "uname",
+    "df", "du", "uptime", "env",
     "mv", "cp", "mkdir", "rm", "rmdir", "touch", "chmod", "chown",
-    "ln", "open", "sort", "uniq", "awk", "sed", "tr", "cut",
-    "xargs", "tee", "diff", "zip", "unzip", "tar", "gzip",
-    "python3", "python", "node", "pip", "npm", "brew",
-    "git", "curl", "wget", "ssh", "scp", "rsync",
-    "ps", "kill", "top", "lsof", "stat", "file", "md5", "shasum",
-    "pbcopy", "pbpaste", "say", "defaults", "sw_vers",
-    "jq", "rg", "fd", "bat", "exa"
+    "ln", "stat", "file", "tree",
+    "sort", "uniq", "awk", "sed", "tr", "cut", "diff", "patch",
+    "xargs", "tee",
+    "zip", "unzip", "tar", "gzip", "bzip2", "xz",
+    "python3", "python", "node", "npm", "npx", "pip", "pip3",
+    "git", "make", "cmake",
+    "curl", "wget", "ssh", "scp", "rsync", "ping", "dig",
+    "ps", "kill", "sleep",
+    "md5", "shasum", "base64", "openssl",
+    "sqlite3", "jq", "rg", "fd", "bat", "exa", "eza",
+    "open", "pbcopy", "pbpaste", "say", "defaults", "sw_vers"
   ],
   "allowed_roots": ["/Users/<your-username>"]
 }
 ```
-
-## Content Types
-
-Ghost classifies clipboard content into these types, each with a tailored system prompt:
-
-| Type | Detection | LLM Behavior |
-|---|---|---|
-| `url` | Starts with `http://` or `https://` | Fetches page content, summarizes in 2-3 sentences |
-| `error` | Contains `Traceback`, `Error:`, `Exception:`, etc. | Debugs the error, suggests a fix command |
-| `code` | Contains `def`, `class`, `import`, `function`, `const`, etc. | Explains the code snippet in 2-3 sentences |
-| `json` | Starts with `{` or `[` | Describes the JSON data structure |
-| `foreign` | More than 30% non-Latin characters | Translates to English |
-| `long_text` | Longer than 150 characters | Analyzes for scams + provides summary |
-| `image` | Screenshot file or clipboard image | Describes image content in 2-4 sentences |
-| `skip` | Too short, looks like a file path, empty | Not processed |
 
 ## CLI Configuration
 
@@ -166,13 +213,13 @@ python ghost.py --poll 1.0                 # Override poll interval
 
 ### Via Dashboard
 
-Go to Configuration page → click "Reset to Defaults".
+Go to Configuration page, click "Reset to Defaults".
 
-### Via CLI
+### Via File
 
 ```bash
 rm ~/.ghost/config.json
-python ghost.py start   # Recreates with defaults
+bash start.sh   # Recreates with defaults
 ```
 
 ### Via API

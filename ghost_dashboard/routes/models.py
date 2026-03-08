@@ -13,7 +13,6 @@ log = logging.getLogger(__name__)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from ghost import load_config, save_config, DEFAULT_CONFIG
-from ghost_responses_capabilities import normalize_responses_capabilities, get_responses_capabilities, get_responses_capabilities_scope
 from ghost_providers import validate_model_for_provider
 
 bp = Blueprint("models", __name__)
@@ -220,43 +219,11 @@ def get_providers():
     from ghost_auth_profiles import get_auth_store
     store = get_auth_store()
     providers = list_providers()
-    cfg = load_config()
-    responses_scope = get_responses_capabilities_scope()
     for p in providers:
         status = store.get_provider_status(p["id"])
         p.update(status)
-        if p.get("id") in ("openai", "openai-codex"):
-            p["responses_capabilities_scope"] = responses_scope
-            p["responses_capabilities_ref"] = "global"
     return jsonify({"providers": providers})
 
-
-@bp.route("/api/responses-capabilities")
-def get_responses_caps_api():
-    cfg = load_config()
-    caps = get_responses_capabilities(cfg)
-    return jsonify({"ok": True, "responses_capabilities": caps})
-
-
-@bp.route("/api/responses-capabilities", methods=["PUT"])
-def set_responses_caps_api():
-    data = request.get_json(silent=True) or {}
-    raw_caps = data.get("responses_capabilities", data)
-    cfg = load_config()
-    try:
-        caps = normalize_responses_capabilities(raw_caps)
-    except ValueError as e:
-        return jsonify({"ok": False, "error": str(e)}), 400
-
-    cfg["responses_capabilities"] = caps
-    save_config(cfg)
-
-    from ghost_dashboard import get_daemon
-    daemon = get_daemon()
-    if daemon:
-        daemon.cfg.update(cfg)
-
-    return jsonify({"ok": True, "responses_capabilities": caps})
 
 
 @bp.route("/api/providers/<provider_id>/models")

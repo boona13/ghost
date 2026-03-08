@@ -41,7 +41,6 @@ export async function render(container) {
           <input id="qf-tz" type="text" class="form-input w-full" value="${u.escapeHtml(timezone)}" placeholder="${t('user.timezonePlaceholder')}">
         </div>
       </div>
-      <button id="btn-quick-apply" class="btn btn-secondary btn-sm mt-3">${t('user.applyToFile')}</button>
     </div>
 
     <textarea id="user-editor" class="editor-textarea">${u.escapeHtml(data.content)}</textarea>
@@ -52,7 +51,7 @@ export async function render(container) {
     </div>
   `;
 
-  document.getElementById('btn-quick-apply')?.addEventListener('click', () => {
+  function applyQuickFieldsToEditor() {
     const editor = document.getElementById('user-editor');
     let content = editor.value;
     const fields = {
@@ -68,10 +67,20 @@ export async function render(container) {
       }
     }
     editor.value = content;
-    u.toast(t('user.fieldsApplied'));
-  });
+  }
+
+  function syncQuickFieldsFromEditor() {
+    const content = document.getElementById('user-editor').value;
+    document.getElementById('qf-name').value = parseField(content, 'Name');
+    document.getElementById('qf-call').value = parseField(content, 'What to call them');
+    document.getElementById('qf-pronouns').value = parseField(content, 'Pronouns');
+    document.getElementById('qf-tz').value = parseField(content, 'Timezone');
+  }
+
+  document.getElementById('user-editor')?.addEventListener('input', syncQuickFieldsFromEditor);
 
   document.getElementById('btn-save-user')?.addEventListener('click', async () => {
+    applyQuickFieldsToEditor();
     await api.put('/api/user', { content: document.getElementById('user-editor').value });
     u.toast(t('user.saved'));
   });

@@ -68,10 +68,6 @@ action_items.json
 growth_log.json
 crash_report.json
 
-# Docker test files
-Dockerfile*
-.dockerignore
-
 # Test / coverage
 .coverage
 htmlcov/

@@ -3,8 +3,9 @@ Ghost Shell Sessions — Persistent Shell & Background Process Management
 
 Provides two capabilities alongside the existing one-shot shell_exec:
 
-1. Interactive Sessions: Named /bin/sh subprocesses that persist across tool
-   calls. Environment, cwd, and shell state carry over between commands.
+1. Interactive Sessions: Named shell subprocesses (/bin/sh on Unix, cmd.exe on
+   Windows) that persist across tool calls. Environment, cwd, and shell state
+   carry over between commands.
 
 2. Background Processes: Fire-and-forget commands with output capture. The LLM
    can start servers/watchers, check their output, and kill them.
@@ -202,14 +203,20 @@ class BackgroundProcess:
         self._output: deque = deque(maxlen=_OUTPUT_LINE_LIMIT)
         self._lock = threading.Lock()
 
-        self._proc = subprocess.Popen(
-            command,
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            cwd=cwd or str(Path.home()),
-            bufsize=0,
-        )
+        popen_kwargs: dict = {
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.STDOUT,
+            "cwd": cwd or str(Path.home()),
+            "bufsize": 0,
+        }
+        if ghost_platform.IS_WIN:
+            self._proc = subprocess.Popen(
+                ["cmd.exe", "/c", command], **popen_kwargs,
+            )
+        else:
+            self._proc = subprocess.Popen(
+                command, shell=True, **popen_kwargs,
+            )
         self.pid = self._proc.pid
 
         self._reader = threading.Thread(
@@ -237,12 +244,18 @@ class BackgroundProcess:
         return "\n".join(recent)
 
     def kill(self):
-        """SIGTERM then SIGKILL if needed."""
+        """Terminate the process cross-platform."""
         try:
-            self._proc.terminate()
+            if ghost_platform.IS_WIN:
+                ghost_platform.kill_process(self.pid)
+            else:
+                self._proc.terminate()
             self._proc.wait(timeout=3)
         except subprocess.TimeoutExpired:
-            self._proc.kill()
+            if ghost_platform.IS_WIN:
+                ghost_platform.kill_process_group(self.pid)
+            else:
+                self._proc.kill()
             self._proc.wait(timeout=2)
         except Exception:
             pass

@@ -86,7 +86,6 @@ export async function render(container) {
             </svg>
             ${t('chat.canvas')}
           </button>
-          <button id="chat-clear" class="btn btn-sm btn-ghost text-xs">${t('common.clear')}</button>
         </div>
       </div>
 
@@ -102,9 +101,32 @@ export async function render(container) {
       <div id="chat-messages" class="chat-messages">
         ${history.length === 0 ? `
           <div id="chat-empty" class="chat-empty">
-            <div class="text-3xl mb-3 opacity-40">&#x1F47B;</div>
-            <div class="text-sm font-medium text-zinc-400">${t('chat.noMessages')}</div>
-            <div class="text-xs text-zinc-600 mt-1">${t('chat.typeBelow')}</div>
+            <div class="chat-empty-orb">
+              <svg class="w-8 h-8 text-ghost-400/60" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                  d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+              </svg>
+            </div>
+            <div class="text-sm font-medium text-zinc-300 mt-4">${t('chat.noMessages')}</div>
+            <div class="text-xs text-zinc-600 mt-1 mb-5">${t('chat.typeBelow')}</div>
+            <div class="chat-suggestions">
+              <button class="chat-suggestion" data-prompt="What can you do? Give me a quick overview of your capabilities.">
+                <svg class="w-3.5 h-3.5 text-ghost-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                <span>What can you do?</span>
+              </button>
+              <button class="chat-suggestion" data-prompt="Show me a summary of your recent activity and what you've been working on.">
+                <svg class="w-3.5 h-3.5 text-blue-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                <span>Summarize recent activity</span>
+              </button>
+              <button class="chat-suggestion" data-prompt="What new features are you planning to implement next?">
+                <svg class="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                <span>Upcoming features</span>
+              </button>
+              <button class="chat-suggestion" data-prompt="Run a health check on all your systems and report any issues.">
+                <svg class="w-3.5 h-3.5 text-amber-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                <span>System health check</span>
+              </button>
+            </div>
           </div>
         ` : ''}
       </div>
@@ -112,6 +134,13 @@ export async function render(container) {
       <div class="chat-input-area chat-drop-zone" id="chat-drop-zone">
         <div id="chat-attachments" class="chat-attachments" style="display:none"></div>
         <div class="chat-input-wrapper">
+          <button id="chat-new-session" class="chat-new-session-btn" title="${t('chat.newSessionBtn')}">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+            </svg>
+            <span>${t('chat.newSessionBtn')}</span>
+          </button>
+          <div class="chat-input-divider"></div>
           <button id="chat-attach" class="chat-attach-btn" title="${t('chat.attachFile')}">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -189,7 +218,7 @@ export async function render(container) {
   const sendBtn = container.querySelector('#chat-send');
   const stopBtn = container.querySelector('#chat-stop');
   const statusEl = container.querySelector('#chat-status');
-  const clearBtn = container.querySelector('#chat-clear');
+  const newSessionBtn = container.querySelector('#chat-new-session');
   const attachBtn = container.querySelector('#chat-attach');
   const fileInput = container.querySelector('#chat-file-input');
   const dropZone = container.querySelector('#chat-drop-zone');
@@ -265,15 +294,31 @@ export async function render(container) {
     }
   });
 
-  clearBtn.addEventListener('click', async () => {
+  newSessionBtn.addEventListener('click', async () => {
     try { await api.post('/api/chat/clear'); } catch {}
     messagesEl.innerHTML = `
       <div id="chat-empty" class="chat-empty">
-        <div class="text-3xl mb-3 opacity-40">&#x1F47B;</div>
-        <div class="text-sm font-medium text-zinc-400">${t('chat.newSession')}</div>
+        <div class="chat-empty-orb">
+          <svg class="w-8 h-8 text-ghost-400/60" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+              d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+          </svg>
+        </div>
+        <div class="text-sm font-medium text-zinc-300 mt-4">${t('chat.newSession')}</div>
         <div class="text-xs text-zinc-600 mt-1">${t('chat.prevContextCleared')}</div>
       </div>
     `;
+    inputEl.focus();
+  });
+
+  messagesEl.addEventListener('click', (e) => {
+    const suggestion = e.target.closest('.chat-suggestion');
+    if (suggestion && !processing) {
+      inputEl.value = suggestion.dataset.prompt || '';
+      inputEl.style.height = 'auto';
+      inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + 'px';
+      sendMessage();
+    }
   });
 
   // ── Push-to-talk mic button ─────────────────────────────────

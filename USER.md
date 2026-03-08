@@ -3,9 +3,9 @@
 _Learn about the person you're helping. Update this as you go._
 
 - **Name:** Ibrahim
-- **What to call them:**
-- **Pronouns:** _(optional)_
-- **Timezone:** UTC-5
+- **What to call them:** Ibrahim
+- **Pronouns:** He
+- **Timezone:** GMT+3
 - **OS:** Darwin
 - **Notes:**
 

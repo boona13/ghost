@@ -25,12 +25,12 @@ import { render as webhooks } from './pages/webhooks.js';
 import { render as projects } from './pages/projects.js';
 import { render as prs } from './pages/prs.js';
 import { render as langfuse } from './pages/langfuse.js';
-import { render as browser_use } from './pages/browser_use.js';
 import { render as pairing } from './pages/pairing.js';
 import { render as nodes } from './pages/nodes.js';
 import { render as gallery } from './pages/gallery.js';
 import { render as audit } from './pages/audit.js';
-const pages = { overview, chat, models, config, soul, user, skills, cron, memory, feed, evolve, integrations, autonomy, accounts, setup, security, console: console_page, channels, future_features, webhooks, projects, prs, langfuse, browser_use, pairing, nodes, gallery, audit };
+import { render as evolve_theater } from './pages/evolve_theater.js';
+const pages = { overview, chat, models, config, soul, user, skills, cron, memory, feed, evolve, integrations, autonomy, accounts, setup, security, console: console_page, channels, future_features, webhooks, projects, prs, langfuse, pairing, nodes, gallery, audit, evolve_theater };
 const container = document.getElementById('page-content');
 let currentPage = null;
 let pollTimer = null;
@@ -46,6 +46,8 @@ function navigate(page) {
   document.querySelectorAll('.nav-link').forEach(el => {
     el.classList.toggle('active', el.dataset.page === page);
   });
+
+  if (typeof _expandSectionForPage === 'function') _expandSectionForPage(page);
 
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
 
@@ -88,6 +90,153 @@ sidebarToggle.addEventListener('click', () => {
   const isCollapsed = sidebar.classList.contains('collapsed');
   localStorage.setItem('ghost-sidebar-collapsed', isCollapsed ? '1' : '0');
   sidebarToggle.title = isCollapsed ? i18n.t('sidebar.expand') : i18n.t('sidebar.collapse');
+});
+
+/* ── Collapsible nav sections ────────────────────────────────── */
+document.querySelectorAll('.nav-section-toggle').forEach(btn => {
+  const sectionId = btn.dataset.section;
+  const items = document.querySelector(`[data-section-id="${sectionId}"]`);
+  if (!items) return;
+
+  const saved = localStorage.getItem(`ghost-nav-${sectionId}`);
+  if (saved === 'collapsed') {
+    items.classList.add('collapsed');
+    btn.dataset.collapsed = 'true';
+  } else if (saved === 'expanded') {
+    items.classList.remove('collapsed');
+    btn.dataset.collapsed = 'false';
+  }
+
+  btn.addEventListener('click', () => {
+    const isCollapsed = items.classList.toggle('collapsed');
+    btn.dataset.collapsed = isCollapsed ? 'true' : 'false';
+    localStorage.setItem(`ghost-nav-${sectionId}`, isCollapsed ? 'collapsed' : 'expanded');
+  });
+});
+
+function _expandSectionForPage(page) {
+  const link = document.querySelector(`.nav-link[data-page="${page}"]`);
+  if (!link) return;
+  const sectionItems = link.closest('.nav-section-items');
+  if (sectionItems && sectionItems.classList.contains('collapsed')) {
+    sectionItems.classList.remove('collapsed');
+    const sectionId = sectionItems.dataset.sectionId;
+    const toggle = document.querySelector(`.nav-section-toggle[data-section="${sectionId}"]`);
+    if (toggle) toggle.dataset.collapsed = 'false';
+  }
+}
+
+/* ── Command palette ─────────────────────────────────────────── */
+const cmdPalette = document.getElementById('cmd-palette');
+const cmdInput = document.getElementById('cmd-palette-input');
+const cmdResults = document.getElementById('cmd-palette-results');
+const cmdTrigger = document.getElementById('cmd-palette-trigger');
+let cmdActiveIndex = 0;
+let cmdFilteredItems = [];
+
+const CMD_PAGES = [
+  { page: 'chat', label: 'Chat', section: '' },
+  { page: 'overview', label: 'Overview', section: '' },
+  { page: 'feed', label: 'Activity Feed', section: 'Monitor' },
+  { page: 'console', label: 'Console', section: 'Monitor' },
+  { page: 'soul', label: 'Soul', section: 'Intelligence' },
+  { page: 'user', label: 'User Profile', section: 'Intelligence' },
+  { page: 'memory', label: 'Memory', section: 'Intelligence' },
+  { page: 'projects', label: 'Projects', section: 'Intelligence' },
+  { page: 'models', label: 'Models', section: 'Intelligence' },
+  { page: 'skills', label: 'Skills', section: 'Capabilities' },
+  { page: 'autonomy', label: 'Autonomy', section: 'Capabilities' },
+  { page: 'evolve', label: 'Evolution', section: 'Capabilities' },
+  { page: 'evolve_theater', label: 'Self-Evolution Theater', section: 'Capabilities' },
+  { page: 'prs', label: 'Pull Requests', section: 'Capabilities' },
+  { page: 'future_features', label: 'Future Features', section: 'Capabilities' },
+  { page: 'nodes', label: 'AI Nodes', section: 'Capabilities' },
+  { page: 'gallery', label: 'Media Gallery', section: 'Capabilities' },
+  { page: 'channels', label: 'Channels', section: 'Connections' },
+  { page: 'webhooks', label: 'Webhooks', section: 'Connections' },
+  { page: 'integrations', label: 'Integrations', section: 'Connections' },
+  { page: 'langfuse', label: 'Observability', section: 'Connections' },
+  { page: 'accounts', label: 'Accounts', section: 'Connections' },
+  { page: 'config', label: 'Configuration', section: 'System' },
+  { page: 'cron', label: 'Cron Jobs', section: 'System' },
+  { page: 'security', label: 'Security', section: 'System' },
+  { page: 'audit', label: 'Audit Log', section: 'System' },
+  { page: 'pairing', label: 'Device Pairing', section: 'System' },
+];
+
+function openCmdPalette() {
+  cmdPalette.style.display = '';
+  cmdInput.value = '';
+  cmdActiveIndex = 0;
+  renderCmdResults('');
+  requestAnimationFrame(() => cmdInput.focus());
+}
+
+function closeCmdPalette() {
+  cmdPalette.style.display = 'none';
+}
+
+function renderCmdResults(query) {
+  const q = query.toLowerCase().trim();
+  cmdFilteredItems = q
+    ? CMD_PAGES.filter(p => p.label.toLowerCase().includes(q) || p.section.toLowerCase().includes(q) || p.page.includes(q))
+    : CMD_PAGES;
+  if (cmdActiveIndex >= cmdFilteredItems.length) cmdActiveIndex = 0;
+
+  cmdResults.innerHTML = cmdFilteredItems.map((item, i) => `
+    <div class="cmd-result ${i === cmdActiveIndex ? 'active' : ''}" data-page="${item.page}">
+      <span class="cmd-result-icon">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5l7 7-7 7"/></svg>
+      </span>
+      <span>${item.label}</span>
+      ${item.section ? `<span class="cmd-result-section">${item.section}</span>` : ''}
+    </div>
+  `).join('') || '<div class="text-xs text-zinc-600 text-center py-4">No matching pages</div>';
+
+  cmdResults.querySelectorAll('.cmd-result').forEach(el => {
+    el.addEventListener('click', () => {
+      closeCmdPalette();
+      window.location.hash = '#' + el.dataset.page;
+      navigate(el.dataset.page);
+    });
+  });
+}
+
+if (cmdTrigger) {
+  cmdTrigger.addEventListener('click', openCmdPalette);
+}
+
+if (cmdPalette) {
+  cmdPalette.querySelector('.cmd-palette-backdrop').addEventListener('click', closeCmdPalette);
+
+  cmdInput.addEventListener('input', () => {
+    cmdActiveIndex = 0;
+    renderCmdResults(cmdInput.value);
+  });
+
+  cmdInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { closeCmdPalette(); return; }
+    if (e.key === 'ArrowDown') { e.preventDefault(); cmdActiveIndex = Math.min(cmdActiveIndex + 1, cmdFilteredItems.length - 1); renderCmdResults(cmdInput.value); return; }
+    if (e.key === 'ArrowUp') { e.preventDefault(); cmdActiveIndex = Math.max(cmdActiveIndex - 1, 0); renderCmdResults(cmdInput.value); return; }
+    if (e.key === 'Enter' && cmdFilteredItems[cmdActiveIndex]) {
+      e.preventDefault();
+      closeCmdPalette();
+      const item = cmdFilteredItems[cmdActiveIndex];
+      window.location.hash = '#' + item.page;
+      navigate(item.page);
+    }
+  });
+}
+
+document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    e.preventDefault();
+    if (cmdPalette.style.display === 'none') openCmdPalette();
+    else closeCmdPalette();
+  }
+  if (e.key === 'Escape' && cmdPalette.style.display !== 'none') {
+    closeCmdPalette();
+  }
 });
 
 async function updateSidebarStatus() {

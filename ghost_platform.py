@@ -12,7 +12,7 @@ import signal
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Set
+from typing import List
 
 log = logging.getLogger(__name__)
 
@@ -188,16 +188,6 @@ def chmod_safe(path: Path, mode: int) -> None:
         log.debug("chmod_safe(%s, %o) failed: %s", path, mode, exc)
 
 
-# ── Sandbox / security helpers ───────────────────────────────────────
-
-def blocked_host_paths() -> Set[str]:
-    """Platform-specific host paths that should never be bind-mounted into containers."""
-    if IS_WIN:
-        sys_root = os.environ.get("SystemRoot", r"C:\Windows")
-        return {sys_root, r"C:\Program Files", r"C:\Program Files (x86)"}
-    return {"/etc", "/proc", "/sys", "/dev", "/root", "/run/docker.sock"}
-
-
 # ── Shell session helpers ────────────────────────────────────────────
 
 def exit_code_echo_cmd(marker: str) -> str:
@@ -253,3 +243,45 @@ def ensure_utf8_stdio() -> None:
                 stream.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
+
+
+# ── LLM platform context ──────────────────────────────────────────
+
+def platform_context() -> str:
+    """Return a short platform summary for LLM system prompts.
+
+    Tells the model what OS, architecture, and shell conventions to use
+    so it generates correct commands, paths, and scripts on every platform.
+    """
+    os_name = PLAT  # "Darwin" | "Linux" | "Windows"
+    arch = platform.machine()  # "x86_64" | "arm64" | "AMD64" etc.
+    py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    home = str(Path.home())
+
+    if IS_WIN:
+        os_label = "Windows"
+        shell = "cmd.exe / PowerShell"
+        path_style = "C:\\Users\\... (backslash separators)"
+        pkg_mgr = "choco / winget"
+    elif IS_MAC:
+        os_label = "macOS"
+        shell = "zsh (default) / bash"
+        path_style = "/Users/... (forward slash separators)"
+        pkg_mgr = "brew"
+    else:
+        os_label = "Linux"
+        shell = "bash (default) / sh"
+        path_style = "/home/... (forward slash separators)"
+        pkg_mgr = "apt / dnf / pacman"
+
+    return (
+        f"## Platform\n"
+        f"- **OS:** {os_label} ({os_name} {arch})\n"
+        f"- **Python:** {py_ver}\n"
+        f"- **Shell:** {shell}\n"
+        f"- **Paths:** {path_style}\n"
+        f"- **Home:** `{home}`\n"
+        f"- **Package manager:** {pkg_mgr}\n"
+        f"Generate shell commands, file paths, and install instructions "
+        f"appropriate for {os_label}. Never assume a different OS.\n"
+    )

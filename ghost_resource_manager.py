@@ -99,8 +99,8 @@ class DeviceInfo:
     def _detect(self):
         if platform.system() == "Darwin" and platform.machine() in ("arm64", "aarch64"):
             self.apple_silicon = True
-            self._detect_unified_memory()
 
+        self._detect_unified_memory()
         self._detect_mlx()
         self._detect_torch()
 
@@ -140,13 +140,30 @@ class DeviceInfo:
     def _detect_unified_memory(self):
         try:
             import subprocess
-            result = subprocess.run(
-                ["sysctl", "-n", "hw.memsize"],
-                capture_output=True, text=True, timeout=5,
-            )
-            if result.returncode == 0:
-                mem_bytes = int(result.stdout.strip())
-                self.unified_memory_gb = round(mem_bytes / (1024 ** 3), 1)
+            sys_name = platform.system()
+            if sys_name == "Darwin":
+                result = subprocess.run(
+                    ["sysctl", "-n", "hw.memsize"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if result.returncode == 0:
+                    self.unified_memory_gb = round(int(result.stdout.strip()) / (1024 ** 3), 1)
+            elif sys_name == "Linux":
+                meminfo = Path("/proc/meminfo")
+                if meminfo.exists():
+                    for line in meminfo.read_text().splitlines():
+                        if line.startswith("MemTotal:"):
+                            kb = int(line.split()[1])
+                            self.unified_memory_gb = round(kb / (1024 ** 2), 1)
+                            break
+            elif sys_name == "Windows":
+                result = subprocess.run(
+                    ["powershell", "-NoProfile", "-Command",
+                     "(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if result.returncode == 0 and result.stdout.strip().isdigit():
+                    self.unified_memory_gb = round(int(result.stdout.strip()) / (1024 ** 3), 1)
         except Exception:
             pass
 

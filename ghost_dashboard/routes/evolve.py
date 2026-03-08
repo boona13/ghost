@@ -44,6 +44,40 @@ def _get_engine():
 def list_history():
     engine = _get_engine()
     history = engine.get_history()
+    try:
+        from ghost_pr import get_pr_store
+        store = get_pr_store()
+        all_prs = store.list_prs()
+        pr_by_evo = {}
+        for pr in all_prs:
+            eid = pr.get("evolution_id")
+            if eid:
+                pr_by_evo[eid] = pr
+        for evo in history:
+            if evo.get("pr_review"):
+                continue
+            pr = pr_by_evo.get(evo.get("id"))
+            if not pr and evo.get("pr_id"):
+                pr = store.get_pr(evo["pr_id"])
+            if pr:
+                reviewer_msgs = [
+                    d for d in pr.get("discussions", [])
+                    if d.get("role") == "reviewer"
+                ]
+                evo["pr_review"] = {
+                    "pr_id": pr["pr_id"],
+                    "verdict": pr.get("verdict"),
+                    "review_rounds": pr.get("review_rounds", 0),
+                    "status": pr.get("status"),
+                    "inline_comments_count": len(pr.get("inline_comments", [])),
+                    "suggested_changes_count": len(pr.get("suggested_changes", [])),
+                    "reviewer_summary": (
+                        reviewer_msgs[-1].get("message", "")[:800]
+                        if reviewer_msgs else ""
+                    ),
+                }
+    except Exception:
+        pass
     return jsonify({"history": history})
 
 

@@ -160,29 +160,8 @@ async function searchRegistry(query, api, u) {
       </div>
     `;
 
-    // Add install handlers
     resultsEl.querySelectorAll('[data-registry-install]').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const name = btn.dataset.registryInstall;
-        btn.disabled = true;
-        btn.innerHTML = '<span class="animate-pulse">' + t('skills.installing') + '</span>';
-        try {
-          const result = await api.post('/api/skills/registry/' + encodeURIComponent(name) + '/install', {});
-          if (result.ok) {
-            u.toast(t('skills.installed') + ' ' + name, 'success');
-            btn.innerHTML = t('skills.installed');
-            btn.classList.add('opacity-50');
-          } else {
-            u.toast(result.error || t('skills.installFailed'), 'error');
-            btn.disabled = false;
-            btn.innerHTML = t('common.install');
-          }
-        } catch (e) {
-          u.toast(t('skills.installFailed') + ': ' + e.message, 'error');
-          btn.disabled = false;
-          btn.innerHTML = t('common.install');
-        }
-      });
+      btn.addEventListener('click', () => startSecureScanInstall(btn, api, u));
     });
   } catch (e) {
     resultsEl.innerHTML = `<div class="text-sm text-red-400">${t('skills.searchFailed', {error: u.escapeHtml(e.message)})}</div>`;
@@ -218,6 +197,212 @@ function renderRegistryCard(s, u) {
       </div>
     </div>
   `;
+}
+
+async function startSecureScanInstall(btn, api, u) {
+  const name = btn.dataset.registryInstall;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="animate-pulse">Scanning...</span>';
+
+  try {
+    const scan = await api.get('/api/skills/registry/' + encodeURIComponent(name) + '/scan');
+    if (!scan.ok) {
+      u.toast(scan.error || 'Scan failed', 'error');
+      btn.disabled = false;
+      btn.innerHTML = t('common.install');
+      return;
+    }
+
+    const security = scan.security || {};
+    const verdict = security.verdict || 'safe';
+    const findings = security.findings || [];
+    const counts = security.finding_counts || {};
+
+    if (verdict === 'blocked') {
+      btn.innerHTML = 'Blocked';
+      btn.classList.add('opacity-50', 'btn-danger');
+      btn.classList.remove('btn-primary');
+      showSecurityModal(name, security, null, u);
+      return;
+    }
+
+    if (verdict === 'safe') {
+      await doInstall(name, btn, api, u);
+      return;
+    }
+
+    showSecurityModal(name, security, async () => {
+      closeSecurityModal();
+      btn.innerHTML = '<span class="animate-pulse">Installing...</span>';
+      await doInstall(name, btn, api, u);
+    }, u);
+
+  } catch (e) {
+    u.toast('Scan failed: ' + e.message, 'error');
+    btn.disabled = false;
+    btn.innerHTML = t('common.install');
+  }
+}
+
+async function doInstall(name, btn, api, u) {
+  try {
+    const result = await api.post('/api/skills/registry/' + encodeURIComponent(name) + '/install', {});
+    if (result.ok || result.installed) {
+      u.toast('Installed ' + name, 'success');
+      btn.innerHTML = t('skills.installed');
+      btn.classList.add('opacity-50');
+      btn.disabled = true;
+
+      const sec = result.security || {};
+      if (sec.verdict === 'caution' || sec.verdict === 'dangerous') {
+        u.toast('Note: this skill has ' + (sec.finding_counts?.high || 0) + ' security finding(s)', 'warning');
+      }
+
+      refreshLocalSkillsData(api);
+    } else {
+      const sec = result.security || {};
+      if (sec.blocked) {
+        btn.innerHTML = 'Blocked';
+        btn.classList.add('opacity-50', 'btn-danger');
+        btn.classList.remove('btn-primary');
+        showSecurityModal(name, sec, null, u);
+      } else {
+        u.toast(result.error || t('skills.installFailed'), 'error');
+        btn.disabled = false;
+        btn.innerHTML = t('common.install');
+      }
+    }
+  } catch (e) {
+    u.toast(t('skills.installFailed') + ': ' + e.message, 'error');
+    btn.disabled = false;
+    btn.innerHTML = t('common.install');
+  }
+}
+
+async function refreshLocalSkillsData(api) {
+  try {
+    const data = await api.get('/api/skills');
+    const groups = data.groups;
+    allSkills = [
+      ...(groups.bundled || []),
+      ...(groups.user || []),
+      ...(groups.other || []),
+    ];
+    const countEl = document.getElementById('skills-count');
+    if (countEl) countEl.textContent = data.stats.total;
+  } catch (_) { /* best-effort */ }
+}
+
+function showSecurityModal(skillName, security, onProceed, u) {
+  const existing = document.getElementById('security-scan-modal');
+  if (existing) existing.remove();
+
+  const verdict = security.verdict || 'unknown';
+  const findings = security.findings || [];
+  const score = security.risk_score || 0;
+  const counts = security.finding_counts || {};
+
+  const verdictColors = {
+    blocked: 'text-red-400',
+    dangerous: 'text-orange-400',
+    caution: 'text-amber-400',
+    safe: 'text-emerald-400',
+  };
+  const verdictIcons = {
+    blocked: '&#x26D4;',
+    dangerous: '&#x26A0;',
+    caution: '&#x26A0;',
+    safe: '&#x2705;',
+  };
+  const severityColors = {
+    critical: 'bg-red-500/15 text-red-400 border-red-500/30',
+    high: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
+    medium: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+    low: 'bg-zinc-500/15 text-zinc-400 border-zinc-500/30',
+  };
+
+  let findingsHtml = '';
+  if (findings.length > 0) {
+    findingsHtml = findings.map(f => `
+      <div class="p-2 rounded border ${severityColors[f.severity] || severityColors.low} mb-2">
+        <div class="flex items-center gap-2 mb-1">
+          <span class="badge badge-${f.severity === 'critical' ? 'red' : f.severity === 'high' ? 'yellow' : 'zinc'} text-[10px]">${u.escapeHtml(f.severity)}</span>
+          <span class="text-[10px] text-zinc-500">${u.escapeHtml(f.category)}</span>
+        </div>
+        <div class="text-xs">${u.escapeHtml(f.message)}</div>
+        ${f.evidence ? '<div class="text-[10px] text-zinc-500 font-mono mt-1 truncate">' + u.escapeHtml(f.evidence) + '</div>' : ''}
+      </div>
+    `).join('');
+  } else {
+    findingsHtml = '<div class="text-xs text-zinc-500">No security issues found.</div>';
+  }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'security-scan-modal';
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-panel" style="max-width:560px">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-sm font-semibold text-white">Security Scan: ${u.escapeHtml(skillName)}</h3>
+        <button id="btn-close-sec-modal" class="btn btn-ghost btn-sm">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <div class="flex items-center gap-3 mb-4 p-3 rounded stat-card">
+        <span class="text-2xl">${verdictIcons[verdict] || '?'}</span>
+        <div>
+          <div class="text-sm font-semibold ${verdictColors[verdict] || 'text-zinc-300'}">${verdict.toUpperCase()}</div>
+          <div class="text-[10px] text-zinc-500">Risk score: ${score}/100</div>
+        </div>
+        <div class="flex gap-2 ml-auto">
+          ${counts.critical ? '<span class="badge badge-red">' + counts.critical + ' critical</span>' : ''}
+          ${counts.high ? '<span class="badge badge-yellow">' + counts.high + ' high</span>' : ''}
+          ${counts.medium ? '<span class="badge badge-zinc">' + counts.medium + ' medium</span>' : ''}
+        </div>
+      </div>
+
+      <div class="mb-4" style="max-height:280px;overflow-y:auto">
+        ${findingsHtml}
+      </div>
+
+      ${verdict === 'blocked' ? `
+        <div class="p-2 rounded bg-red-500/10 border border-red-500/20 text-xs text-red-400 mb-4">
+          This skill has been blocked due to critical security findings. It cannot be installed.
+        </div>
+        <div class="flex justify-end">
+          <button id="btn-sec-close" class="btn btn-secondary btn-sm">Close</button>
+        </div>
+      ` : `
+        <div class="p-2 rounded bg-amber-500/10 border border-amber-500/20 text-xs text-amber-400 mb-4">
+          This skill has security findings. Review them carefully before proceeding. Ghost's runtime safeguards (allowed_commands, allowed_roots) still apply.
+        </div>
+        <div class="flex gap-3 justify-end">
+          <button id="btn-sec-cancel" class="btn btn-secondary btn-sm">Cancel</button>
+          <button id="btn-sec-proceed" class="btn btn-danger btn-sm">Install Anyway</button>
+        </div>
+      `}
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  overlay.querySelector('#btn-close-sec-modal')?.addEventListener('click', closeSecurityModal);
+  overlay.querySelector('#btn-sec-close')?.addEventListener('click', closeSecurityModal);
+  overlay.querySelector('#btn-sec-cancel')?.addEventListener('click', closeSecurityModal);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeSecurityModal(); });
+
+  if (onProceed) {
+    overlay.querySelector('#btn-sec-proceed')?.addEventListener('click', onProceed);
+  }
+}
+
+function closeSecurityModal() {
+  const m = document.getElementById('security-scan-modal');
+  if (m) {
+    m.classList.add('modal-closing');
+    m.addEventListener('animationend', () => m.remove(), { once: true });
+  }
 }
 
 async function refreshRegistry(api, u) {

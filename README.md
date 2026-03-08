@@ -23,29 +23,64 @@ Most AI assistants wait for you to type something. Ghost doesn't.
 - Python 3.10+
 - An API key from any supported provider (or none — Ghost starts a setup wizard)
 
-### Install
+### One-liner (macOS / Linux)
 
 ```bash
-git clone https://github.com/your-username/ghost.git
+curl -fsSL https://raw.githubusercontent.com/boona13/ghost/main/install.sh | bash
+```
+
+This clones the repo, creates a virtual environment, installs all dependencies, and offers to start Ghost immediately. It also accepts flags for unattended installs:
+
+```bash
+# Non-interactive with Playwright and API key
+curl -fsSL https://raw.githubusercontent.com/boona13/ghost/main/install.sh | bash -s -- --with-playwright --api-key sk-or-v1-...
+
+# Skip all prompts
+curl -fsSL https://raw.githubusercontent.com/boona13/ghost/main/install.sh | bash -s -- --no-interactive
+```
+
+Or clone first, then install:
+
+```bash
+git clone https://github.com/boona13/ghost.git
 cd ghost
 bash install.sh
 ```
 
-The installer creates a virtual environment, installs dependencies, optionally sets up Playwright for browser automation, and walks you through first-run configuration.
+### Install (Windows)
 
-```bash
-./start.sh
+```powershell
+git clone https://github.com/boona13/ghost.git
+cd ghost
+powershell -ExecutionPolicy Bypass -File install.ps1
 ```
+
+```bat
+start.bat
+```
+
+### Start / Stop
+
+| | macOS / Linux | Windows |
+|---|---|---|
+| **Start** | `./start.sh` | `start.bat` |
+| **Stop** | `./stop.sh` | `stop.bat` |
 
 Open [http://localhost:3333](http://localhost:3333) — the setup wizard guides you through connecting your AI providers.
 
 ### Manual Install
 
 ```bash
-git clone https://github.com/your-username/ghost.git
+git clone https://github.com/boona13/ghost.git
 cd ghost
 python3 -m venv .venv
+
+# macOS / Linux
 source .venv/bin/activate
+
+# Windows
+.venv\Scripts\activate
+
 pip install -r requirements.txt
 
 # Optional: browser automation
@@ -146,7 +181,7 @@ Four layers of persistent memory:
 - **Vector memory** — Cosine similarity search across typed memories (notes, facts, preferences, code, insights)
 - **Session memory** — Auto-saves conversation summaries with LLM-generated slugs
 
-### 37+ Skills
+### 42+ Skills + GhostHub Registry
 
 Specialized knowledge that Ghost injects automatically when relevant:
 
@@ -161,7 +196,7 @@ Specialized knowledge that Ghost injects automatically when relevant:
 | **Finance** | Trading analysis (chart patterns, technical indicators, portfolio tracking) |
 | **System** | Ghost system management, webhooks, weather, tmux, 1password, PDF tools, speech-to-text |
 
-Plus user-created skills in `~/.ghost/skills/`.
+Plus user-created skills in `~/.ghost/skills/` and community skills from [GhostHub](https://github.com/boona13/skills-registry) — a public skill registry where anyone can publish and install skills with one click from the dashboard.
 
 ### Webhook Triggers
 
@@ -228,7 +263,7 @@ On every startup, Ghost validates its critical state files (config.json, memory.
 
 ## Dashboard
 
-The web dashboard at [http://localhost:3333](http://localhost:3333) is a full management interface with 20+ pages:
+The web dashboard at [http://localhost:3333](http://localhost:3333) is a full management interface with 29 pages:
 
 | Page | What It Does |
 |---|---|
@@ -240,7 +275,7 @@ The web dashboard at [http://localhost:3333](http://localhost:3333) is a full ma
 | **User Profile** | Edit user info (USER.md) with quick-set form |
 | **Memory** | Search, browse, and prune the memory database |
 | **Models** | Multi-provider management, fallback chain visualization, model browser with pricing |
-| **Skills** | Browse, search, enable/disable, edit 37+ skills with requirements checking |
+| **Skills** | Browse, search, enable/disable, edit 42+ skills with requirements checking + GhostHub Registry |
 | **Autonomy** | Action items, growth routine status, growth log, crash reports |
 | **Evolution** | Self-modification history, approve/reject pending changes, view diffs, rollback |
 | **Future Features** | Prioritized backlog for autonomous implementation — add, approve, reject, track |
@@ -281,7 +316,6 @@ ghost_auth_profiles.py      Auth store — API keys, OAuth tokens, credential sy
 ghost_oauth.py              OAuth — Codex PKCE flow
 ghost_integrations.py       Google Workspace + Grok integration
 ghost_webhooks.py           Webhook triggers — event-driven automation via HTTP POST
-ghost_sandbox.py            Docker sandboxing — isolated code execution
 ghost_code_intel.py         Code intelligence — analysis, metrics, bug detection
 ghost_data_extract.py       Data extraction — structured data from unstructured text
 ghost_security_audit.py     Security audits — AI-driven with auto-fix
@@ -292,8 +326,8 @@ ghost_email.py              Disposable email — instant accounts via mail.tm
 ghost_credentials.py        Credential storage — structured service credentials
 ghost_x_tracker.py          X/Twitter tracker — duplicate prevention for social actions
 ghost_supervisor.py         Process supervisor — crash recovery, auto-rollback
-ghost_dashboard/            Flask web dashboard — 16+ pages, real-time SSE
-  routes/                   20 API blueprint modules
+ghost_dashboard/            Flask web dashboard — 29 pages, real-time SSE
+  routes/                   31 API blueprint modules
   static/js/pages/          Frontend page modules (SPA, no build step)
   templates/                HTML shell
 ghost_channels/             20+ messaging channel implementations
@@ -304,7 +338,7 @@ ghost_channels/             20+ messaging channel implementations
   slack.py                  Webhook + Socket Mode
   signal.py                 signal-cli REST API
   ...and 14 more
-skills/                     37+ bundled skill definitions
+skills/                     42 bundled skill definitions
 SOUL.md                     Agent personality and development standards
 USER.md                     User profile for personalization
 ```
@@ -376,7 +410,14 @@ Ghost stores configuration at `~/.ghost/config.json`. Every setting is editable 
 
 ## Cross-Platform
 
-Ghost runs on **macOS**, **Linux**, and **Windows**. No system-level dependencies required — all Python packages are pip-installable with pure-Python fallbacks where system libraries are needed (e.g., `python-magic` shim for WhatsApp media detection). File paths use `pathlib.Path` everywhere. OS-specific behavior is gated with `platform.system()`.
+Ghost runs on **macOS**, **Linux**, and **Windows**. No system-level dependencies required — all Python packages are pip-installable with pure-Python fallbacks where system libraries are needed (e.g., `python-magic` shim for WhatsApp media detection). File paths use `pathlib.Path` everywhere. OS-specific behavior is centralised in `ghost_platform.py` and gated with `platform.system()`.
+
+- **Install & launch scripts**: `install.sh` / `start.sh` / `stop.sh` (macOS/Linux) and `install.ps1` / `start.bat` / `stop.bat` (Windows)
+- **Process management**: `SIGTERM` on Unix, `taskkill` on Windows, with cross-platform detached-process and process-group helpers
+- **Notifications**: `osascript` (macOS), `notify-send` (Linux), PowerShell balloon tips (Windows)
+- **Audio playback**: `afplay` (macOS), `mpv`/`paplay`/`aplay` (Linux), PowerShell `SoundPlayer` (Windows), with `sounddevice` pure-Python fallback
+- **Memory detection**: `sysctl` (macOS), `/proc/meminfo` (Linux), `Win32_ComputerSystem` (Windows)
+- **Shell sessions**: `/bin/sh` on Unix, `cmd.exe` on Windows, with platform-appropriate exit-code markers
 
 ## Disclaimer
 

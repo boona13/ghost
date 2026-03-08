@@ -48,75 +48,207 @@ log = logging.getLogger(__name__)
 
 # ── Ghost LLM integration ─────────────────────────────────────────────
 
+class _GhostChatModel:
+    """browser-use BaseChatModel implementation that routes through Ghost's provider system.
+
+    Works with ALL Ghost providers including openai-codex, anthropic,
+    openrouter, ollama, etc. — Ghost's adapt_request/adapt_response handles
+    every format natively.
+    """
+
+    model: str = ""
+    _verified_api_keys: bool = True
+
+    def __init__(self, engine, provider_name: str, model_id: str):
+        self._engine = engine
+        self.model = model_id
+        self._provider_name = provider_name
+
+    @property
+    def provider(self) -> str:
+        return self._provider_name
+
+    @property
+    def name(self) -> str:
+        return self.model
+
+    @property
+    def model_name(self) -> str:
+        return self.model
+
+    @staticmethod
+    def _serialize_messages(messages) -> list:
+        """Convert browser-use message objects to OpenAI-format dicts."""
+        oai = []
+        for m in messages:
+            role = getattr(m, "role", "user")
+            content = getattr(m, "content", "")
+            if isinstance(content, list):
+                parts = []
+                for part in content:
+                    ptype = getattr(part, "type", "text")
+                    if ptype == "text":
+                        parts.append({"type": "text", "text": getattr(part, "text", "")})
+                    elif ptype == "image_url":
+                        img = getattr(part, "image_url", None)
+                        if img:
+                            parts.append({
+                                "type": "image_url",
+                                "image_url": {"url": getattr(img, "url", ""), "detail": getattr(img, "detail", "auto")},
+                            })
+                    elif ptype == "refusal":
+                        parts.append({"type": "text", "text": f"[Refusal] {getattr(part, 'refusal', '')}"})
+                content = parts
+
+            entry = {"role": role, "content": content}
+
+            tool_calls = getattr(m, "tool_calls", None)
+            if tool_calls:
+                entry["tool_calls"] = [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                    }
+                    for tc in tool_calls
+                ]
+            oai.append(entry)
+        return oai
+
+    async def ainvoke(self, messages, output_format=None, **kwargs):
+        import asyncio
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, lambda: self._invoke_sync(messages, output_format)
+        )
+
+    def _invoke_sync(self, messages, output_format=None):
+        from browser_use.llm.views import ChatInvokeCompletion, ChatInvokeUsage
+
+        oai_messages = self._serialize_messages(messages)
+        payload = {"messages": oai_messages}
+
+        if output_format is not None:
+            try:
+                schema = output_format.model_json_schema()
+                payload["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {"name": "agent_output", "strict": True, "schema": schema},
+                }
+            except Exception:
+                pass
+
+        data, err = self._engine._call_llm(payload, timeout=120)
+
+        if err:
+            from browser_use.llm.exceptions import ModelProviderError
+            raise ModelProviderError(message=str(err), model=self.name)
+
+        usage_info = None
+        if isinstance(data, dict):
+            raw_usage = data.get("usage", {})
+            if isinstance(raw_usage, dict) and raw_usage.get("total_tokens"):
+                usage_info = ChatInvokeUsage(
+                    prompt_tokens=raw_usage.get("prompt_tokens", 0),
+                    prompt_cached_tokens=raw_usage.get("cached_tokens"),
+                    prompt_cache_creation_tokens=None,
+                    prompt_image_tokens=None,
+                    completion_tokens=raw_usage.get("completion_tokens", 0),
+                    total_tokens=raw_usage.get("total_tokens", 0),
+                )
+
+        choices = data.get("choices", []) if isinstance(data, dict) else []
+        text = ""
+        if choices:
+            msg = choices[0].get("message", {})
+            text = msg.get("content", "") or ""
+
+        if output_format is not None and text:
+            try:
+                parsed = output_format.model_validate_json(text)
+                return ChatInvokeCompletion(completion=parsed, usage=usage_info)
+            except Exception:
+                pass
+
+        return ChatInvokeCompletion(completion=text, usage=usage_info)
+
+
 def _resolve_ghost_llm():
-    """Build a LangChain-compatible LLM from Ghost's configured provider.
+    """Build a LangChain-compatible LLM using Ghost's own provider system.
 
     Returns (llm_object, description_string) or (None, error_string).
-    Tries providers in order: primary, then any other configured OpenAI-compatible
-    or Anthropic provider.
+    Routes through ToolLoopEngine which handles ALL providers: openai-codex,
+    openrouter, anthropic, ollama, google, etc.
     """
     try:
         from ghost import load_config
-        from ghost_providers import PROVIDERS, get_provider
         from ghost_auth_profiles import AuthProfileStore
+        from ghost_providers import get_provider
 
         cfg = load_config()
-        auth = AuthProfileStore()
         primary_pid = cfg.get("primary_provider", "openrouter")
         provider_models = cfg.get("provider_models", {})
+        model = provider_models.get(primary_pid, cfg.get("model", ""))
 
-        candidates = [primary_pid] + [
-            pid for pid in PROVIDERS if pid != primary_pid
-        ]
+        api_key = cfg.get("api_key", "")
+        fallback_models = cfg.get("fallback_models", [])
 
-        last_err = "No compatible provider found"
-        for pid in candidates:
-            provider = get_provider(pid)
-            if not provider:
-                continue
-            if provider.api_format not in ("openai", "anthropic"):
-                continue
+        auth = AuthProfileStore()
 
-            api_key = auth.get_api_key(pid)
-            if not api_key and provider.auth_type != "none":
-                continue
+        provider = get_provider(primary_pid)
+        provider_name = provider.name if provider else primary_pid
+        display_model = model or (provider.default_model if provider else "?")
+        desc = f"{provider_name}: {display_model}"
 
-            model = provider_models.get(pid, cfg.get("model", provider.default_model))
+        from ghost_loop import ToolLoopEngine
+        engine = ToolLoopEngine(
+            api_key=api_key,
+            model=model,
+            fallback_models=fallback_models,
+            auth_store=auth,
+            provider_chain=_build_browser_provider_chain(cfg, auth),
+        )
 
-            base_url = provider.base_url
-            if base_url.endswith("/chat/completions"):
-                base_url = base_url[: -len("/chat/completions")]
-
-            desc = f"{provider.name}: {model}"
-
-            if provider.api_format == "anthropic":
-                try:
-                    from langchain_anthropic import ChatAnthropic
-                    llm = ChatAnthropic(model=model, api_key=api_key)
-                    return llm, desc
-                except ImportError:
-                    last_err = "langchain-anthropic not installed"
-                    continue
-
-            try:
-                from langchain_openai import ChatOpenAI
-            except ImportError:
-                last_err = "langchain-openai not installed"
-                continue
-
-            kwargs = {"model": model, "base_url": base_url}
-            kwargs["api_key"] = api_key if api_key else "not-needed"
-            try:
-                llm = ChatOpenAI(**kwargs)
-                return llm, desc
-            except Exception as exc:
-                last_err = f"ChatOpenAI init failed for {pid}: {exc}"
-                continue
-
-        return None, last_err
+        llm = _GhostChatModel(engine, provider_name=provider_name, model_id=display_model)
+        return llm, desc
 
     except Exception as exc:
         return None, f"Ghost LLM resolution failed: {exc}"
+
+
+def _build_browser_provider_chain(cfg, auth):
+    """Build a minimal provider chain for browser-use from Ghost's config."""
+    from ghost_providers import PROVIDERS, get_provider
+
+    primary_pid = cfg.get("primary_provider", "openrouter")
+    provider_models = cfg.get("provider_models", {})
+    model = cfg.get("model", "")
+    fallback_models = cfg.get("fallback_models", [])
+    chain = []
+    seen = set()
+
+    def _add(pid, mdl):
+        key = (pid, mdl)
+        if key not in seen:
+            seen.add(key)
+            chain.append(key)
+
+    order = [primary_pid] + [pid for pid in PROVIDERS if pid != primary_pid]
+    for pid in order:
+        prov = get_provider(pid)
+        if not prov:
+            continue
+        if prov.auth_type != "none" and not auth.is_provider_configured(pid):
+            continue
+        pm = provider_models.get(pid, "")
+        if pid == primary_pid:
+            _add(pid, pm or model or prov.default_model)
+            for fm in fallback_models:
+                _add(pid, fm)
+        else:
+            _add(pid, pm or prov.default_model)
+
+    return chain
 
 
 # ── shared asyncio event loop (one per process) ────────────────────────
@@ -325,33 +457,11 @@ async def _run_browser_task(
         browser = Browser(headless=headless)
         _set_runtime(session_id, "browser", browser)
 
-        llm = None
-        if api_key:
-            try:
-                from langchain_openai import ChatOpenAI
-            except ImportError:
-                return {"success": False, "error": "langchain-openai not installed. Run: pip install langchain-openai"}
-            llm_kwargs: Dict[str, Any] = {"model": model or "gpt-4o"}
-            llm_kwargs["api_key"] = api_key
-            try:
-                llm = ChatOpenAI(**llm_kwargs)
-            except Exception as exc:
-                return {"success": False, "error": f"LLM init failed: {exc}"}
-        else:
-            ghost_llm, desc = _resolve_ghost_llm()
-            if ghost_llm:
-                llm = ghost_llm
-                log.info("Browser-use using Ghost LLM: %s", desc)
-            else:
-                try:
-                    from langchain_openai import ChatOpenAI
-                except ImportError:
-                    return {"success": False, "error": f"No Ghost LLM available ({desc}) and langchain-openai not installed"}
-                llm_kwargs_fb: Dict[str, Any] = {"model": model or "gpt-4o"}
-                try:
-                    llm = ChatOpenAI(**llm_kwargs_fb)
-                except Exception as exc:
-                    return {"success": False, "error": f"Ghost LLM unavailable ({desc}), OpenAI fallback also failed: {exc}"}
+        ghost_llm, desc = _resolve_ghost_llm()
+        if not ghost_llm:
+            return {"success": False, "error": f"No LLM available: {desc}"}
+        llm = ghost_llm
+        log.info("Browser-use using Ghost LLM: %s", desc)
 
         agent = Agent(task=task, llm=llm, browser=browser)
         _set_runtime(session_id, "agent", agent)

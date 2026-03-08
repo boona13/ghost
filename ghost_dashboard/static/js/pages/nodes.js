@@ -112,11 +112,33 @@ export async function render(container) {
     <!-- Install Section -->
     <div class="mt-8 stat-card">
       <h2 class="text-sm font-semibold text-white mb-3">${t('nodes.installNode')}</h2>
-      <div class="flex gap-3">
-        <input id="install-source" type="text" class="form-input flex-1" placeholder="${t('nodes.installPlaceholder')}" aria-label="${t('nodes.installPlaceholder')}">
-        <button id="install-btn" class="btn btn-primary btn-sm">${t('nodes.install')}</button>
+      <div class="flex gap-2 mb-4" role="tablist" aria-label="${t('nodes.installMethod')}">
+        <button class="install-method-tab px-4 py-1.5 text-xs rounded-full bg-ghost-600 text-white transition-colors" data-method="github" role="tab" aria-selected="true">${t('nodes.fromGithub')}</button>
+        <button class="install-method-tab px-4 py-1.5 text-xs rounded-full bg-surface-700 text-zinc-400 hover:bg-surface-600 transition-colors" data-method="computer" role="tab" aria-selected="false">${t('nodes.fromComputer')}</button>
       </div>
-      <div id="install-status" class="mt-2 text-xs text-zinc-500 hidden"></div>
+
+      <div id="install-github-panel" role="tabpanel">
+        <div class="flex gap-3">
+          <input id="install-source" type="text" class="form-input flex-1" placeholder="${t('nodes.githubUrlPlaceholder')}" aria-label="${t('nodes.githubUrlPlaceholder')}">
+          <button id="install-github-btn" class="btn btn-primary btn-sm">${t('nodes.install')}</button>
+        </div>
+        <p class="text-[10px] text-zinc-600 mt-1.5">${t('nodes.githubHint')}</p>
+      </div>
+
+      <div id="install-computer-panel" role="tabpanel" style="display:none">
+        <div id="install-dropzone" class="border-2 border-dashed border-surface-600 rounded-lg p-6 text-center hover:border-ghost-500/50 transition-colors cursor-pointer">
+          <div class="text-2xl mb-2" aria-hidden="true">📦</div>
+          <div class="text-sm text-zinc-300 mb-1" id="install-file-label">${t('nodes.chooseZip')}</div>
+          <div class="text-[10px] text-zinc-600">${t('nodes.dropHint')}</div>
+          <input id="install-file-input" type="file" accept=".zip" class="hidden" aria-label="${t('nodes.chooseZip')}">
+        </div>
+        <div class="flex items-center justify-between mt-3">
+          <span id="install-file-name" class="text-xs text-zinc-500 truncate max-w-[70%]"></span>
+          <button id="install-upload-btn" class="btn btn-primary btn-sm" disabled>${t('nodes.install')}</button>
+        </div>
+      </div>
+
+      <div id="install-status" class="mt-3 text-xs text-zinc-500 hidden"></div>
     </div>
   `;
 
@@ -179,34 +201,133 @@ export async function render(container) {
     });
   });
 
-  const installBtn = container.querySelector('#install-btn');
+  /* ── Install method tabs ───────────────────────────────────── */
+  const githubPanel = container.querySelector('#install-github-panel');
+  const computerPanel = container.querySelector('#install-computer-panel');
+
+  container.querySelectorAll('.install-method-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      container.querySelectorAll('.install-method-tab').forEach(b => {
+        b.classList.remove('bg-ghost-600', 'text-white');
+        b.classList.add('bg-surface-700', 'text-zinc-400');
+        b.setAttribute('aria-selected', 'false');
+      });
+      tab.classList.add('bg-ghost-600', 'text-white');
+      tab.classList.remove('bg-surface-700', 'text-zinc-400');
+      tab.setAttribute('aria-selected', 'true');
+
+      const method = tab.dataset.method;
+      githubPanel.style.display = method === 'github' ? '' : 'none';
+      computerPanel.style.display = method === 'computer' ? '' : 'none';
+    });
+  });
+
+  /* ── GitHub URL install ──────────────────────────────────── */
+  const installGithubBtn = container.querySelector('#install-github-btn');
   const installInput = container.querySelector('#install-source');
   const installStatus = container.querySelector('#install-status');
-  if (installBtn) {
-    installBtn.addEventListener('click', async () => {
+
+  if (installGithubBtn) {
+    installGithubBtn.addEventListener('click', async () => {
       const source = installInput.value.trim();
-      if (!source) return;
-      installBtn.disabled = true;
-      installBtn.textContent = t('nodes.installing');
+      if (!source) { installInput.focus(); return; }
+      installGithubBtn.disabled = true;
+      installGithubBtn.textContent = t('nodes.installing');
       installInput.disabled = true;
       if (installStatus) {
         installStatus.classList.remove('hidden');
-        installStatus.textContent = source.includes('github') ? t('nodes.installProgress') : t('nodes.installing');
+        installStatus.textContent = t('nodes.installProgress');
       }
       try {
         const result = await api.post('/api/nodes/install', { source });
         if (result.status === 'ok') {
           u.toast(t('nodes.installSuccess', { name: result.name }), 'success');
+          if (result.warnings?.length) {
+            u.toast(t('nodes.validationWarnings') + ' ' + result.warnings.join('; '), 'warning');
+          }
           render(container);
         } else {
-          u.toast(result.error || t('nodes.installFailed'), 'error');
+          const detail = result.validation?.errors?.join('; ') || result.error;
+          u.toast(detail || t('nodes.installFailed'), 'error');
         }
       } catch (e) {
         u.toast(e.message, 'error');
       }
-      installBtn.disabled = false;
-      installBtn.textContent = t('nodes.install');
+      installGithubBtn.disabled = false;
+      installGithubBtn.textContent = t('nodes.install');
       installInput.disabled = false;
+      if (installStatus) installStatus.classList.add('hidden');
+    });
+  }
+
+  /* ── Zip file upload install ─────────────────────────────── */
+  const dropzone = container.querySelector('#install-dropzone');
+  const fileInput = container.querySelector('#install-file-input');
+  const fileLabel = container.querySelector('#install-file-label');
+  const fileName = container.querySelector('#install-file-name');
+  const uploadBtn = container.querySelector('#install-upload-btn');
+
+  if (dropzone && fileInput) {
+    dropzone.addEventListener('click', () => fileInput.click());
+
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropzone.classList.add('border-ghost-500/50', 'bg-ghost-500/5');
+    });
+    dropzone.addEventListener('dragleave', () => {
+      dropzone.classList.remove('border-ghost-500/50', 'bg-ghost-500/5');
+    });
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('border-ghost-500/50', 'bg-ghost-500/5');
+      const file = e.dataTransfer.files[0];
+      if (file && file.name.toLowerCase().endsWith('.zip')) {
+        fileInput.files = e.dataTransfer.files;
+        selectFile(file);
+      } else {
+        u.toast(t('nodes.zipOnly'), 'error');
+      }
+    });
+
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files[0]) selectFile(fileInput.files[0]);
+    });
+
+    function selectFile(file) {
+      fileName.textContent = file.name + ' (' + (file.size / 1024).toFixed(0) + ' KB)';
+      fileLabel.textContent = file.name;
+      uploadBtn.disabled = false;
+    }
+
+    uploadBtn.addEventListener('click', async () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      uploadBtn.disabled = true;
+      uploadBtn.textContent = t('nodes.uploading');
+      if (installStatus) {
+        installStatus.classList.remove('hidden');
+        installStatus.textContent = t('nodes.uploading');
+      }
+      try {
+        const form = new FormData();
+        form.append('file', file);
+        const resp = await fetch('/api/nodes/upload-install', { method: 'POST', body: form });
+        const result = await resp.json();
+        if (result.status === 'ok') {
+          u.toast(t('nodes.installSuccess', { name: result.name || file.name }), 'success');
+          if (result.warnings?.length) {
+            u.toast(t('nodes.validationWarnings') + ' ' + result.warnings.join('; '), 'warning');
+          }
+          render(container);
+        } else {
+          const detail = result.validation?.errors?.join('; ') || result.error;
+          u.toast(detail || t('nodes.installFailed'), 'error');
+        }
+      } catch (e) {
+        u.toast(e.message || t('nodes.installFailed'), 'error');
+      }
+      uploadBtn.disabled = false;
+      uploadBtn.textContent = t('nodes.install');
       if (installStatus) installStatus.classList.add('hidden');
     });
   }
@@ -227,6 +348,15 @@ export async function render(container) {
       } finally {
         btn.disabled = false;
       }
+    });
+  });
+
+  /* ── Delete node ─────────────────────────────────────────── */
+  container.querySelectorAll('.node-delete-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const name = btn.dataset.node;
+      const hasModels = btn.dataset.hasModels === 'true';
+      openDeleteModal(name, hasModels, api, u, container);
     });
   });
 }
@@ -807,6 +937,87 @@ async function openRunModal(nodeName, tools, api, u) {
   bindEvents();
 }
 
+/* ── Delete Confirmation Modal ──────────────────────────────────── */
+
+function openDeleteModal(nodeName, hasModels, api, u, pageContainer) {
+  const existing = document.getElementById('node-delete-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'node-delete-overlay';
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-panel" style="max-width:420px">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-base font-semibold text-white">${t('nodes.deleteTitle')}</h2>
+        <button id="delete-modal-close" class="text-zinc-500 hover:text-white text-lg leading-none" aria-label="${t('nodes.close')}">&times;</button>
+      </div>
+      <p class="text-sm text-zinc-400 mb-4">
+        ${t('nodes.deleteConfirm', { name: u.escapeHtml(nodeName) })}
+      </p>
+      ${hasModels ? `
+        <label class="flex items-start gap-2.5 mb-4 p-3 rounded-lg bg-surface-800 border border-surface-700 cursor-pointer hover:border-surface-600 transition-colors">
+          <input type="checkbox" id="delete-models-check" class="mt-0.5 rounded bg-surface-700 border-surface-600 text-red-500">
+          <div>
+            <div class="text-xs text-zinc-300">${t('nodes.deleteModels')}</div>
+            <div class="text-[10px] text-zinc-500 mt-0.5">${t('nodes.deleteModelsHint')}</div>
+          </div>
+        </label>
+      ` : ''}
+      <div class="flex items-center gap-3 pt-2">
+        <button id="delete-confirm-btn" class="btn btn-sm text-xs bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/30 px-5 transition-colors">${t('nodes.delete')}</button>
+        <button id="delete-cancel-btn" class="btn btn-sm text-xs bg-surface-700 text-zinc-400 hover:text-zinc-200 transition-colors">${t('nodes.cancel')}</button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(overlay);
+
+  function close() {
+    overlay.classList.add('modal-closing');
+    setTimeout(() => overlay.remove(), 200);
+    document.removeEventListener('keydown', onEsc);
+  }
+  function onEsc(e) { if (e.key === 'Escape') close(); }
+  document.addEventListener('keydown', onEsc);
+
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector('#delete-modal-close')?.addEventListener('click', close);
+  overlay.querySelector('#delete-cancel-btn')?.addEventListener('click', close);
+
+  overlay.querySelector('#delete-confirm-btn')?.addEventListener('click', async () => {
+    const deleteModels = overlay.querySelector('#delete-models-check')?.checked || false;
+    const confirmBtn = overlay.querySelector('#delete-confirm-btn');
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = t('nodes.deleting');
+
+    try {
+      const resp = await fetch(`/api/nodes/${encodeURIComponent(nodeName)}/uninstall`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ delete_models: deleteModels }),
+      });
+      const result = await resp.json();
+      if (result.ok) {
+        close();
+        let msg = t('nodes.deleteSuccess', { name: nodeName });
+        if (result.deleted_models?.length) {
+          msg += ' · ' + t('nodes.deletedModelsCount', { count: result.deleted_models.length });
+        }
+        u.toast(msg, 'success');
+        render(pageContainer);
+      } else {
+        u.toast(result.error || t('nodes.deleteFailed'), 'error');
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = t('nodes.delete');
+      }
+    } catch (e) {
+      u.toast(e.message || t('nodes.deleteFailed'), 'error');
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = t('nodes.delete');
+    }
+  });
+}
+
 function renderNodeCard(node, u) {
   const m = node.manifest || {};
   const cat = m.category || 'utility';
@@ -854,6 +1065,7 @@ function renderNodeCard(node, u) {
         }
         ${hasError ? `<button class="node-toggle-btn btn btn-sm text-xs bg-surface-700 text-zinc-300 hover:bg-amber-500/20 hover:text-amber-400 transition-colors" data-node="${u.escapeHtml(node.name)}" data-action="enable">${t('common.retry')}</button>` : ''}
         ${isLoaded && node.tools?.length ? `<button class="node-run-btn btn btn-sm text-xs bg-ghost-600/20 text-ghost-400 hover:bg-ghost-600/40 transition-colors" data-node="${u.escapeHtml(node.name)}">${t('nodes.run')}</button>` : ''}
+        ${node.source !== 'bundled' ? `<button class="node-delete-btn btn btn-sm text-xs bg-surface-700 text-zinc-300 hover:bg-red-500/20 hover:text-red-400 transition-colors ml-auto" data-node="${u.escapeHtml(node.name)}" data-has-models="${(m.models || []).length > 0}">${t('nodes.delete')}</button>` : ''}
       </div>
     </div>
   `;

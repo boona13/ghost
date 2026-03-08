@@ -50,7 +50,6 @@ from ghost_email import build_email_tools
 from ghost_hybrid_memory import build_hybrid_memory_tools
 from ghost_code_intel import build_code_intel_tools
 from ghost_data_extract import build_data_extract_tools
-from ghost_sandbox import build_sandbox_tools, docker_available
 from ghost_x_tracker import build_x_tracker_tools
 from ghost_web_search import build_web_search_tools
 from ghost_web_fetch import build_web_fetch_tools
@@ -81,7 +80,6 @@ from ghost_uptime import build_uptime_tools
 from ghost_code_tools import build_code_search_tools
 from ghost_setup_providers import build_setup_provider_tools
 from ghost_tool_intent_security import ToolIntentSecurity
-from ghost_responses_capabilities import get_responses_capabilities, get_responses_capabilities_scope
 from ghost_implementation_auditor_filters import build_implementation_auditor_filter_tools
 from ghost_interrupt import make_interrupt_tools
 from ghost_config_payloads import build_config_payload_tools
@@ -89,7 +87,7 @@ from ghost_dependency_doctor import build_dependency_doctor_tools
 from ghost_pr import build_pr_tools
 from ghost_subagents import build_subagent_tools
 from ghost_langfuse import get_langfuse_manager, build_langfuse_tools
-from ghost_browser_use import build_browser_use_tools
+# from ghost_browser_use import build_browser_use_tools  # disabled — burns rate limits
 from ghost_resource_manager import ResourceManager, build_resource_manager_tools
 from ghost_node_manager import NodeManager, build_node_manager_tools
 from ghost_media_store import MediaStore, build_media_store_tools
@@ -99,8 +97,6 @@ from ghost_node_sdk import build_node_sdk_tools
 from ghost_cloud_providers import ProviderRegistry
 from ghost_community_hub import CommunityHub, build_community_hub_tools
 from ghost_tool_builder import ToolManager, ToolEventBus, build_tool_manager_tools
-
-# responses capabilities wiring marker: dashboard-managed feature flags loaded via config/routes
 
 # ── Logging ──────────────────────────────────────────────────────────
 log = logging.getLogger("ghost")
@@ -967,10 +963,10 @@ class GhostDaemon:
             for tool_def in build_browser_tools():
                 self.tool_registry.register(tool_def)
 
-        # Browser-use tools (AI-native browser automation)
-        if cfg.get("enable_browser_use", True):
-            for tool_def in build_browser_use_tools(cfg):
-                self.tool_registry.register(tool_def)
+        # Browser-use tools — disabled (uses separate LLM calls that burn rate limits)
+        # if cfg.get("enable_browser_use", True):
+        #     for tool_def in build_browser_use_tools(cfg):
+        #         self.tool_registry.register(tool_def)
 
         # Persistent memory (skip in dry-run mode for faster startup)
         self.memory_db = None
@@ -1019,11 +1015,6 @@ class GhostDaemon:
         if cfg.get("enable_evolve", True):
             self.evolve_engine = get_evolve_engine()
             for tool_def in build_evolve_tools(cfg):
-                self.tool_registry.register(tool_def)
-
-        # Sandbox tools (Docker isolation for safe code testing)
-        if cfg.get("enable_sandbox", True) and docker_available():
-            for tool_def in build_sandbox_tools():
                 self.tool_registry.register(tool_def)
 
         # Integration tools (Google APIs, Grok/X API)
@@ -1562,12 +1553,13 @@ class GhostDaemon:
 
 
     def _build_identity_context(self):
-        """Build the identity preamble from SOUL.md + USER.md.
+        """Build the identity preamble from SOUL.md + USER.md + platform info.
 
         Returns a string to prepend to any system prompt.
         Hot-reloads on file change (mtime check).
         """
-        parts = []
+        parts = [ghost_platform.platform_context()]
+
         soul = self._load_soul()
         user = self._load_user()
 
@@ -1586,13 +1578,10 @@ class GhostDaemon:
                 "something new about the user.\n\n"
                 + user
             )
-        if not parts:
-            return ""
         return "\n\n".join(parts) + "\n\n---\n\n"
 
     _BROWSER_TOOL_NAMES = frozenset({
-        "browser", "browser_use_create_session", "browser_use_run_task",
-        "browser_use_navigate", "browser_use_get_html", "browser_use_screenshot",
+        "browser",
     })
 
     def _resolve_skill_model(self, matched_skills):
@@ -1623,16 +1612,7 @@ class GhostDaemon:
             _browser_stop()
         except Exception as e:
             log.warning("Post-task browser cleanup failed: %s", e)
-        try:
-            from ghost_browser_use import list_sessions, delete_session
-            for s in list_sessions():
-                if s.get("status") in ("completed", "error"):
-                    try:
-                        delete_session(s["id"])
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+        pass
 
     def _cleanup_stuck_features(self, tool_calls):
         """Auto-reset or auto-complete features after the implementer finishes.
@@ -3525,7 +3505,6 @@ def main():
             "enable_web_fetch": False,
             "enable_data_extract": False,
             "enable_code_intel": False,
-            "enable_sandbox": False,
         })
         daemon = GhostDaemon(dummy_key, dry_cfg, dry_run=True)
         print("Dry-run: daemon initialized successfully")

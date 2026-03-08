@@ -98,8 +98,6 @@ _BASE_ALLOWED_COMMANDS = [
     "jq",
     # Modern CLI tools
     "bat", "exa", "eza",
-    # Docker (if available)
-    "docker", "docker-compose",
     # Media processing
     "ffmpeg", "ffprobe",
 ]
@@ -266,7 +264,7 @@ def _check_dangerous_command_policy(command: str, cfg: dict, workspace=None):
         for tok in tokens[1:]:
             if tok.startswith("-"):
                 continue
-            return False, "POLICY_DENY:PYTHON_SCRIPT_EXEC:Python script execution denied by policy (use sandbox_exec)"
+            return False, "POLICY_DENY:PYTHON_SCRIPT_EXEC:Python script execution denied by policy"
         return True, ""
 
     if base_cmd in {"pip", "pip3"}:

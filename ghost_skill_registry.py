@@ -22,7 +22,7 @@ from ghost_skills import SKILLS_USER_DIR
 log = logging.getLogger("ghost.skill_registry")
 
 # Default registry configuration
-DEFAULT_REGISTRY_REPO = "ghost-ai/skills-registry"
+DEFAULT_REGISTRY_REPO = "boona13/skills-registry"
 DEFAULT_REGISTRY_BRANCH = "main"
 DEFAULT_CACHE_TTL_SECONDS = 3600  # 1 hour
 DEFAULT_REGISTRY_INDEX_URL = "https://raw.githubusercontent.com/{repo}/{branch}/index.json"
@@ -333,27 +333,43 @@ class SkillRegistryManager:
         except SkillRegistryError as exc:
             return {"ok": False, "error": str(exc)}
 
-        # Validate content
+        # Validate content + run security scan
         from ghost_skill_manager import SkillManager
         manager = SkillManager(self.config_loader, self.config_saver)
-        validation = manager.validate_skill_text(content)
+        validation = manager.validate_skill_text(content, run_security_scan=True)
 
         if not validation.get("ok", False):
+            security = validation.get("security", {})
+            if security.get("blocked"):
+                findings = security.get("findings", [])
+                top_findings = [f.get("message", "") for f in findings[:3]]
+                log.warning("Skill '%s' BLOCKED by security scan: %s", skill_name, top_findings)
+                return {
+                    "ok": False,
+                    "error": f"Skill '{skill_name}' blocked by security scan: contains potentially dangerous content",
+                    "security": security,
+                    "validation": validation,
+                }
             return {
                 "ok": False,
                 "error": f"Skill validation failed: {validation.get('status', 'unknown error')}",
                 "validation": validation,
             }
 
+        # Warn but allow caution/dangerous (user already consented via UI)
+        security = validation.get("security", {})
+        verdict = security.get("verdict", "safe")
+
         # Install the skill
         try:
             result = manager.install_local(skill_name, content, overwrite=overwrite)
             if result.get("ok"):
-                log.info("Installed skill '%s' v%s by %s", skill_name, skill.version, skill.author)
+                log.info("Installed skill '%s' v%s by %s (security: %s)", skill_name, skill.version, skill.author, verdict)
                 return {
                     "ok": True,
                     "skill": skill.to_dict(),
                     "path": result.get("path"),
+                    "security": security,
                     "message": f"Installed {skill_name} v{skill.version} by {skill.author}",
                 }
             else:

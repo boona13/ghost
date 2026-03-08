@@ -15,6 +15,7 @@ export async function render(container) {
   const paused = s.paused;
   const statusLabel = paused ? t('status.paused') : running ? t('status.runningStatus') : t('status.stopped');
   const statusColor = paused ? 'amber' : running ? 'emerald' : 'red';
+  const statusGlow = running && !paused ? 'box-shadow: 0 0 12px rgba(52, 211, 153, 0.3)' : '';
 
   let modelDisplay = s.model || '\u2014';
   let providerPart = '';
@@ -25,7 +26,7 @@ export async function render(container) {
     modelPart = modelDisplay.slice(idx + 1);
   }
 
-  const recentEntries = (feed.entries || []).slice(0, 8);
+  const recentEntries = (feed.entries || []).slice(0, 5);
 
   const sessionTokens = usage.session_tokens || s.session_tokens || 0;
   const sessionCalls = usage.calls_this_session || s.calls_this_session || 0;
@@ -34,106 +35,136 @@ export async function render(container) {
   const featureLabels = { tool_loop:t('overview.featureToolLoop'), memory:t('overview.featureMemory'), skills:t('overview.featureSkills'), plugins:t('overview.featurePlugins'), browser:t('overview.featureBrowser'), cron:t('overview.featureCron'), vision:t('overview.featureVision'), tts:t('overview.featureTts'), security_audit:t('overview.featureSecurityAudit'), session_memory:t('overview.featureSessionMemory') };
   const allFeaturesOn = featureKeys.every(k => s.features?.[k]);
 
-  const quickActions = [
-    { page: 'chat', icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>', label: t('overview.qaChat'), desc: t('overview.qaChatDesc') },
-    { page: 'skills', icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 10V3L4 14h7v7l9-11h-7z"/>', label: t('overview.qaSkills'), desc: t('overview.qaSkillsDesc') },
-    { page: 'memory', icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>', label: t('overview.qaMemory'), desc: t('overview.qaMemoryDesc') },
-    { page: 'cron', icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>', label: t('overview.qaCron'), desc: t('overview.qaCronDesc') },
-  ];
-
   container.innerHTML = `
-    <div class="overview-hero mb-6">
-      <div class="flex items-start justify-between gap-4 flex-wrap">
+    <!-- Status hero -->
+    <div class="overview-hero-v2 mb-6">
+      <div class="flex items-center gap-4 mb-4">
+        <div class="status-orb status-orb-${statusColor}" style="${statusGlow}">
+          <span class="status-orb-inner bg-${statusColor}-500 ${running && !paused ? 'animate-pulse' : ''}"></span>
+        </div>
         <div class="flex-1 min-w-0">
-          <div class="flex items-center gap-3 mb-2">
-            <span class="inline-block w-3 h-3 rounded-full bg-${statusColor}-500 ${running && !paused ? 'animate-pulse' : ''} flex-shrink-0"></span>
-            <span class="text-lg font-bold text-white">${statusLabel}</span>
-          </div>
-          <div class="flex items-center gap-2 text-sm">
-            ${providerPart ? `<span class="text-zinc-500">${u.escapeHtml(providerPart)}</span><span class="text-zinc-700">/</span>` : ''}
-            <span class="text-zinc-200 font-medium">${u.escapeHtml(modelPart)}</span>
+          <div class="text-lg font-bold text-white leading-tight">${statusLabel}</div>
+          <div class="flex items-center gap-1.5 mt-0.5">
+            ${providerPart ? `<span class="text-xs text-zinc-500">${u.escapeHtml(providerPart)}</span><span class="text-xs text-zinc-700">/</span>` : ''}
+            <span class="text-xs text-zinc-300 font-medium">${u.escapeHtml(modelPart)}</span>
+            ${s.uptime_seconds ? `<span class="text-xs text-zinc-600 ml-2">${formatUptime(s.uptime_seconds)}</span>` : ''}
           </div>
         </div>
-        <div class="flex items-center gap-4 flex-shrink-0">
-          ${s.uptime_seconds ? `<div class="text-right"><div class="text-[10px] text-zinc-600 uppercase tracking-wider">${t('overview.uptime')}</div><div class="text-sm font-mono text-zinc-300">${formatUptime(s.uptime_seconds)}</div></div>` : ''}
-          <div class="flex gap-2">
-            ${s.embedded ? `<button id="btn-reload" class="btn btn-sm btn-secondary">${t('overview.reload')}</button>` : ''}
-            <button id="btn-pause" class="btn btn-sm ${paused ? 'btn-primary' : 'btn-secondary'}">${paused ? t('overview.resume') : t('overview.pause')}</button>
-            ${s.embedded ? `<button id="btn-restart" class="btn btn-sm btn-secondary">${t('overview.restart')}</button>` : ''}
-            ${s.embedded ? `<button id="btn-shutdown" class="btn btn-sm btn-danger">${t('overview.shutdown')}</button>` : ''}
-          </div>
+        <div class="flex gap-2 flex-shrink-0">
+          <button id="btn-pause" class="btn btn-sm ${paused ? 'btn-primary' : 'btn-secondary'}">${paused ? t('overview.resume') : t('overview.pause')}</button>
+          ${s.embedded ? `<button id="btn-reload" class="btn btn-sm btn-secondary">${t('overview.reload')}</button>` : ''}
+          ${s.embedded ? `<button id="btn-restart" class="btn btn-sm btn-secondary">${t('overview.restart')}</button>` : ''}
+          ${s.embedded ? `<button id="btn-shutdown" class="btn btn-sm btn-danger">${t('overview.shutdown')}</button>` : ''}
         </div>
       </div>
     </div>
 
     ${s.live ? `
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-      <div class="metric-card" data-goto="feed">
-        <div class="metric-card-label">${t('overview.sessionsToday')}</div>
-        <div class="metric-card-value">${s.today_actions}</div>
-        <div class="metric-card-sub">${s.total_actions} ${t('overview.allTime')}</div>
+    <!-- Metrics grid -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+      <div class="metric-card-v2" data-goto="feed">
+        <div class="metric-card-icon-wrap bg-blue-500/10">
+          <svg class="w-4 h-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
+        </div>
+        <div>
+          <div class="metric-card-label">${t('overview.sessionsToday')}</div>
+          <div class="flex items-baseline gap-2">
+            <div class="metric-card-value">${s.today_actions}</div>
+            <div class="metric-card-sub">${s.total_actions} ${t('overview.allTime')}</div>
+          </div>
+        </div>
       </div>
-      <div class="metric-card">
-        <div class="metric-card-label">${t('overview.tokensSession')}</div>
-        <div class="metric-card-value">${sessionTokens.toLocaleString()}</div>
-        <div class="metric-card-sub">${sessionCalls} ${t('overview.llmCalls')}</div>
+      <div class="metric-card-v2">
+        <div class="metric-card-icon-wrap bg-ghost-500/10">
+          <svg class="w-4 h-4 text-ghost-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg>
+        </div>
+        <div>
+          <div class="metric-card-label">${t('overview.tokensSession')}</div>
+          <div class="flex items-baseline gap-2">
+            <div class="metric-card-value">${sessionTokens.toLocaleString()}</div>
+            <div class="metric-card-sub">${sessionCalls} ${t('overview.llmCalls')}</div>
+          </div>
+        </div>
       </div>
-      <div class="metric-card" data-goto="skills">
-        <div class="metric-card-label">${t('overview.skills')}</div>
-        <div class="metric-card-value">${s.live.skills}</div>
-        <div class="metric-card-sub">${t('overview.skillsReady')}</div>
+      <div class="metric-card-v2" data-goto="skills">
+        <div class="metric-card-icon-wrap bg-amber-500/10">
+          <svg class="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        </div>
+        <div>
+          <div class="metric-card-label">${t('overview.skills')}</div>
+          <div class="flex items-baseline gap-2">
+            <div class="metric-card-value">${s.live.skills}</div>
+            <div class="metric-card-sub">${t('overview.skillsReady')}</div>
+          </div>
+        </div>
       </div>
-      <div class="metric-card" data-goto="memory">
-        <div class="metric-card-label">${t('overview.memory')}</div>
-        <div class="metric-card-value">${s.live.memory_entries}</div>
-        <div class="metric-card-sub">${t('overview.memoriesStored')}</div>
+      <div class="metric-card-v2" data-goto="memory">
+        <div class="metric-card-icon-wrap bg-emerald-500/10">
+          <svg class="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/></svg>
+        </div>
+        <div>
+          <div class="metric-card-label">${t('overview.memory')}</div>
+          <div class="flex items-baseline gap-2">
+            <div class="metric-card-value">${s.live.memory_entries}</div>
+            <div class="metric-card-sub">${t('overview.memoriesStored')}</div>
+          </div>
+        </div>
       </div>
     </div>
     ` : `<div class="mb-6 p-3 rounded-lg" style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2)">
       <div class="text-xs text-amber-400">${t('overview.standaloneMode')}</div>
     </div>`}
 
-    <div class="grid grid-cols-1 lg:grid-cols-5 gap-6 mb-6">
-      <div class="lg:col-span-3">
-        <div class="flex items-center justify-between mb-3">
-          <h2 class="text-sm font-semibold text-zinc-400">${t('overview.recentActivity')}</h2>
-          <a href="#feed" class="text-[11px] text-ghost-400 hover:text-ghost-300 transition-colors">${t('overview.viewAll')} &rarr;</a>
-        </div>
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+      <!-- Quick actions -->
+      <div>
+        <h2 class="text-sm font-semibold text-zinc-400 mb-3">${t('overview.quickActions')}</h2>
         <div class="space-y-2">
-          ${recentEntries.length === 0 ? `<div class="text-xs text-zinc-600 py-8 text-center">${t('overview.noActivity')}</div>` :
-            recentEntries.map(e => `
-              <div class="feed-entry type-${e.type || 'unknown'}">
-                <div class="flex items-center gap-2 mb-1">
-                  <span class="text-xs">${u.TYPE_ICONS[e.type] || '\u2753'}</span>
-                  <span class="badge badge-${u.TYPE_COLORS[e.type] || 'zinc'}">${e.type}</span>
-                  <span class="text-[10px] text-zinc-600 ml-auto">${u.timeAgo(e.time)}</span>
-                </div>
-                <div class="text-xs text-zinc-400 line-clamp-2">${u.escapeHtml((e.result || '').slice(0, 200))}</div>
-              </div>
-            `).join('')}
+          <div class="quick-action-v2" data-goto="chat">
+            <div class="qa-icon bg-ghost-600/20"><svg class="w-4 h-4 text-ghost-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg></div>
+            <div class="flex-1 min-w-0">
+              <div class="text-sm font-medium text-zinc-200">${t('overview.qaChat')}</div>
+              <div class="text-[11px] text-zinc-600">${t('overview.qaChatDesc')}</div>
+            </div>
+            <svg class="w-4 h-4 text-zinc-700 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+          </div>
+          <div class="quick-action-v2" data-goto="skills">
+            <div class="qa-icon bg-amber-500/10"><svg class="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg></div>
+            <div class="flex-1 min-w-0">
+              <div class="text-sm font-medium text-zinc-200">${t('overview.qaSkills')}</div>
+              <div class="text-[11px] text-zinc-600">${t('overview.qaSkillsDesc')}</div>
+            </div>
+            <svg class="w-4 h-4 text-zinc-700 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+          </div>
+          <div class="quick-action-v2" data-goto="memory">
+            <div class="qa-icon bg-emerald-500/10"><svg class="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg></div>
+            <div class="flex-1 min-w-0">
+              <div class="text-sm font-medium text-zinc-200">${t('overview.qaMemory')}</div>
+              <div class="text-[11px] text-zinc-600">${t('overview.qaMemoryDesc')}</div>
+            </div>
+            <svg class="w-4 h-4 text-zinc-700 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+          </div>
+          <div class="quick-action-v2" data-goto="evolve">
+            <div class="qa-icon bg-blue-500/10"><svg class="w-4 h-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg></div>
+            <div class="flex-1 min-w-0">
+              <div class="text-sm font-medium text-zinc-200">Evolution</div>
+              <div class="text-[11px] text-zinc-600">Self-improvement history</div>
+            </div>
+            <svg class="w-4 h-4 text-zinc-700 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+          </div>
         </div>
       </div>
 
-      <div class="lg:col-span-2">
-        <h2 class="text-sm font-semibold text-zinc-400 mb-3">${t('overview.quickActions')}</h2>
-        <div class="grid grid-cols-2 gap-2 mb-4">
-          ${quickActions.map(qa => `
-            <div class="quick-action-card" data-goto="${qa.page}">
-              <svg class="w-5 h-5 text-ghost-400 mb-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">${qa.icon}</svg>
-              <div class="text-xs font-medium text-zinc-200">${qa.label}</div>
-              <div class="text-[10px] text-zinc-600 mt-0.5">${qa.desc}</div>
-            </div>
-          `).join('')}
-        </div>
-
-        ${s.live ? `
+      <!-- System health -->
+      ${s.live ? `
+      <div>
         <h2 class="text-sm font-semibold text-zinc-400 mb-3">${t('overview.systemHealth')}</h2>
         <div class="stat-card">
-          <div class="space-y-2">
+          <div class="space-y-3">
             <div class="health-item">
               <span class="health-dot health-dot-ok"></span>
               <span class="text-xs text-zinc-300">${t('overview.healthModel')}</span>
-              <span class="text-[10px] text-zinc-500 ml-auto font-mono">${u.escapeHtml(modelPart)}</span>
+              <span class="text-[10px] text-zinc-500 ml-auto font-mono truncate max-w-[120px]">${u.escapeHtml(modelPart)}</span>
             </div>
             <div class="health-item">
               <span class="health-dot ${s.live.cron_enabled === s.live.cron_jobs ? 'health-dot-ok' : 'health-dot-warn'}"></span>
@@ -152,23 +183,41 @@ export async function render(container) {
             </div>
           </div>
         </div>
+
+        ${!allFeaturesOn ? `
+        <h2 class="text-sm font-semibold text-zinc-400 mt-4 mb-3">${t('overview.features')}</h2>
+        <div class="flex flex-wrap gap-1.5" id="feature-toggles">
+          ${featureKeys.map(k => {
+            const on = s.features?.[k];
+            return `<button data-feature="${k}" class="badge ${on ? 'badge-green' : 'badge-zinc'} cursor-pointer hover:opacity-80 text-[10px] px-2 py-0.5">
+              ${on ? '\u25CF' : '\u25CB'} ${featureLabels[k]}
+            </button>`;
+          }).join('')}
+        </div>
         ` : ''}
       </div>
-    </div>
+      ` : ''}
 
-    ${!allFeaturesOn ? `
-    <div class="mb-6">
-      <h2 class="text-sm font-semibold text-zinc-400 mb-3">${t('overview.features')}</h2>
-      <div class="flex flex-wrap gap-2" id="feature-toggles">
-        ${featureKeys.map(k => {
-          const on = s.features?.[k];
-          return `<button data-feature="${k}" class="badge ${on ? 'badge-green' : 'badge-zinc'} cursor-pointer hover:opacity-80 text-xs px-3 py-1">
-            ${on ? '\u25CF' : '\u25CB'} ${featureLabels[k]}
-          </button>`;
-        }).join('')}
+      <!-- Recent activity -->
+      <div>
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-sm font-semibold text-zinc-400">${t('overview.recentActivity')}</h2>
+          <a href="#feed" class="text-[11px] text-ghost-400 hover:text-ghost-300 transition-colors">${t('overview.viewAll')} &rarr;</a>
+        </div>
+        <div class="space-y-2">
+          ${recentEntries.length === 0 ? `<div class="text-xs text-zinc-600 py-8 text-center">${t('overview.noActivity')}</div>` :
+            recentEntries.map(e => `
+              <div class="feed-entry-compact type-${e.type || 'unknown'}">
+                <div class="flex items-center gap-2">
+                  <span class="text-xs flex-shrink-0">${u.TYPE_ICONS[e.type] || '\u2753'}</span>
+                  <span class="text-xs text-zinc-400 truncate flex-1">${u.escapeHtml((e.result || '').slice(0, 100))}</span>
+                  <span class="text-[10px] text-zinc-600 flex-shrink-0">${u.timeAgo(e.time)}</span>
+                </div>
+              </div>
+            `).join('')}
+        </div>
       </div>
     </div>
-    ` : ''}
   `;
 
   // Navigation for metric cards and quick actions

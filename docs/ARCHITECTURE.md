@@ -5,53 +5,47 @@ This document describes the internal architecture of the Ghost system — how th
 ## System Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        GhostDaemon                              │
-│                                                                 │
-│  ┌──────────┐   ┌────────────┐   ┌──────────────┐              │
-│  │ Clipboard │──▶│ SmartFilter│──▶│  classify()  │              │
-│  │  Watcher  │   │  (dedup +  │   │  (content    │              │
-│  │           │   │  rate-limit)│  │   type)      │              │
-│  └──────────┘   └────────────┘   └──────┬───────┘              │
-│                                          │                      │
-│  ┌──────────┐                   ┌────────▼────────┐             │
-│  │Screenshot│──────────────────▶│ process_text()  │             │
-│  │ Watcher  │                   │ process_image() │             │
-│  └──────────┘                   └────────┬────────┘             │
-│                                          │                      │
-│          ┌───────────────────────────────┼──────────────┐       │
-│          │                               │              │       │
-│  ┌───────▼──────┐  ┌────────────┐  ┌────▼─────┐        │       │
-│  │ SkillLoader  │  │  Identity   │  │ Hooks    │        │       │
-│  │  (match +    │  │ (SOUL.md + │  │ (plugin  │        │       │
-│  │   inject)    │  │  USER.md)  │  │  events) │        │       │
-│  └───────┬──────┘  └─────┬──────┘  └──────────┘        │       │
-│          │               │                              │       │
-│  ┌───────▼───────────────▼──────────────────────┐       │       │
-│  │              System Prompt Builder            │       │       │
-│  │  identity + base prompt + matched skills     │       │       │
-│  └──────────────────┬───────────────────────────┘       │       │
-│                     │                                   │       │
-│  ┌──────────────────▼───────────────────────────┐       │       │
-│  │            ToolLoopEngine                     │       │       │
-│  │  LLM call ──▶ tool execution ──▶ LLM call    │       │       │
-│  │  (multi-turn until text response or max)     │       │       │
-│  └──────────────────┬───────────────────────────┘       │       │
-│                     │                                   │       │
-│  ┌─────────┬────────┼─────────┬──────────┐              │       │
-│  │         │        │         │          │              │       │
-│  ▼         ▼        ▼         ▼          ▼              │       │
-│ Feed    MemoryDB  Terminal  Panel    Context             │       │
-│ (.json) (SQLite)  (stdout)  (native) Memory             │       │
-│                                                         │       │
-│  ┌──────────────┐  ┌──────────────┐                     │       │
-│  │ CronService  │  │  Dashboard   │◀── Flask (bg thread)│       │
-│  │  (scheduler) │  │  :3333       │                     │       │
-│  └──────────────┘  └──────────────┘                     │       │
-└─────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────┐
+│                           GhostDaemon                                 │
+│                                                                       │
+│  ┌────────────┐  ┌────────────┐  ┌──────────────┐                    │
+│  │  Dashboard  │  │  Channels  │  │  Cron Tasks  │                    │
+│  │  Chat UI   │  │ (20+ msg   │  │  (scheduled  │                    │
+│  │  (primary) │  │  platforms) │  │   routines)  │                    │
+│  └─────┬──────┘  └─────┬──────┘  └──────┬───────┘                    │
+│        │               │                │                             │
+│        └───────────────┼────────────────┘                             │
+│                        ▼                                              │
+│  ┌──────────────────────────────────────────────────────┐             │
+│  │              Message Processing Pipeline              │             │
+│  │  classify() → SkillLoader.match() → prompt builder   │             │
+│  └──────────────────────┬───────────────────────────────┘             │
+│                         │                                             │
+│  ┌──────────────┐  ┌────▼──────────┐  ┌──────────────┐               │
+│  │   Identity   │  │  System       │  │   Skills     │               │
+│  │ (SOUL.md +   │──│  Prompt       │──│  (42 bundled │               │
+│  │  USER.md)    │  │  Builder      │  │  + registry) │               │
+│  └──────────────┘  └────┬──────────┘  └──────────────┘               │
+│                         │                                             │
+│  ┌──────────────────────▼───────────────────────────────┐             │
+│  │              ToolLoopEngine                           │             │
+│  │  LLM call ──▶ tool execution ──▶ LLM call            │             │
+│  │  (multi-turn until text response or 200 max steps)   │             │
+│  └──────────────────────┬───────────────────────────────┘             │
+│                         │                                             │
+│     ┌──────┬───────┬────┼────┬──────────┬──────────┐                  │
+│     ▼      ▼       ▼    ▼    ▼          ▼          ▼                  │
+│  Memory  Browser  Shell  Web   Vision  GhostNodes  Evolve             │
+│  (4-layer)(Playwright)  Exec  Search  (5 providers)(23 nodes)(self-mod)│
+│                                                                       │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                │
+│  │ CronService  │  │  Dashboard   │  │  Providers   │                │
+│  │  (scheduler) │  │  :3333       │  │  (7 LLMs)    │                │
+│  └──────────────┘  └──────────────┘  └──────────────┘                │
+└───────────────────────────────────────────────────────────────────────┘
 ```
 
-## Core Modules
+## Core Modules (77 Python files)
 
 ### `ghost.py` — Main Daemon
 
@@ -60,7 +54,6 @@ The central module. Contains:
 - **`GhostDaemon`** — The main class that orchestrates everything.
 - **`classify(text)`** — Content type classifier. Returns one of: `url`, `error`, `code`, `json`, `foreign`, `long_text`, or `skip`.
 - **`SmartFilter`** — Prevents duplicate processing via content hashing and rate limiting.
-- **`LLMClient`** — Single-shot OpenRouter API client (legacy fallback).
 - **`ContextMemory`** — Short-term rolling context for recent actions (not persisted).
 - **CLI** — Argument parser and subcommands (`start`, `log`, `status`, `context`, `cron`, `soul`, `user`, `dashboard`).
 
@@ -70,59 +63,40 @@ The central module. Contains:
 main()
   └─▶ GhostDaemon.__init__()
        ├── SmartFilter, ContextMemory
-       ├── LLMClient (legacy), ToolLoopEngine
-       ├── ToolRegistry + built-in tools (9 system + browser + cron)
-       ├── MemoryDB (SQLite + FTS5)
-       ├── HookRunner
-       ├── SkillLoader (scans skills/ + ~/.ghost/skills/)
+       ├── ToolLoopEngine + ToolRegistry
+       ├── 60+ tools (system + browser + memory + cron + evolve + integrations + ...)
+       ├── MemoryDB (SQLite + FTS5) + HybridMemory (vector embeddings)
+       ├── HookRunner (plugin events)
+       ├── SkillLoader (scans skills/ + ~/.ghost/skills/, 42 bundled)
        ├── PluginLoader
-       └── CronService
+       ├── CronService (10+ autonomous routines)
+       ├── Multi-provider LLM chain (7 providers)
+       └── Channel gateway (20+ messaging platforms)
   └─▶ GhostDaemon.run()
        ├── Print banner, start cron, start dashboard thread
        ├── Write PID file, set signal handlers
+       ├── Bootstrap growth routines
        └── Main loop:
-            ├── Check PAUSE_FILE → skip if paused
-            ├── Check Desktop for new screenshots → process_image()
-            ├── Check clipboard for images (every 6 ticks) → process_image()
-            ├── Check OWN_COPY flag → skip own copies
-            ├── Check clipboard text → SmartFilter → process_text()
-            └── Check for panel actions → check_actions()
+            ├── Check for dashboard chat messages
+            ├── Check for channel messages (WhatsApp, Telegram, etc.)
+            ├── Check for panel actions
+            └── Process via tool loop engine
 ```
 
-#### Text Processing Pipeline (`process_text`)
+#### Message Processing Pipeline
 
 ```
-1. Hook: on_classify            (plugins can override content type)
-2. classify(text)               → url / error / code / json / foreign / long_text / skip
-3. Hook: before_analyze         (plugins can modify text)
-4. ContextMemory prefix         (recent actions for context)
-5. SkillLoader.match()          (find matching skills, exclude disabled)
-6. Build system prompt          (identity + base prompt + skill instructions)
-7. URL fetch                    (if content_type == "url", fetch page content)
-8. ToolLoopEngine.run()         (multi-turn LLM ↔ tool execution)
-   OR LLMClient.analyze()      (single-shot fallback if tools disabled)
-9. Hook: after_analyze          (plugins can modify result)
-10. Terminal output             (pretty-printed to stdout)
-11. Extract fix command         (for errors, copy fix to clipboard)
-12. Hook: on_feed_append        (plugins can modify feed entry)
-13. Append to feed + log        (feed.json, log.json)
-14. Save to MemoryDB            (persistent SQLite storage)
-15. Increment actions_today
-```
-
-#### Image Processing Pipeline (`process_image`)
-
-```
-1. Hook: on_screenshot
-2. ContextMemory prefix
-3. SkillLoader.match("image screenshot", "image")
-4. Build system prompt (identity + image prompt + skills)
-5. Read image as base64
-6. ToolLoopEngine.run() with image
-   OR LLMClient.analyze_image() (fallback)
-7. Terminal output
-8. Append to feed + log
-9. Save to MemoryDB
+1. classify(text)               → url / error / code / json / foreign / long_text / skip
+2. Hook: before_analyze         (plugins can modify text)
+3. ContextMemory prefix         (recent actions for context)
+4. SkillLoader.match()          (find matching skills, exclude disabled)
+5. Build system prompt          (identity + base prompt + skill instructions)
+6. URL fetch                    (if content_type == "url", fetch page content)
+7. ToolLoopEngine.run()         (multi-turn LLM ↔ tool execution)
+8. Hook: after_analyze          (plugins can modify result)
+9. Stream to chat / channel     (real-time response delivery)
+10. Append to feed + log        (feed.json, log.json)
+11. Save to MemoryDB            (persistent SQLite storage)
 ```
 
 ### `ghost_loop.py` — Tool Loop Engine
@@ -132,7 +106,7 @@ The autonomous multi-turn execution engine.
 **`ToolLoopEngine`** sends messages to the LLM with available tools. When the LLM returns tool calls instead of text, the engine executes them and feeds results back. This continues until:
 
 - The LLM returns a text response (no tool calls), or
-- `max_steps` is reached (default: 20), or
+- `max_steps` is reached (default: 200), or
 - The `LoopDetector` identifies repetitive patterns and injects a break.
 
 ```
@@ -150,15 +124,9 @@ Step 1: LLM call (system prompt + user message + tools schema)
 - `parameters` — JSON Schema of accepted arguments
 - `execute` — Python callable that runs the tool
 
-**`ToolLoopResult`** returned after loop completion:
-- `text` — Final text response
-- `tool_calls` — List of all tool calls made
-- `total_tokens` — Token usage across all turns
-- `steps` — Number of loop iterations
+### `ghost_tools.py` — Built-in System Tools
 
-### `ghost_tools.py` — Built-in Tools
-
-Nine system tools registered by default:
+Core tools registered by default:
 
 | Tool | Description |
 |---|---|
@@ -166,24 +134,58 @@ Nine system tools registered by default:
 | `file_read` | Read file contents |
 | `file_write` | Write or append to files |
 | `file_search` | Search files by name or content |
-| `web_fetch` | Fetch URL content |
+| `web_fetch` | Fetch URL content (5-tier extraction pipeline) |
+| `web_search` | Multi-provider web search (6 providers) |
 | `clipboard_read` | Read current clipboard text |
 | `clipboard_write` | Write text to clipboard |
-| `notify` | Send macOS notification |
-| `app_control` | Open/activate macOS applications |
+| `notify` | Send system notification |
+| `app_control` | Open/activate applications |
+| `generate_image` | AI image generation |
 
-Additional tool sets:
-- **Browser tools** (`ghost_browser.py`): `browser` — a single multi-action tool with subcommands for navigation, inspection, and interaction.
-- **Memory tools** (`ghost_memory.py`): `memory_search`, `memory_save` — registered when memory is enabled.
-- **Cron tools** (`ghost_cron.py`): `cron_list`, `cron_add`, `cron_remove`, `cron_run`, `cron_status`, `cron_enable` — registered when cron is enabled.
+Additional tool sets registered from other modules:
 
-Total: up to **18 tools** active simultaneously.
+| Module | Tools |
+|---|---|
+| `ghost_browser.py` | `browser` (multi-action: navigate, snapshot, click, type, fill, etc.) |
+| `ghost_memory.py` | `memory_search`, `memory_save` |
+| `ghost_hybrid_memory.py` | `semantic_memory_search`, `semantic_memory_save` |
+| `ghost_cron.py` | `cron_list`, `cron_add`, `cron_remove`, `cron_run`, `cron_status`, `cron_enable` |
+| `ghost_evolve.py` | `evolve_plan`, `evolve_apply`, `evolve_test`, `evolve_deploy`, `evolve_rollback` |
+| `ghost_future_features.py` | `add_future_feature`, `list_future_features`, `get_future_feature`, `approve_future_feature`, etc. |
+| `ghost_integrations.py` | `google_gmail`, `google_calendar`, `google_drive`, `google_docs`, `google_sheets` |
+| `ghost_email.py` | `email_create`, `email_inbox`, `email_read` |
+| `ghost_credentials.py` | `credential_save`, `credential_get`, `credential_list`, `credential_delete` |
+| `ghost_autonomy.py` | `add_action_item`, `log_growth_activity`, `repair_state` |
+| `ghost_webhooks.py` | `webhook_create`, `webhook_list`, `webhook_delete`, `webhook_test` |
+| `ghost_skill_registry.py` | `search_registry_skills`, `install_registry_skill`, `refresh_registry_cache` |
+| `ghost_canvas.py` | `canvas` (create/update visual output panels) |
+| `ghost_code_tools.py` | `code_analyze`, `code_metrics` |
+| `ghost_x_tracker.py` | `x_check_action`, `x_log_action`, `x_action_history`, `x_action_stats` |
+| `ghost_node_manager.py` | 20+ GhostNode tools (text_to_image_local, text_to_video, bark_speak, etc.) |
+| `ghost_tool_builder.py` | `tools_create`, `tools_install_github`, `tools_list` |
+| `ghost_voice.py` | Voice Wake + Talk Mode tools |
+
+Total: **60+ tools** active simultaneously depending on configuration.
+
+### `ghost_providers.py` — Multi-Provider LLM
+
+7 LLM providers with automatic fallback:
+
+| Provider | Access | Key Models |
+|---|---|---|
+| OpenRouter | 200+ models via single API key | Any model on the platform |
+| OpenAI | Direct API | gpt-5.3-codex, gpt-4.1, o3 |
+| OpenAI Codex | ChatGPT subscription via OAuth | No extra cost |
+| Anthropic | Direct API | claude-opus-4-6, claude-sonnet-4-6 |
+| Google Gemini | Direct API (free tier) | gemini-2.5-pro, gemini-2.5-flash |
+| xAI | Direct API | grok-4, grok-3 |
+| Ollama | Local models | llama3, mistral, etc. |
+
+Features: jittered exponential backoff, 5-minute cooldown with periodic probing, automatic API format adaptation (OpenAI ↔ Anthropic Messages ↔ Codex Responses), OAuth auto-refresh.
 
 ### `ghost_browser.py` — Browser Automation
 
 Playwright-based browser automation exposed as a single `browser` tool with action-based dispatch.
-
-**Actions:**
 
 | Category | Actions |
 |---|---|
@@ -198,13 +200,9 @@ Playwright-based browser automation exposed as a single `browser` tool with acti
 3. `click(ref="e5")` or `type(ref="e5", text="hello")` targets that element
 4. After page changes, `snapshot()` is called again
 
-Security: SSRF guard blocks localhost/private IPs; external page content is wrapped with boundary markers to prevent prompt injection.
-
 ### `ghost_memory.py` — Persistent Memory
 
 SQLite database with FTS5 full-text search at `~/.ghost/memory.db`.
-
-**Schema:**
 
 | Column | Type | Description |
 |---|---|---|
@@ -219,17 +217,29 @@ SQLite database with FTS5 full-text search at `~/.ghost/memory.db`.
 | `tools_used` | TEXT | Comma-separated tool names |
 | `tokens_used` | INTEGER | Token count |
 
-**FTS5 virtual table** indexes `content`, `tags`, and `source_preview` for fast full-text search with ranked results. Falls back to `LIKE` search if FTS5 fails.
+**FTS5 virtual table** indexes `content`, `tags`, and `source_preview` for fast full-text search.
 
-**Automatic maintenance:**
-- Auto-prune to 5,000 entries on daemon shutdown
-- Dashboard provides manual prune control
+**Hybrid Memory** (`ghost_hybrid_memory.py`) adds vector embeddings (4 providers with fallback: OpenRouter, Gemini, Ollama, offline hash) with temporal decay and MMR reranking on top of FTS5.
+
+**Vector Memory** (`ghost_vector_memory.py`) provides typed cosine similarity search across notes, facts, preferences, code, and insights.
+
+**Session Memory** (`ghost_session_memory.py`) auto-saves conversation summaries with LLM-generated slugs.
+
+### `ghost_evolve.py` — Self-Evolution Engine
+
+Ghost can modify its own source code through a controlled pipeline:
+
+```
+evolve_plan → evolve_apply (1-5x) → evolve_test → evolve_deploy → restart
+                                                    ↓ (if failure)
+                                              evolve_rollback
+```
+
+Protected by: backup creation before changes, syntax + import + smoke testing, max evolutions per hour, protected files list, and supervisor auto-rollback after 5 consecutive crashes.
 
 ### `ghost_cron.py` — Cron Scheduler
 
 Background scheduler for repeating and one-shot tasks.
-
-**Three schedule types:**
 
 | Kind | Format | Example |
 |---|---|---|
@@ -237,87 +247,220 @@ Background scheduler for repeating and one-shot tasks.
 | `cron` | Standard cron expression | `{"kind": "cron", "expr": "0 9 * * *"}` (daily at 9 AM) |
 | `at` | One-shot at datetime | `{"kind": "at", "at": "2026-12-31T23:59:00"}` |
 
-**Three payload types:**
-
-| Type | Description |
-|---|---|
-| `task` | Runs a prompt through the tool loop engine |
-| `notify` | Sends a system notification |
-| `shell` | Executes a shell command |
-
-**Execution model:**
-- Timer-based: wakes at the next earliest job, sleeps between
-- Max 3 concurrent job executions
-- Error backoff with `consecutiveErrors` tracking
-- Atomic file persistence at `~/.ghost/cron/jobs.json`
-- Thread-safe with locking
+Payload types: `task` (runs through tool loop), `notify` (system notification), `shell` (command execution). Max 3 concurrent executions.
 
 ### `ghost_skills.py` — Skill System
 
-Skills are markdown files that inject domain-specific instructions into the LLM's system prompt when their triggers match clipboard content.
+42 bundled skills plus user-created and registry-installed skills.
 
 **Discovery:**
 1. Bundled: `<project>/skills/*/SKILL.md`
 2. User: `~/.ghost/skills/*/SKILL.md`
 3. Auto-reload every 30 seconds
 
-**Matching:** When text is copied, the `SkillLoader` checks each skill's trigger keywords against the text and content type. Matched skills are sorted by priority (highest first) and their body is injected into the system prompt.
-
-**Skill filtering:** Skills can require specific binaries or environment variables. The dashboard shows requirement status and allows enabling/disabling skills.
+**Matching:** When a message arrives, the `SkillLoader` checks each skill's trigger keywords against the text and content type. Matched skills are sorted by priority (highest first) and their body is injected into the system prompt.
 
 See [SKILLS.md](SKILLS.md) for the full authoring guide.
 
+### `ghost_node_manager.py` — GhostNodes
+
+23 bundled AI capability nodes for local inference:
+
+| Category | Nodes |
+|---|---|
+| Image | stable-diffusion, image-upscale, background-remove, image-inpaint, style-transfer, face-enhance |
+| Video | video-gen, video-router, video-composer, image-to-video, kling-video, minimax-video, runway-video, runware-video |
+| Audio | bark-tts, music-gen, sound-effects, whisper-stt, voice-clone, voice-fx |
+| Vision | florence-vision, surya-ocr, depth-estimation |
+
+Nodes are managed by the `NodeManager` with GPU-aware scheduling via `ghost_pipeline.py` for multi-step workflows.
+
+### `ghost_channels/` — Messaging Channels
+
+20+ messaging platform integrations. Each channel gets: message queuing with WAL, exponential backoff retries, crash recovery, per-channel formatting, streaming, DM security policies, rate limiting, health monitoring, and onboarding wizards.
+
+| Channel | Implementation |
+|---|---|
+| WhatsApp | neonize QR + Business API webhook |
+| Telegram | Bot API with reactions, threading, streaming |
+| Discord | Webhook + discord.py bot mode |
+| Slack | Webhook + Socket Mode |
+| iMessage | AppleScript + chat.db (macOS) |
+| Signal | signal-cli REST API |
+| Email | SMTP/IMAP with IDLE push |
+| Matrix, MS Teams, Google Chat, Mattermost, Line, IRC, Nostr | Various |
+| ntfy, Pushover, SMS, Webhook | Push/fallback |
+
 ### `ghost_dashboard/` — Web Dashboard
 
-Flask web application that runs as a background thread inside the daemon (or standalone).
-
-**Two modes:**
-- **Embedded** — Started by `GhostDaemon.run()`, shares the same process, reads live daemon state (tools, skills, memory, cron) directly from memory.
-- **Standalone** — Started by `python ghost.py dashboard`, reads from config files and creates its own connections to SQLite/cron.
+Flask web application with 29 page modules and 31 API blueprints.
 
 **Architecture:**
 ```
 ghost_dashboard/
-  __init__.py          App factory, get_daemon(), start/stop
-  routes/
-    __init__.py        Blueprint registration
-    status.py          GET /api/status (live daemon state)
-    config.py          GET/PUT /api/config (hot-reload)
-    models.py          GET/PUT /api/models (OpenRouter API)
-    identity.py        GET/PUT /api/soul, /api/user
-    skills.py          GET/PUT /api/skills (live loader)
-    cron.py            CRUD /api/cron/jobs (live scheduler)
-    memory.py          GET/DELETE /api/memory/* (live DB)
-    feed.py            GET /api/feed, /api/logs
-    daemon.py          POST /api/ghost/pause|resume|reload
+  __init__.py              App factory, get_daemon(), start/stop
+  routes/                  31 API blueprint modules
+    status.py, config.py, models.py, identity.py, skills.py,
+    cron.py, memory.py, feed.py, daemon.py, evolve.py, chat.py,
+    integrations.py, autonomy.py, setup.py, accounts.py,
+    security.py, console.py, channels.py, future_features.py,
+    voice.py, canvas.py, usage.py, webhooks.py, projects.py,
+    prs.py, doctor.py, langfuse.py, pairing.py, nodes.py,
+    media.py, audit.py
   templates/
-    index.html         SPA shell (Tailwind CDN)
+    index.html             SPA shell (Tailwind CDN)
   static/
-    css/dashboard.css  Custom dark theme styles
+    css/dashboard.css      Custom dark theme
     js/
-      api.js           HTTP client (get/put/post/del)
-      utils.js         Toast, escapeHtml, timeAgo
-      app.js           Hash-based router, sidebar polling
-      pages/           One module per page (10 total)
+      api.js, utils.js     HTTP client, utilities
+      app.js               Hash-based router, sidebar polling
+      i18n/                Internationalization (en, ar, zh-CN, pt-BR)
+      pages/               29 page modules
 ```
 
-See [DASHBOARD.md](DASHBOARD.md) for the full API reference.
+See [DASHBOARD.md](DASHBOARD.md) for the full page and API reference.
+
+## Module Map
+
+### Core Infrastructure
+| Module | Purpose |
+|---|---|
+| `ghost.py` | Main daemon, action handling, GhostDaemon class |
+| `ghost_loop.py` | ToolLoopEngine: multi-turn LLM + tool execution |
+| `ghost_tools.py` | System tools: shell_exec, file_read, file_write, web_fetch, etc. |
+| `ghost_cron.py` | CronService: scheduled job execution |
+| `ghost_plugins.py` | PluginLoader + HookRunner |
+| `ghost_hook_debug.py` | Hook debug event store with redaction and replay |
+| `ghost_supervisor.py` | Process supervisor for safe restarts (OFF-LIMITS) |
+
+### Self-Evolution
+| Module | Purpose |
+|---|---|
+| `ghost_evolve.py` | EvolutionEngine: backup, validate, test, deploy, rollback |
+| `ghost_autonomy.py` | Autonomous growth engine, action items, self-repair |
+| `ghost_future_features.py` | Prioritized feature queue for serial evolution |
+| `ghost_state_repair.py` | State file validation and repair |
+
+### Memory
+| Module | Purpose |
+|---|---|
+| `ghost_memory.py` | MemoryDB: SQLite + FTS5 persistent memory |
+| `ghost_hybrid_memory.py` | Semantic memory with vector embeddings |
+| `ghost_vector_memory.py` | Vector store for semantic search |
+| `ghost_session_memory.py` | Per-session memory isolation |
+
+### LLM Providers
+| Module | Purpose |
+|---|---|
+| `ghost_providers.py` | Multi-provider LLM registry + API format adapters |
+| `ghost_auth_profiles.py` | Auth profile store (API keys + OAuth tokens) |
+| `ghost_oauth.py` | OpenAI Codex OAuth PKCE flow |
+| `ghost_llm_task.py` | Structured LLM subtasks with JSON output |
+| `ghost_interrupt.py` | Generation interrupt and injection |
+| `ghost_reasoning.py` | Reasoning mode directives and prompt shaping |
+
+### Browser & Web
+| Module | Purpose |
+|---|---|
+| `ghost_browser.py` | Browser automation (Playwright) |
+| `ghost_browser_use.py` | Extended browser-use integration |
+| `ghost_web_fetch.py` | Web content extraction (5-tier pipeline) |
+| `ghost_web_search.py` | Multi-provider web search |
+
+### Voice & Vision & Media
+| Module | Purpose |
+|---|---|
+| `ghost_voice.py` | Voice Wake + Talk Mode, STT integration |
+| `ghost_tts.py` | Text-to-speech (Edge, OpenAI, ElevenLabs) |
+| `ghost_vision.py` | Image analysis (5 providers) |
+| `ghost_image_gen.py` | Image generation |
+| `ghost_canvas.py` | Visual output panel for HTML/CSS/JS |
+| `ghost_media_store.py` | Media gallery storage and indexing |
+
+### Skills & Projects
+| Module | Purpose |
+|---|---|
+| `ghost_skills.py` | SkillLoader: discover and match skills |
+| `ghost_skill_manager.py` | Managed skill installation with validation |
+| `ghost_skill_registry.py` | GhostHub: public skill registry client |
+| `ghost_projects.py` | Project management |
+
+### GhostNodes
+| Module | Purpose |
+|---|---|
+| `ghost_node_manager.py` | Node lifecycle and execution management |
+| `ghost_node_registry.py` | Node discovery and metadata registry |
+| `ghost_node_sdk.py` | Node development SDK |
+| `ghost_pipeline.py` | Multi-step AI pipeline orchestration |
+| `ghost_nodes/` | 23 bundled AI capability nodes |
+
+### Integrations & Channels
+| Module | Purpose |
+|---|---|
+| `ghost_integrations.py` | Google Workspace + third-party integrations |
+| `ghost_channels/` | 20+ messaging channel implementations |
+| `ghost_webhooks.py` | Webhook triggers for event-driven automation |
+| `ghost_email.py` | Disposable email account management |
+| `ghost_mcp.py` | MCP client for external tool servers |
+
+### Security
+| Module | Purpose |
+|---|---|
+| `ghost_security_audit.py` | AI-driven security auditing |
+| `ghost_tool_intent_security.py` | Tool intent signing and verification |
+| `ghost_api_key_posture.py` | API key risk analysis |
+| `ghost_secret_refs.py` | Secret reference management |
+| `ghost_credentials.py` | Secure credential storage |
+| `ghost_audit_log.py` | Security audit event logging |
+| `ghost_device_auth.py` | Device authentication flows |
+
+### Code Intelligence
+| Module | Purpose |
+|---|---|
+| `ghost_code_tools.py` | Code analysis and repository tools |
+| `ghost_code_intel.py` | Code intelligence and indexing |
+| `ghost_tool_builder.py` | ToolManager for ghost_tools/ directory |
+
+### Diagnostics & Setup
+| Module | Purpose |
+|---|---|
+| `ghost_doctor.py` | Health diagnostics and repair |
+| `ghost_setup_doctor.py` | Setup wizard and onboarding |
+| `ghost_setup_providers.py` | Provider configuration wizard |
+| `ghost_config_tool.py` | Configuration management |
+
+### Utilities
+| Module | Purpose |
+|---|---|
+| `ghost_data_extract.py` | Smart data extraction (emails, phones, URLs) |
+| `ghost_platform.py` | Cross-platform OS utility helpers |
+| `ghost_shell_sessions.py` | Persistent shell session management |
+| `ghost_console.py` | Console logging and SSE event bus |
+| `ghost_usage.py` | Usage tracking and statistics |
+| `ghost_uptime.py` | Uptime monitoring |
+| `ghost_langfuse.py` | Langfuse tracing and observability |
+| `ghost_query_expansion.py` | Query expansion for search quality |
+| `ghost_subagents.py` | Subagent task delegation |
+| `ghost_resource_manager.py` | Runtime resource tracking |
+| `ghost_git.py` | Git helper operations |
+| `ghost_pr.py` | Internal PR review workflow |
+| `ghost_session_export.py` | Session export and archiving |
+| `ghost_community_hub.py` | Community Hub client |
+| `ghost_x_tracker.py` | X/Twitter interaction tracking |
 
 ## Data Flow
 
-### Clipboard → Response
+### User Message → Response
 
 ```
-User copies text
-  → Clipboard watcher detects change (every 0.5s)
-  → SmartFilter: hash dedup + rate limit + min length
+User sends message (dashboard chat / channel / voice)
   → classify(): determine content type
   → SkillLoader.match(): find relevant skills
   → Build system prompt: identity + base + skills
   → ToolLoopEngine: LLM call(s) + tool execution(s)
-  → Result: text response from LLM
-  → Terminal output + panel update
-  → Feed entry (feed.json) + log entry (log.json)
+  → Result: streamed text response
+  → Chat / channel delivery
+  → Feed entry + log entry
   → MemoryDB save (SQLite)
 ```
 
@@ -329,7 +472,7 @@ User clicks in dashboard
   → Flask route: update config.json
   → _notify_daemon(): daemon.cfg.update(fresh)
   → daemon.llm.model = new_model (live update)
-  → Next clipboard event uses new model
+  → Next task uses new model
 ```
 
 ### Cron → Action
@@ -343,8 +486,7 @@ Timer fires for due job
       → System notification
   → if payload.type == "shell":
       → subprocess.run(command)
-  → Update job state (lastRunAtMs, nextRunAtMs, status)
-  → Compute next run time
+  → Update job state, compute next run time
 ```
 
 ## Threading Model
@@ -353,42 +495,58 @@ Ghost runs in a single process with multiple threads:
 
 | Thread | Purpose |
 |---|---|
-| Main thread | Clipboard polling loop (`while self.running`) |
-| Processing threads | `process_text()` / `process_image()` in `threading.Thread(daemon=True)` |
+| Main thread | Event loop (chat messages, channel messages, panel actions) |
+| Processing threads | `process_text()` in `threading.Thread(daemon=True)` |
 | Dashboard thread | Flask server (`make_server(...).serve_forever()`, daemon thread) |
 | Cron timer thread | `threading.Timer` for scheduled wake-ups |
 | Cron execution threads | Job execution (max 3 concurrent, daemon threads) |
+| Channel threads | Per-channel message polling/receiving |
+| Voice thread | Wake word detection + audio capture |
 
 All daemon threads are marked `daemon=True`, so they die when the main thread exits.
 
 ## File Layout
 
 ```
-~/.ghost/                      Persistent data directory
-  config.json                  User configuration
-  log.json                     Action history (last 500 entries)
-  feed.json                    Activity feed (last 50 entries)
-  ghost.pid                    Running daemon PID
-  memory.db                    SQLite memory database
-  paused                       Pause flag file (presence = paused)
-  own_copy                     Flag to skip own clipboard writes
-  action.json                  Panel-to-daemon communication
-  screenshots/                 Processed screenshot storage
-  cron/
-    jobs.json                  Cron job definitions
-  skills/                      User-created skills
-  plugins/                     User plugins
+~/.ghost/                        Persistent data directory
+  config.json                    User configuration
+  auth_profiles.json             Provider credentials
+  log.json                       Action history (last 500 entries)
+  feed.json                      Activity feed (last 50 entries)
+  ghost.pid                      Running daemon PID
+  memory.db                      SQLite memory database
+  cron/jobs.json                 Cron job definitions
+  future_features.json           Evolution backlog
+  action_items.json              User action items
+  growth_log.json                Autonomous growth history
+  integrations.json              Google OAuth tokens
+  channels.json                  Channel configurations
+  evolve/backups/                Project backups before self-modifications
+  audio/                         Generated TTS audio files
+  voice/                         Voice capture and STT models
+  canvas/                        Canvas session files
+  generated_images/              AI-generated images
+  memory/sessions/               Session summaries
+  skill_registry/                GhostHub registry cache
+  skills/                        User-created + registry-installed skills
+  plugins/                       User plugins
+  screenshots/                   Captured screenshots
+  state_backups/                 State file backups from repair
 
-<project>/                     Project directory
-  ghost.py                     Main daemon
-  ghost_loop.py                Tool loop engine + registry
-  ghost_tools.py               Built-in tool definitions
-  ghost_browser.py             Browser automation
-  ghost_memory.py              Memory database
-  ghost_skills.py              Skill loader
-  ghost_cron.py                Cron scheduler
-  ghost_dashboard/             Web dashboard (Flask)
-  skills/                      Bundled skills (25)
-  SOUL.md                      Agent personality
-  USER.md                      User profile
+<project>/                       Project directory
+  ghost.py                       Main daemon (77 Python modules in root)
+  ghost_loop.py                  Tool loop engine + registry
+  ghost_tools.py                 Built-in tool definitions
+  ghost_browser.py               Browser automation
+  ghost_memory.py                Memory database
+  ghost_skills.py                Skill loader
+  ghost_cron.py                  Cron scheduler
+  ghost_evolve.py                Evolution engine
+  ghost_providers.py             Multi-provider LLM
+  ghost_channels/                20+ messaging channels
+  ghost_nodes/                   23 AI capability nodes
+  ghost_dashboard/               Web dashboard (Flask, 31 blueprints, 29 pages)
+  skills/                        Bundled skills (42)
+  SOUL.md                        Agent personality
+  USER.md                        User profile
 ```

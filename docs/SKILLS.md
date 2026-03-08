@@ -1,48 +1,88 @@
 # Ghost Skills
 
-Skills extend Ghost's capabilities by injecting specialized instructions into the LLM's system prompt when clipboard content matches their triggers. A skill is a single markdown file (`SKILL.md`) with YAML frontmatter and a body of instructions.
+Skills extend Ghost's capabilities by injecting specialized instructions into the LLM's system prompt when a user's message or task matches their triggers. A skill is a single markdown file (`SKILL.md`) with YAML frontmatter and a body of instructions.
 
 ## How Skills Work
 
-1. You copy text to the clipboard
-2. Ghost classifies the content type
-3. The **SkillLoader** checks each skill's triggers against the text and content type
-4. Matching skills (sorted by priority) have their body injected into the system prompt
-5. The LLM receives the specialized instructions along with the content
+1. A user sends a message (via chat, channel, or cron task)
+2. The **SkillLoader** checks each skill's triggers against the message text and content type
+3. Matching skills (sorted by priority) have their body injected into the system prompt
+4. The LLM receives the specialized instructions along with the user's message
+5. Ghost executes the task with focused tool access and domain-specific guidance
 
-This means skills don't add new tools — they teach Ghost *how to use existing tools* for specific tasks.
+Skills don't add new tools — they teach Ghost *how to use existing tools* for specific tasks.
 
 ## Bundled Skills
 
-Ghost ships with 25 bundled skills in the `skills/` directory:
+Ghost ships with 42 bundled skills in the `skills/` directory:
 
 | Skill | Triggers | Tools | Description |
 |---|---|---|---|
-| `1password` | 1password, op, password, secret | shell_exec | 1Password CLI integration |
-| `apple-notes` | notes, apple notes, note to self | shell_exec | Create/search Apple Notes |
-| `apple-reminders` | reminder, remind me, todo | shell_exec | Create Apple Reminders |
-| `blogwatcher` | blog, rss, feed, article | web_fetch, shell_exec | Monitor blogs/RSS feeds |
-| `browser` | browse, website, web page, url | browser | Browser automation |
-| `code-reviewer` | review, code review, PR | file_read, shell_exec | Code review assistance |
-| `general` | (low priority catch-all) | shell_exec, file_read, file_write | General-purpose assistance |
-| `gifgrep` | gif, giphy, reaction | web_fetch | Search for GIFs |
-| `github` | github, PR, issue, repo | shell_exec, web_fetch | GitHub CLI integration |
-| `himalaya` | email, mail, inbox | shell_exec | Email via Himalaya CLI |
-| `nano-pdf` | pdf, document | shell_exec | PDF processing |
-| `notion` | notion, page, database | shell_exec | Notion integration |
-| `openai-image-gen` | generate image, create image, dall-e | web_fetch | AI image generation |
-| `peekaboo` | screenshot, screen, capture | shell_exec | Screenshot tools |
-| `researcher` | research, find, look up, search | web_fetch, shell_exec | Web research |
-| `spotify-player` | spotify, music, play, song | shell_exec | Spotify control |
-| `summarize` | summarize, summary, tldr | (none) | Text summarization |
-| `things-mac` | things, task, project | shell_exec | Things 3 integration |
-| `tmux` | tmux, terminal, session | shell_exec | Tmux session management |
-| `trader` | stock, crypto, trade, price | web_fetch | Market data and trading |
-| `translator` | translate, translation, language | (none) | Translation |
-| `trello` | trello, board, card | shell_exec | Trello integration |
-| `video-frames` | video, frame, extract | shell_exec | Video frame extraction |
-| `weather` | weather, forecast, temperature | web_fetch | Weather information |
-| `webhooks` | webhook, trigger, github webhook | webhook_create, webhook_list, webhook_delete, webhook_test | Webhook trigger management |
+| `1password` | 1password, password, secret, credential, op, vault | shell_exec | 1Password CLI integration |
+| `apple-notes` | note, notes, apple notes, memo | shell_exec | Apple Notes via memo CLI |
+| `apple-reminders` | reminder, reminders, todo, remindctl | shell_exec | Apple Reminders via remindctl CLI |
+| `blogwatcher` | rss, blog, feed, subscribe, articles | shell_exec, web_fetch | Monitor blogs/RSS feeds |
+| `browser` | browse, open website, go to, visit, fill form, scrape | browser, shell_exec | Browser automation with snapshot+ref |
+| `code-reviewer` | code, function, class, def, const, import | file_read, shell_exec, memory_search | Code review and analysis |
+| `competitive-intel` | competitor, ai landscape, feature gap, ai agent trends | web_search, web_fetch, browser, memory | AI ecosystem research |
+| `email-creator` | create email, email account, new email, check inbox | email_create, email_inbox, email_read, credential_* | Disposable email creation |
+| `fullstack-development` | implement, feature, build, create, new endpoint | file_*, shell_exec, browser, evolve_* | Full-stack implementation standards |
+| `future_features` | future feature, feature backlog, queue feature | add_future_feature, list_future_features, get_feature_stats | Evolution queue management |
+| `general` | *(low priority catch-all)* | memory_search, web_search, file_read, shell_exec | Default fallback skill |
+| `ghost-creative-studio` | creative workflow, ai workflow, generate content | text_to_image_local, text_to_video, pipeline_*, bark_speak | Multi-step creative AI workflows |
+| `ghost-mistakes` | evolve, evolution, bug fix | *(none)* | Query past mistakes before evolution |
+| `ghost-node-developer` | create node, new node, build node, add tool | file_*, shell_exec, nodes_list, gpu_status | Guide for building new AI nodes |
+| `ghost-nodes-pipelines` | pipeline, create video, multi-step, workflow | pipeline_*, text_to_image_local, text_to_video | Chain AI tools into pipelines |
+| `ghost-system` | evolve, self-modify, add feature, ghost code | file_*, shell_exec, evolve_*, browser | Ghost's self-knowledge and architecture |
+| `gifgrep` | gif, meme, reaction, tenor, giphy | shell_exec, clipboard_write | GIF search and download |
+| `github` | github, PR, pull request, commit, issue, CI | shell_exec, web_fetch, clipboard_read | GitHub CLI integration |
+| `google_workspace` | gmail, calendar, google drive, google docs, sheets | google_gmail, google_calendar, google_drive, google_docs, google_sheets | Full Google Workspace integration |
+| `himalaya` | email, mail, inbox, himalaya, send email | shell_exec, file_read, file_write | CLI email via IMAP/SMTP |
+| `image-generation` | generate image, create image, concept art, thumbnail | generate_image | AI image generation |
+| `moonshine-stt` | moonshine, transcribe, speech to text, .mp3, .wav | shell_exec, file_read, notify | Moonshine speech-to-text |
+| `nano-pdf` | pdf, document, edit pdf, modify pdf | shell_exec, file_read | AI-powered PDF editing |
+| `news-search` | news, latest news, headlines, current events | web_search, web_fetch, memory_search | Real news search (not summaries) |
+| `notion` | notion, workspace, database, notion page | shell_exec, file_read, web_fetch | Notion API integration |
+| `openai-image-gen` | generate image, create image, draw, ai image | generate_image | Image generation via DALL-E |
+| `peekaboo` | peekaboo, ui, window, screenshot, automation | shell_exec, file_read | macOS UI automation |
+| `pr-reviewer` | pr review, code review, pull request | read_pr_diff, read_pr_file, leave_comment, submit_review | Internal PR review workflow |
+| `researcher` | url, article, paper, research, deep dive | web_fetch, web_search, memory_search, browser | Deep multi-source research |
+| `spotify-player` | spotify, music, song, play, playlist | shell_exec | Spotify CLI control |
+| `summarize` | summarize, summary, tldr, transcript, youtube | shell_exec, web_fetch, file_read | Text and media summarization |
+| `things-mac` | things, task, project, things 3 | shell_exec | Things 3 on macOS |
+| `tmux` | tmux, session, terminal, pane | shell_exec | tmux session management |
+| `trader` | stock, crypto, trading, chart, BTC, price, market | web_fetch, memory_search | Trading and market analysis |
+| `translator` | foreign, translate, translation | memory_search | Language detection and translation |
+| `trello` | trello, board, card, kanban | shell_exec, web_fetch | Trello board management |
+| `ui-development` | dashboard, ui, ux, frontend, css, design | file_*, browser, evolve_* | Dashboard UI/UX standards |
+| `video-frames` | video, frame, extract, ffmpeg | shell_exec, file_read | Video frame extraction |
+| `weather` | weather, forecast, temperature, rain | shell_exec, web_fetch | Weather via wttr.in |
+| `webhooks` | webhook, trigger, github webhook, stripe webhook | webhook_create, webhook_list, webhook_delete, webhook_test | Webhook trigger management |
+| `x-account-creator` | create x account, sign up twitter | browser, email_*, credential_* | X/Twitter account setup |
+| `x-growth` | post on x, tweet, like, repost, x growth | browser, generate_image, x_*_action, memory | X/Twitter growth automation |
+
+## GhostHub Registry
+
+GhostHub is a public skill registry hosted on GitHub. Community members can publish skills for anyone to install.
+
+**Browse:** Dashboard → Skills → **GhostHub Registry** tab
+
+**Install:** Click **Install** on any skill card, or ask Ghost:
+```
+install the weather skill from ghosthub
+```
+
+**Submit:** Fork [boona13/skills-registry](https://github.com/boona13/skills-registry), add your skill to `skills/<name>/SKILL.md`, and open a PR. CI validates the frontmatter and auto-rebuilds the index on merge.
+
+Registry skills install to `~/.ghost/skills/<name>/SKILL.md` and are picked up by the SkillLoader within 30 seconds.
+
+### Registry Configuration
+
+| Config Key | Default | Description |
+|---|---|---|
+| `enable_skill_registry` | `true` | Enable the GhostHub registry feature |
+
+The registry client fetches from `https://raw.githubusercontent.com/boona13/skills-registry/main/index.json` and caches locally for 1 hour.
 
 ## SKILL.md Format
 
@@ -59,7 +99,7 @@ triggers:
   - "keyword2"
 ---
 
-When the user copies content related to keyword1 or keyword2,
+When the user asks about keyword1 or keyword2,
 follow these instructions to help them.
 
 Use the `shell_exec` tool to run commands as needed.
@@ -80,6 +120,7 @@ triggers:
 tools:
   - "web_fetch"
 priority: 5
+model: "google/gemini-2.5-flash"
 os:
   - "Darwin"
   - "Linux"
@@ -117,14 +158,16 @@ a weather API and present the results in a clear format.
 | `triggers` | list | **Yes** | — | Keywords or content types that activate this skill |
 | `tools` | list | No | `[]` | Tools this skill uses (for tool filtering) |
 | `priority` | integer | No | `0` | Higher priority skills are matched first |
+| `model` | string | No | `null` | Preferred LLM model for this skill (can be overridden in config) |
 | `os` | string or list | No | `null` | OS filter: `"Darwin"`, `"Linux"`, `"Windows"`, or a list |
 | `requires` | object | No | `{}` | Requirements that must be met |
 | `requires.bins` | list | No | `[]` | Binary executables that must be on PATH |
 | `requires.env` | list | No | `[]` | Environment variables that must be set |
+| `content_types` | list | No | `[]` | Content types this skill specializes in |
 
 ### Triggers
 
-Triggers are case-insensitive substring matches. A skill activates when **any** trigger matches the clipboard text or content type.
+Triggers are case-insensitive substring matches. A skill activates when **any** trigger matches the user's message text or the classified content type.
 
 ```yaml
 triggers:
@@ -136,7 +179,7 @@ triggers:
   - "image"        # Matches screenshot/image processing
 ```
 
-Content types you can trigger on: `url`, `error`, `code`, `json`, `foreign`, `long_text`, `image`.
+Content types you can trigger on: `url`, `error`, `code`, `json`, `foreign`, `long_text`, `image`, `email`, `calendar`, `document`, `audio`, `transcription`.
 
 ### Tools
 
@@ -146,21 +189,37 @@ If `tools` is empty, the full tool registry is available.
 
 ```yaml
 tools:
-  - "shell_exec"   # Execute shell commands
-  - "file_read"    # Read files
-  - "file_write"   # Write files
-  - "file_search"  # Search for files
-  - "web_fetch"    # Fetch URLs
-  - "browser"      # Full browser automation
-  - "notify"       # System notifications
-  - "app_control"  # Open applications
-  - "clipboard_read"   # Read clipboard
-  - "clipboard_write"  # Write to clipboard
+  - "shell_exec"        # Execute shell commands
+  - "file_read"         # Read files
+  - "file_write"        # Write files
+  - "file_search"       # Search for files
+  - "web_fetch"         # Fetch URLs
+  - "web_search"        # Search the web
+  - "browser"           # Full browser automation
+  - "notify"            # System notifications
+  - "app_control"       # Open applications
+  - "clipboard_read"    # Read clipboard
+  - "clipboard_write"   # Write to clipboard
+  - "generate_image"    # AI image generation
+  - "memory_search"     # Search memory
+  - "memory_save"       # Save to memory
 ```
+
+### Model Override
+
+Skills can specify a preferred LLM model via the `model` frontmatter field. This is useful for skills that need stronger reasoning or specific provider capabilities.
+
+```yaml
+model: "google/gemini-2.5-pro"
+```
+
+Users can override a skill's model from the dashboard's skill detail panel (Skills → click a skill → Model dropdown). Config overrides take precedence over frontmatter values.
+
+Priority: config override > frontmatter `model` > global default model.
 
 ### Requirements
 
-Requirements let you declare what a skill needs to function. The dashboard shows ✓/✗ for each requirement and marks skills as ineligible if requirements aren't met.
+Requirements let you declare what a skill needs to function. The dashboard shows checkmark/cross status for each requirement and marks skills as ineligible if requirements aren't met.
 
 ```yaml
 requires:
@@ -175,7 +234,7 @@ Requirements are **advisory** — they affect the dashboard UI and eligibility s
 
 ### Priority
 
-Skills are matched in priority order (highest first). If multiple skills match the same content, higher-priority skills appear first in the system prompt.
+Skills are matched in priority order (highest first). If multiple skills match the same message, higher-priority skills appear first in the system prompt.
 
 ```yaml
 priority: 10   # High priority, matched first
@@ -208,7 +267,7 @@ mkdir -p ~/.ghost/skills/my-skill
 cat > ~/.ghost/skills/my-skill/SKILL.md << 'EOF'
 ---
 name: my-skill
-description: "Does something useful when you copy specific text"
+description: "Does something useful when you ask about specific topics"
 triggers:
   - "my keyword"
   - "another trigger"
@@ -220,7 +279,7 @@ priority: 5
 
 # My Custom Skill
 
-When the user copies text containing "my keyword", follow these steps:
+When the user asks about "my keyword", follow these steps:
 
 1. Use `shell_exec` to check the current state
 2. Use `web_fetch` to get additional data if needed
@@ -239,7 +298,7 @@ The skill is auto-discovered within 30 seconds, or you can restart Ghost. Check 
 
 ### Step 4: Test
 
-Copy text containing one of your trigger keywords. Ghost should match your skill and follow your instructions.
+Send a message containing one of your trigger keywords. Ghost should match your skill and follow your instructions.
 
 ## Writing Effective Skills
 
@@ -254,7 +313,7 @@ Help the user with their email.
 # Good
 1. Use `shell_exec` to run `himalaya list --page-size 5` to check recent emails
 2. Parse the output and present a summary of unread messages
-3. If the user copied an email address, draft a reply template
+3. If the user mentions an email address, draft a reply template
 ```
 
 ### Declare Tools
@@ -288,33 +347,25 @@ Present results as a markdown table:
 
 The Skills page at [http://localhost:3333/#skills](http://localhost:3333/#skills) provides:
 
+- **Local Skills tab** — Browse all loaded skills grouped by source (Bundled, User, Other)
+- **GhostHub Registry tab** — Search and install community skills from the public registry
 - **Search** across all skills by name, description, or trigger
 - **Filter** by status (Eligible, Disabled, Missing Requirements)
 - **Enable/Disable** toggle on each skill card
 - **Edit** skill content directly in the browser
-- **Requirements** status with ✓/✗ indicators for each binary and environment variable
+- **Model override** — Set a specific LLM model per skill
+- **Requirements** status with checkmark/cross indicators for each binary and environment variable
 
 Disabled skills are stored in `config.json` under `disabled_skills` and are excluded from matching even if their triggers hit.
-
-## Managing Skills via CLI
-
-```bash
-# Skills are auto-loaded from these directories:
-ls skills/                 # Bundled skills
-ls ~/.ghost/skills/        # User skills
-
-# Check loaded skills
-python ghost.py status     # Shows skill count in features
-```
 
 ## Skill Discovery Directories
 
 | Directory | Priority | Description |
 |---|---|---|
 | `<project>/skills/` | Bundled | Ships with Ghost, updated with the codebase |
-| `~/.ghost/skills/` | User | Your custom skills, persisted across updates |
+| `~/.ghost/skills/` | User | Your custom skills + installed registry skills, persisted across updates |
 
-Both directories are scanned for `SKILL.md` files. Skills can be at the root or in subdirectories:
+Both directories are scanned for `SKILL.md` files in subdirectories:
 
 ```
 skills/

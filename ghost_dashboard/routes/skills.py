@@ -273,10 +273,34 @@ def registry_get_skill(name):
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@bp.route("/api/skills/registry/<name>/scan")
+def registry_scan(name):
+    """Run security scan on a registry skill before installing."""
+    try:
+        client = SkillRegistryClient()
+        skill = client.get_skill(name)
+        if not skill:
+            return jsonify({"ok": False, "error": "Skill not found"}), 404
+
+        content = client.fetch_skill_content(name)
+        from ghost_skill_manager import SkillManager
+        manager = SkillManager(load_config, save_config)
+        validation = manager.validate_skill_text(content, run_security_scan=True)
+
+        return jsonify({
+            "ok": True,
+            "skill": skill.to_dict(),
+            "validation": validation,
+            "security": validation.get("security", {}),
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @bp.route("/api/skills/registry/<name>/install", methods=["POST"])
 @rate_limit(requests_per_minute=10)
 def registry_install(name):
-    """Install a skill from the registry."""
+    """Install a skill from the registry (security scan runs automatically)."""
     data = request.get_json(silent=True) or {}
     overwrite = data.get("overwrite", False)
 
@@ -284,7 +308,6 @@ def registry_install(name):
         manager = SkillRegistryManager(load_config, save_config)
         result = manager.install_skill(name, overwrite=overwrite)
         if result.get("ok"):
-            # Reload skills after install
             loader = _get_loader()
             loader.reload()
         return jsonify(result)

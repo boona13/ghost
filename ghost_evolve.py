@@ -1592,6 +1592,18 @@ class EvolutionEngine:
                 return False, f"Merge failed after approval: {msg}"
             ghost_git.delete_branch(branch_name)
             store.mark_merged(pr["pr_id"])
+            pr_after = store.get_pr(pr["pr_id"]) or pr
+            evo["pr_id"] = pr["pr_id"]
+            evo["pr_verdict"] = "approved"
+            evo["pr_review_rounds"] = pr_after.get("review_rounds", 1)
+            reviewer_msgs = [
+                d for d in pr_after.get("discussions", [])
+                if d.get("role") == "reviewer"
+            ]
+            if reviewer_msgs:
+                evo["pr_reviewer_summary"] = reviewer_msgs[-1].get("message", "")[:2000]
+            evo["pr_inline_comments"] = len(pr_after.get("inline_comments", []))
+            evo["pr_suggested_changes"] = len(pr_after.get("suggested_changes", []))
             evo["status"] = "tested_pass"
             deploy_result = self.deploy(evolution_id, feature_id=feature_id)
             self._active_evolutions.pop(evolution_id, None)

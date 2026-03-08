@@ -64,7 +64,6 @@ Read this ENTIRE section before writing any code.
 | `ghost_code_intel.py` | AST-based code analysis | `build_code_intel_tools()` |
 | `ghost_data_extract.py` | LLM-powered structured extraction | `build_data_extract_tools()` |
 | `ghost_web_search.py` | Multi-provider web search with fallback | `build_web_search_tools()` |
-| `ghost_sandbox.py` | Docker-based isolated execution | `build_sandbox_tools()` |
 | `ghost_supervisor.py` | Process supervisor — restarts, crash recovery, deploy handling | `GhostSupervisor` |
 
 ### Adding a New Backend Module

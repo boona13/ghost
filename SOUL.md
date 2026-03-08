@@ -89,7 +89,6 @@ ghost_vector_memory.py          — Vector store for semantic search
 ghost_providers.py              — Multi-provider LLM registry + API format adapters
 ghost_auth_profiles.py          — Auth profile store (API keys + OAuth tokens)
 ghost_oauth.py                  — OpenAI Codex OAuth PKCE flow
-ghost_responses_capabilities.py — OpenAI Responses API integration for advanced skills
 ghost_llm_task.py               — Structured LLM subtasks with JSON output
 ghost_interrupt.py              — Generation interrupt and injection
 
@@ -148,7 +147,6 @@ ghost_langfuse.py               — Langfuse tracing, telemetry, and observabili
 
 # Generation Control
 ghost_interrupt.py              — Generation interrupt and prompt injection
-ghost_responses_capabilities.py — OpenAI Responses API integration for advanced skills
 
 # Security
 ghost_security_audit.py         — Security auditing and auto-remediation
@@ -168,7 +166,6 @@ ghost_config_tool.py            — Configuration management and validation
 # Code Intelligence
 ghost_code_tools.py             — Code analysis and repository tools
 ghost_code_intel.py             — Code intelligence and indexing
-ghost_sandbox.py                — Docker sandbox for safe code execution
 
 # Data & Utilities
 ghost_data_extract.py           — Smart data extraction (emails, phones, URLs, etc.)

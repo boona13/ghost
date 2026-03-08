@@ -18,7 +18,6 @@ class GhostDoctor:
             self._check_provider_credentials(),
             self._check_cron_service(),
             self._check_browser_runtime(),
-            self._check_sandbox_docker(),
             self._check_state_integrity_ready(),
             self._check_channel_security(),
         ]
@@ -128,23 +127,6 @@ class GhostDoctor:
             "details": {"enable_browser": browser_enabled},
             "fix_available": not browser_enabled,
             "fix_id": "browser_enable" if not browser_enabled else None,
-        }
-
-    def _check_sandbox_docker(self) -> Dict[str, Any]:
-        try:
-            from ghost_sandbox import docker_available
-            available = bool(docker_available())
-        except Exception:
-            available = False
-
-        return {
-            "id": "sandbox.docker",
-            "status": "ok" if available else "warn",
-            "severity": "medium" if not available else "none",
-            "summary": "Docker availability for sandbox",
-            "details": {"docker_available": available},
-            "fix_available": False,
-            "fix_id": None,
         }
 
     def _check_state_integrity_ready(self) -> Dict[str, Any]:

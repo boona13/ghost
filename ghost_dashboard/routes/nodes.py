@@ -91,14 +91,73 @@ def install_node():
     return jsonify(result)
 
 
+@bp.route("/api/nodes/upload-install", methods=["POST"])
+@rate_limit(requests_per_minute=5)
+def upload_install_node():
+    """Install a node from an uploaded .zip file."""
+    import tempfile
+    import zipfile
+    import shutil
+    from pathlib import Path
+
+    daemon = _get_daemon()
+    if not daemon or not hasattr(daemon, "node_manager") or not daemon.node_manager:
+        return jsonify({"status": "error", "error": "Node system not initialized"}), 503
+
+    if "file" not in request.files:
+        return jsonify({"status": "error", "error": "No file provided"}), 400
+
+    f = request.files["file"]
+    if not f.filename or not f.filename.lower().endswith(".zip"):
+        return jsonify({"status": "error", "error": "Only .zip files are supported"}), 400
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="ghost_node_"))
+    zip_path = tmp_dir / "upload.zip"
+    try:
+        f.save(str(zip_path))
+
+        if not zipfile.is_zipfile(str(zip_path)):
+            return jsonify({"status": "error", "error": "Invalid zip file"}), 400
+
+        extract_dir = tmp_dir / "extracted"
+        extract_dir.mkdir()
+        with zipfile.ZipFile(str(zip_path), "r") as zf:
+            for member in zf.namelist():
+                if ".." in member or member.startswith("/"):
+                    return jsonify({"status": "error", "error": "Zip contains unsafe paths"}), 400
+            zf.extractall(str(extract_dir))
+
+        node_root = extract_dir
+        if not (node_root / "NODE.yaml").exists() and not (node_root / "NODE.yml").exists():
+            subdirs = [d for d in extract_dir.iterdir() if d.is_dir() and not d.name.startswith((".", "__"))]
+            if len(subdirs) == 1:
+                node_root = subdirs[0]
+
+        result = daemon.node_manager.install_local(str(node_root))
+        status_code = 200 if result.get("status") == "ok" else 400
+        return jsonify(result), status_code
+
+    except zipfile.BadZipFile:
+        return jsonify({"status": "error", "error": "Corrupt or invalid zip file"}), 400
+    except Exception as e:
+        log.error("upload-install error: %s", e)
+        return jsonify({"status": "error", "error": str(e)[:300]}), 500
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 @bp.route("/api/nodes/<name>/uninstall", methods=["POST"])
 def uninstall_node(name):
     daemon = _get_daemon()
     if not daemon or not hasattr(daemon, "node_manager") or not daemon.node_manager:
-        return jsonify({"error": "Node system not initialized"}), 503
+        return jsonify({"ok": False, "error": "Node system not initialized"}), 503
 
-    ok = daemon.node_manager.uninstall_node(name)
-    return jsonify({"ok": ok})
+    data = request.get_json(silent=True) or {}
+    delete_models = data.get("delete_models", False)
+
+    result = daemon.node_manager.uninstall_node(name, delete_models=delete_models)
+    status_code = 200 if result.get("ok") else 400
+    return jsonify(result), status_code
 
 
 @bp.route("/api/nodes/browse")

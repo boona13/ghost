@@ -1835,7 +1835,7 @@ class ToolLoopEngine:
 
         return provider.base_url, headers, adapted
 
-    def _call_llm(self, payload, timeout=DEFAULT_TIMEOUT, on_token=None):
+    def _call_llm(self, payload, timeout=DEFAULT_TIMEOUT, on_token=None, cancel_check=None):
         """Make an LLM API call with provider-aware fallback chain and jittered retry.
 
         All providers use streaming (SSE) to avoid blocking on slow responses.
@@ -1845,6 +1845,9 @@ class ToolLoopEngine:
         If *on_token* is provided it is forwarded to the stream parser so
         each content-delta chunk is emitted in real time.
 
+        If *cancel_check* returns True, the call aborts immediately with
+        a CancelledError-style return so the tool loop can exit fast.
+
         Flow:  for each (provider, model) in fallback chain →
                  resolve base_url, headers, adapted payload →
                  for each retry attempt →
@@ -1853,10 +1856,21 @@ class ToolLoopEngine:
                on retriable failure → jittered backoff, next attempt
                on exhausted retries → record_failure, try next candidate
         """
+        def _cancellable_sleep(seconds):
+            """Sleep in small increments, aborting early if cancelled."""
+            end = time.time() + seconds
+            while time.time() < end:
+                if cancel_check and cancel_check():
+                    return True
+                time.sleep(min(0.5, end - time.time()))
+            return cancel_check() if cancel_check else False
+
         candidates = self._fallback_chain.get_candidates()
         all_errors = []
 
         for provider_id, model in candidates:
+            if cancel_check and cancel_check():
+                return None, "Cancelled by user"
             url, headers, adapted_payload = self._resolve_provider_call(
                 provider_id, model, payload
             )
@@ -1897,7 +1911,8 @@ class ToolLoopEngine:
                                  provider_id, model, wait, attempt + 1,
                                  RATE_LIMIT_MAX_RETRIES + 1,
                                  f"{retry_after}s" if retry_after else "not set")
-                        time.sleep(wait)
+                        if _cancellable_sleep(wait):
+                            return None, "Cancelled by user"
                         last_err = f"HTTP 429 on {provider_id}:{model}"
                         continue
 
@@ -1944,7 +1959,12 @@ class ToolLoopEngine:
 
                     if self._usage_tracker:
                         usage = data.get("usage", {}) if isinstance(data, dict) else {}
-                        total_tokens = usage.get("total_tokens", 0) if isinstance(usage, dict) else 0
+                        if isinstance(usage, dict):
+                            total_tokens = usage.get("total_tokens") or (
+                                usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
+                            )
+                        else:
+                            total_tokens = 0
                         self._usage_tracker.call_completed(total_tokens, success=True)
 
                     return data, None
@@ -1966,12 +1986,14 @@ class ToolLoopEngine:
                             wait = _jittered_delay(RATE_LIMIT_BASE_DELAY, rate_limit_hits - 1)
                         log.info("Rate-limited (HTTPError) on %s:%s, waiting %.1fs (attempt %d)",
                                  provider_id, model, wait, attempt + 1)
-                        time.sleep(wait)
+                        if _cancellable_sleep(wait):
+                            return None, "Cancelled by user"
                         last_err = f"HTTP 429 on {provider_id}:{model}: {body[:100]}"
                         continue
                     if status in (500, 502, 503) and attempt < MAX_RETRIES:
                         wait = _jittered_delay(RETRY_DELAY, attempt)
-                        time.sleep(wait)
+                        if _cancellable_sleep(wait):
+                            return None, "Cancelled by user"
                         last_err = f"HTTP {status} on {provider_id}:{model}: {body[:100]}"
                         continue
                     err_body = body[:200] if status == 400 else body[:100]
@@ -1979,14 +2001,16 @@ class ToolLoopEngine:
                     break
                 except requests.exceptions.Timeout:
                     if attempt < MAX_RETRIES:
-                        time.sleep(_jittered_delay(RETRY_DELAY, attempt))
+                        if _cancellable_sleep(_jittered_delay(RETRY_DELAY, attempt)):
+                            return None, "Cancelled by user"
                         last_err = f"Timeout on {provider_id}:{model}"
                         continue
                     last_err = f"Timeout on {provider_id}:{model} after retries"
                     break
                 except requests.exceptions.ConnectionError as e:
                     if attempt < MAX_RETRIES:
-                        time.sleep(_jittered_delay(RETRY_DELAY, attempt))
+                        if _cancellable_sleep(_jittered_delay(RETRY_DELAY, attempt)):
+                            return None, "Cancelled by user"
                         last_err = f"Connection error on {provider_id}:{model}: {str(e)[:80]}"
                         continue
                     last_err = f"Connection error on {provider_id}:{model} after retries: {str(e)[:80]}"
@@ -2217,16 +2241,28 @@ class ToolLoopEngine:
                 else:
                     payload["tool_choice"] = "auto"
 
-            future = _llm_pool.submit(self._call_llm, payload, DEFAULT_TIMEOUT, on_token)
-            try:
-                data, error = future.result(timeout=MAX_LLM_WALL_CLOCK)
-            except concurrent.futures.TimeoutError:
-                data, error = None, f"Wall-clock timeout ({MAX_LLM_WALL_CLOCK}s) — model too slow"
-                log.warning("LLM call exceeded %ds wall clock at step %d", MAX_LLM_WALL_CLOCK, step)
+            future = _llm_pool.submit(
+                self._call_llm, payload, DEFAULT_TIMEOUT, on_token,
+                cancel_check=cancel_check,
+            )
+            deadline = time.time() + MAX_LLM_WALL_CLOCK
+            data, error = None, None
+            while True:
+                if cancel_check and cancel_check():
+                    future.cancel()
+                    final_text = "(Stopped by user)"
+                    exit_reason = "cancelled"
+                    break
+                try:
+                    data, error = future.result(timeout=0.5)
+                    break
+                except concurrent.futures.TimeoutError:
+                    if time.time() >= deadline:
+                        data, error = None, f"Wall-clock timeout ({MAX_LLM_WALL_CLOCK}s) — model too slow"
+                        log.warning("LLM call exceeded %ds wall clock at step %d", MAX_LLM_WALL_CLOCK, step)
+                        break
 
-            if cancel_check and cancel_check():
-                final_text = "(Stopped by user)"
-                exit_reason = "cancelled"
+            if exit_reason == "cancelled":
                 break
 
             if error:
@@ -2281,7 +2317,9 @@ class ToolLoopEngine:
 
             consecutive_errors = 0
             usage = data.get("usage", {})
-            total_tokens += usage.get("total_tokens", 0)
+            total_tokens += usage.get("total_tokens") or (
+                usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
+            )
 
             choices = data.get("choices", [])
             if not choices:
@@ -2452,11 +2490,27 @@ class ToolLoopEngine:
                             if not ok_intent:
                                 tool_result = f"BLOCKED by tool-intent security: {reason_intent}"
                             else:
-                                tool_result = tool_registry.execute(fn_name, exec_args)
+                                tool_future = _llm_pool.submit(
+                                    tool_registry.execute, fn_name, exec_args)
+                                while True:
+                                    if cancel_check and cancel_check():
+                                        tool_future.cancel()
+                                        tool_result = "(Stopped by user)"
+                                        break
+                                    try:
+                                        tool_result = tool_future.result(timeout=0.5)
+                                        break
+                                    except concurrent.futures.TimeoutError:
+                                        continue
                         except Exception as e:
                             tool_result = f"Tool execution failed: {e}"
 
                         tool_duration_ms = (time.time() - t0) * 1000
+
+                        if cancel_check and cancel_check():
+                            final_text = "(Stopped by user)"
+                            exit_reason = "cancelled"
+                            break
 
                         if hook_runner:
                             modified_result = hook_runner.run(

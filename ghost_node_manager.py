@@ -222,6 +222,136 @@ class NodeManifest:
 
 
 # ═════════════════════════════════════════════════════════════════════
+#  NODE VALIDATOR — pre-install structural & security checks
+# ═════════════════════════════════════════════════════════════════════
+
+@dataclass
+class NodeValidationResult:
+    valid: bool = True
+    errors: list = field(default_factory=list)
+    warnings: list = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {"valid": self.valid, "errors": self.errors, "warnings": self.warnings}
+
+
+_DANGEROUS_PATTERNS = [
+    ("os.system",         "Direct shell execution via os.system()"),
+    ("subprocess.call",   "Uncontrolled subprocess call"),
+    ("subprocess.Popen",  "Uncontrolled subprocess Popen"),
+    ("eval(",             "Use of eval() — arbitrary code execution risk"),
+    ("exec(",             "Use of exec() — arbitrary code execution risk"),
+    ("__import__(",       "Dynamic import — may load untrusted modules"),
+    ("compile(",          "Code compilation — may execute arbitrary code"),
+    ("ctypes",            "ctypes usage — native memory access"),
+    ("webbrowser.open",   "Attempts to open URLs in the user's browser"),
+]
+
+
+def validate_node(source_path: Path, existing_nodes: dict | None = None) -> NodeValidationResult:
+    """Validate a node directory before installation.
+
+    Checks:
+      1. Required files exist (NODE.yaml, node.py)
+      2. Manifest parses and has valid required fields
+      3. node.py is valid Python with a register() function
+      4. No name collision with bundled nodes
+      5. Dangerous code patterns flagged as warnings
+    """
+    result = NodeValidationResult()
+
+    manifest_path = source_path / "NODE.yaml"
+    if not manifest_path.exists():
+        manifest_path = source_path / "NODE.yml"
+    if not manifest_path.exists():
+        result.valid = False
+        result.errors.append("Missing NODE.yaml (or NODE.yml) manifest file")
+        return result
+
+    node_py = source_path / "node.py"
+    if not node_py.exists():
+        result.valid = False
+        result.errors.append("Missing node.py entry point")
+        return result
+
+    # ── Manifest validation ──────────────────────────────────────
+    try:
+        manifest = NodeManifest.from_yaml(manifest_path)
+    except Exception as e:
+        result.valid = False
+        result.errors.append(f"Manifest parse error: {e}")
+        return result
+
+    if not manifest.name or not manifest.name.strip():
+        result.valid = False
+        result.errors.append("Manifest 'name' field is missing or empty")
+
+    if not manifest.description or not manifest.description.strip():
+        result.warnings.append("Manifest 'description' is empty — recommended for discoverability")
+
+    if not manifest.version or not manifest.version.strip():
+        result.warnings.append("Manifest 'version' is empty — defaults to 0.1.0")
+
+    import re
+    safe_name = manifest.name.strip().lower() if manifest.name else ""
+    if safe_name and not re.match(r"^[a-z0-9][a-z0-9._-]*$", safe_name):
+        result.valid = False
+        result.errors.append(f"Invalid node name '{manifest.name}' — must be alphanumeric with hyphens/dots, starting with a letter or digit")
+
+    if manifest.category and manifest.category not in NODE_CATEGORIES:
+        result.warnings.append(f"Unknown category '{manifest.category}' — expected one of: {', '.join(NODE_CATEGORIES)}")
+
+    # ── Duplicate / collision detection ──────────────────────────
+    if existing_nodes and safe_name:
+        existing = existing_nodes.get(safe_name)
+        if existing and existing.source == "bundled":
+            result.valid = False
+            result.errors.append(f"Cannot overwrite bundled node '{safe_name}'")
+        elif existing:
+            result.warnings.append(f"Node '{safe_name}' already installed — it will be replaced")
+
+    # ── node.py AST validation ───────────────────────────────────
+    import ast
+    try:
+        source_code = node_py.read_text(encoding="utf-8")
+    except Exception as e:
+        result.valid = False
+        result.errors.append(f"Cannot read node.py: {e}")
+        return result
+
+    try:
+        tree = ast.parse(source_code, filename="node.py")
+    except SyntaxError as e:
+        result.valid = False
+        result.errors.append(f"node.py has invalid Python syntax: {e.msg} (line {e.lineno})")
+        return result
+
+    has_register = False
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.name == "register":
+                if len(node.args.args) >= 1:
+                    has_register = True
+                else:
+                    result.valid = False
+                    result.errors.append("register() function must accept at least one argument (api)")
+
+    if not has_register:
+        result.valid = False
+        result.errors.append("node.py must define a register(api) function — this is the node entry point")
+
+    # ── Dangerous pattern scan ───────────────────────────────────
+    for pattern, description in _DANGEROUS_PATTERNS:
+        if pattern in source_code:
+            result.warnings.append(f"Security: {description}")
+
+    if re.search(r'subprocess\.(?:run|call|Popen)\s*\([^)]*shell\s*=\s*True', source_code):
+        result.warnings.append("Security: subprocess called with shell=True — potential command injection")
+
+    return result
+
+
+# ═════════════════════════════════════════════════════════════════════
 #  NODE API (exposed to nodes during registration)
 # ═════════════════════════════════════════════════════════════════════
 
@@ -621,25 +751,27 @@ class NodeManager:
         return clean
 
     def install_local(self, source_path: str) -> dict:
-        """Install a node from a local directory."""
+        """Install a node from a local directory.
+
+        Runs full validation before copying files. Returns error details
+        if validation fails, or installs and loads the node on success.
+        """
         src = Path(source_path)
+
+        validation = validate_node(src, existing_nodes=self.nodes)
+        if not validation.valid:
+            return {
+                "status": "error",
+                "error": "; ".join(validation.errors),
+                "validation": validation.to_dict(),
+            }
+
         manifest_path = src / "NODE.yaml"
         if not manifest_path.exists():
             manifest_path = src / "NODE.yml"
-        if not manifest_path.exists():
-            return {"status": "error", "error": "No NODE.yaml found in source directory"}
 
-        if not (src / "node.py").exists():
-            return {"status": "error", "error": "No node.py entry point found in source directory"}
-
-        try:
-            manifest = NodeManifest.from_yaml(manifest_path)
-        except Exception as e:
-            return {"status": "error", "error": f"Invalid manifest: {e}"}
-
+        manifest = NodeManifest.from_yaml(manifest_path)
         safe_name = self._sanitize_node_name(manifest.name)
-        if not safe_name:
-            return {"status": "error", "error": f"Invalid node name: {manifest.name!r} (must be alphanumeric with hyphens/dots)"}
         manifest.name = safe_name
 
         dest = NODES_DIR / safe_name
@@ -671,6 +803,8 @@ class NodeManager:
             "name": safe_name,
             "tools": info.tools,
         }
+        if validation.warnings:
+            result["warnings"] = validation.warnings
         if info.error:
             result["warning"] = f"Node installed but failed to load: {info.error}"
         if dep_result and dep_result.get("status") == "error":
@@ -695,13 +829,60 @@ class NodeManager:
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
-    def uninstall_node(self, name: str) -> bool:
+    def uninstall_node(self, name: str, delete_models: bool = False) -> dict:
+        """Uninstall a user-installed node.
+
+        Args:
+            name: Node name to uninstall.
+            delete_models: If True, delete cached models that are exclusive
+                           to this node (not used by any other installed node).
+
+        Returns:
+            dict with status info: ``{"ok": True/False, ...}``
+        """
         info = self.nodes.get(name)
         if not info:
-            return False
+            return {"ok": False, "error": "Node not found"}
         if info.source == "bundled":
-            log.warning("Cannot uninstall bundled node: %s", name)
-            return False
+            return {"ok": False, "error": "Cannot uninstall bundled nodes"}
+
+        deleted_models: list[str] = []
+        skipped_models: list[str] = []
+
+        if delete_models and info.manifest and info.manifest.models:
+            node_model_ids = {
+                m["id"] if isinstance(m, dict) else str(m)
+                for m in info.manifest.models
+            }
+            other_model_ids: set[str] = set()
+            for other_name, other_info in self.nodes.items():
+                if other_name == name or not other_info.manifest:
+                    continue
+                for m in (other_info.manifest.models or []):
+                    other_model_ids.add(m["id"] if isinstance(m, dict) else str(m))
+
+            exclusive = node_model_ids - other_model_ids
+
+            for model_id in node_model_ids:
+                if model_id not in exclusive:
+                    skipped_models.append(model_id)
+                    continue
+                try:
+                    self.resource_manager.release(model_id)
+                except Exception:
+                    pass
+                cleaned = self._delete_model_cache(model_id)
+                if cleaned:
+                    deleted_models.append(model_id)
+                    log.info("Deleted model cache for %s (exclusive to %s)", model_id, name)
+                else:
+                    skipped_models.append(model_id)
+
+        for tool_name in list(info.tools):
+            try:
+                self.tool_registry.remove(tool_name)
+            except Exception:
+                pass
 
         mod_name = f"ghost_node_{name}"
         if mod_name in sys.modules:
@@ -711,8 +892,32 @@ class NodeManager:
         if node_path.exists():
             shutil.rmtree(node_path, ignore_errors=True)
 
+        data_dir = GHOST_HOME / "node_data" / name
+        if data_dir.exists():
+            shutil.rmtree(data_dir, ignore_errors=True)
+
         del self.nodes[name]
-        return True
+        return {
+            "ok": True,
+            "deleted_models": deleted_models,
+            "skipped_models": skipped_models,
+        }
+
+    def _delete_model_cache(self, model_id: str) -> bool:
+        """Delete a HuggingFace-style model from the shared cache. Returns True if found."""
+        safe_id = model_id.replace("/", "--")
+        found = False
+
+        models_dir = MODELS_CACHE_DIR / "models--" + safe_id if "--" not in safe_id else MODELS_CACHE_DIR / f"models--{safe_id}"
+        hub_dir = MODELS_CACHE_DIR / "hub" / f"models--{safe_id}"
+
+        for candidate in [models_dir, hub_dir]:
+            if candidate.is_dir():
+                shutil.rmtree(candidate, ignore_errors=True)
+                found = True
+                log.info("Removed model cache: %s", candidate)
+
+        return found
 
     def _install_deps(self, name: str, req_file: Path) -> dict:
         """Install node dependencies to isolated site-packages. Returns status dict."""
