@@ -250,6 +250,10 @@ export async function render(container) {
         showTelegramModal(container);
         return;
       }
+      if (id === 'discord') {
+        showDiscordModal(container);
+        return;
+      }
       try {
         const schemaData = await api.get(`/api/channels/${id}/schema`);
         showConfigModal(id, schemaData.schema, schemaData.current, container);
@@ -831,6 +835,423 @@ function showTelegramModal(pageContainer) {
     } catch (_) {}
     setTimeout(() => { cleanup(); render(pageContainer); }, 2500);
   };
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+//  Discord Setup Wizard
+// ═══════════════════════════════════════════════════════════════
+
+function showDiscordModal(pageContainer) {
+  const { GhostAPI: api, GhostUtils: u } = window;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4';
+  overlay.innerHTML = `
+    <div class="bg-surface-800 rounded-xl border border-surface-600 p-6 w-full max-w-md shadow-2xl">
+      <div class="flex items-center gap-3 mb-5">
+        <span class="text-3xl">\u{1f3ae}</span>
+        <div>
+          <h3 class="text-sm font-semibold text-white">${t('channels.discordSetup')}</h3>
+          <p class="text-[11px] text-zinc-500">${t('channels.linkDiscord')}</p>
+        </div>
+      </div>
+
+      <!-- Mode selector -->
+      <div id="dc-mode-select">
+        <div class="grid grid-cols-2 gap-2 mb-5">
+          <button id="dc-mode-bot" class="dc-mode-btn px-3 py-2.5 rounded-lg border-2 border-indigo-500/50 bg-indigo-500/10 text-left transition-all">
+            <div class="text-xs font-semibold text-white">${t('channels.discordModeBot')}</div>
+            <div class="text-[10px] text-zinc-400 mt-0.5">${t('channels.discordModeBotDesc')}</div>
+          </button>
+          <button id="dc-mode-webhook" class="dc-mode-btn px-3 py-2.5 rounded-lg border-2 border-surface-600 bg-surface-700 text-left transition-all hover:border-zinc-500">
+            <div class="text-xs font-semibold text-zinc-300">${t('channels.discordModeWebhook')}</div>
+            <div class="text-[10px] text-zinc-500 mt-0.5">${t('channels.discordModeWebhookDesc')}</div>
+          </button>
+        </div>
+      </div>
+
+      <!-- ════ Webhook flow ════ -->
+      <div id="dc-webhook-panel" class="hidden">
+        <label class="block text-[11px] text-zinc-400 mb-1.5">${t('channels.enterWebhookUrl')}</label>
+        <input id="dc-webhook-url" type="text" placeholder="${t('channels.webhookPlaceholder')}"
+          class="w-full bg-surface-700 border border-surface-600 rounded px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 font-mono" />
+        <div id="dc-webhook-status" class="text-[11px] mt-2 hidden"></div>
+        <div class="flex justify-end gap-2 mt-4">
+          <button id="dc-wh-back" class="px-3 py-1.5 rounded bg-surface-600 text-zinc-400 text-sm hover:bg-surface-500">${t('common.back')}</button>
+          <button id="dc-wh-save" class="px-4 py-1.5 rounded bg-indigo-600 text-white text-sm hover:bg-indigo-500 font-medium opacity-50 cursor-not-allowed" disabled>${t('common.save')}</button>
+        </div>
+      </div>
+
+      <!-- ════ Bot flow ════ -->
+
+      <!-- Bot Step 1: Token -->
+      <div id="dc-bot-step-1">
+        <div id="dc-bot-steps" class="flex items-center gap-2 mb-4">
+          <div class="dc-step-dot w-2 h-2 rounded-full bg-indigo-400"></div>
+          <div class="dc-step-bar flex-1 h-0.5 bg-surface-600 rounded"><div id="dc-bar-1" class="h-full rounded bg-surface-600 transition-all duration-500" style="width:0%"></div></div>
+          <div class="dc-step-dot w-2 h-2 rounded-full bg-surface-600"></div>
+          <div class="dc-step-bar flex-1 h-0.5 bg-surface-600 rounded"><div id="dc-bar-2" class="h-full rounded bg-surface-600 transition-all duration-500" style="width:0%"></div></div>
+          <div class="dc-step-dot w-2 h-2 rounded-full bg-surface-600"></div>
+          <div class="dc-step-bar flex-1 h-0.5 bg-surface-600 rounded"><div id="dc-bar-3" class="h-full rounded bg-surface-600 transition-all duration-500" style="width:0%"></div></div>
+          <div class="dc-step-dot w-2 h-2 rounded-full bg-surface-600"></div>
+        </div>
+        <div class="text-[10px] text-zinc-600 mb-3">${t('channels.discordStep', {n: '1', total: '4'})}</div>
+        <label class="block text-[11px] text-zinc-400 mb-1.5">${t('channels.enterBotTokenDiscord')}</label>
+        <input id="dc-token" type="password" placeholder="${t('channels.botTokenDiscordPlaceholder')}"
+          class="w-full bg-surface-700 border border-surface-600 rounded px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 font-mono" />
+        <div id="dc-token-status" class="text-[11px] mt-2 hidden"></div>
+        <p class="text-[10px] text-zinc-600 mt-3">${t('channels.createBotDiscordHint')}</p>
+        <div class="flex justify-end gap-2 mt-4">
+          <button id="dc-cancel-1" class="px-3 py-1.5 rounded bg-surface-600 text-zinc-400 text-sm hover:bg-surface-500">${t('common.cancel')}</button>
+          <button id="dc-next-1" class="px-4 py-1.5 rounded bg-indigo-600 text-white text-sm hover:bg-indigo-500 font-medium opacity-50 cursor-not-allowed" disabled>${t('common.next')}</button>
+        </div>
+      </div>
+
+      <!-- Bot Step 2: Invite bot -->
+      <div id="dc-bot-step-2" class="hidden">
+        <div class="text-[10px] text-zinc-600 mb-3">${t('channels.discordStep', {n: '2', total: '4'})}</div>
+        <div class="flex flex-col items-center py-4">
+          <div class="w-14 h-14 rounded-full bg-indigo-500/15 flex items-center justify-center mb-4">
+            <svg class="w-7 h-7 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"/>
+            </svg>
+          </div>
+          <p class="text-xs text-zinc-300 text-center font-medium">${t('channels.inviteBotToServer')}</p>
+          <p id="dc-bot-name" class="text-sm text-indigo-400 font-semibold mt-1"></p>
+          <a id="dc-invite-link" href="#" target="_blank"
+            class="mt-3 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium inline-flex items-center gap-2 transition-colors">
+            ${t('channels.openInviteLink')}
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+          </a>
+          <p class="text-[10px] text-zinc-500 mt-3 text-center">${t('channels.inviteBotDesc')}</p>
+        </div>
+        <div class="flex justify-end gap-2 mt-2">
+          <button id="dc-back-2" class="px-3 py-1.5 rounded bg-surface-600 text-zinc-400 text-sm hover:bg-surface-500">${t('common.back')}</button>
+          <button id="dc-next-2" class="px-4 py-1.5 rounded bg-indigo-600 text-white text-sm hover:bg-indigo-500 font-medium">${t('common.next')}</button>
+        </div>
+      </div>
+
+      <!-- Bot Step 3: Select server & channel -->
+      <div id="dc-bot-step-3" class="hidden">
+        <div class="text-[10px] text-zinc-600 mb-3">${t('channels.discordStep', {n: '3', total: '4'})}</div>
+        <div class="space-y-3">
+          <div>
+            <div class="flex items-center justify-between mb-1.5">
+              <label class="text-[11px] text-zinc-400">${t('channels.selectServer')}</label>
+              <button id="dc-refresh-guilds" class="text-[10px] text-indigo-400 hover:text-indigo-300">${t('channels.refreshServers')}</button>
+            </div>
+            <select id="dc-guild-select"
+              class="w-full bg-surface-700 border border-surface-600 rounded px-3 py-2.5 text-sm text-zinc-200 focus:outline-none focus:border-zinc-500">
+              <option value="">${t('channels.loadingServers')}</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-[11px] text-zinc-400 mb-1.5">${t('channels.selectChannel')}</label>
+            <select id="dc-channel-select"
+              class="w-full bg-surface-700 border border-surface-600 rounded px-3 py-2.5 text-sm text-zinc-200 focus:outline-none focus:border-zinc-500" disabled>
+              <option value="">—</option>
+            </select>
+          </div>
+        </div>
+        <div class="flex justify-end gap-2 mt-4">
+          <button id="dc-back-3" class="px-3 py-1.5 rounded bg-surface-600 text-zinc-400 text-sm hover:bg-surface-500">${t('common.back')}</button>
+          <button id="dc-next-3" class="px-4 py-1.5 rounded bg-indigo-600 text-white text-sm hover:bg-indigo-500 font-medium opacity-50 cursor-not-allowed" disabled>${t('common.next')}</button>
+        </div>
+      </div>
+
+      <!-- Bot Step 4: Connected -->
+      <div id="dc-bot-step-4" class="hidden">
+        <div class="flex flex-col items-center py-6">
+          <div class="w-16 h-16 rounded-full bg-emerald-500/20 flex items-center justify-center mb-3">
+            <svg class="w-8 h-8 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+            </svg>
+          </div>
+          <p class="text-sm font-semibold text-emerald-400">${t('channels.discordConnected')}</p>
+          <p class="text-[11px] text-zinc-400 mt-1">${t('channels.discordConnectedDesc')}</p>
+          <div id="dc-test-result" class="text-[10px] text-zinc-500 mt-3"></div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  const $ = (sel) => overlay.querySelector(sel);
+  let currentMode = 'bot';
+  let validatedToken = '';
+  let botName = '';
+  let inviteUrl = '';
+  let selectedGuildId = '';
+
+  const cleanup = () => overlay.remove();
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(); });
+  $('#dc-cancel-1').addEventListener('click', cleanup);
+
+  const switchMode = (mode) => {
+    currentMode = mode;
+    if (mode === 'bot') {
+      $('#dc-mode-bot').classList.add('border-indigo-500/50', 'bg-indigo-500/10');
+      $('#dc-mode-bot').classList.remove('border-surface-600', 'bg-surface-700');
+      $('#dc-mode-webhook').classList.remove('border-indigo-500/50', 'bg-indigo-500/10');
+      $('#dc-mode-webhook').classList.add('border-surface-600', 'bg-surface-700');
+      $('#dc-webhook-panel').classList.add('hidden');
+      $('#dc-bot-step-1').classList.remove('hidden');
+    } else {
+      $('#dc-mode-webhook').classList.add('border-indigo-500/50', 'bg-indigo-500/10');
+      $('#dc-mode-webhook').classList.remove('border-surface-600', 'bg-surface-700');
+      $('#dc-mode-bot').classList.remove('border-indigo-500/50', 'bg-indigo-500/10');
+      $('#dc-mode-bot').classList.add('border-surface-600', 'bg-surface-700');
+      $('#dc-bot-step-1').classList.add('hidden');
+      $('#dc-bot-step-2').classList.add('hidden');
+      $('#dc-bot-step-3').classList.add('hidden');
+      $('#dc-bot-step-4').classList.add('hidden');
+      $('#dc-webhook-panel').classList.remove('hidden');
+    }
+  };
+
+  $('#dc-mode-bot').addEventListener('click', () => switchMode('bot'));
+  $('#dc-mode-webhook').addEventListener('click', () => switchMode('webhook'));
+
+  const showBotStep = (step) => {
+    $('#dc-bot-step-1').classList.toggle('hidden', step !== 1);
+    $('#dc-bot-step-2').classList.toggle('hidden', step !== 2);
+    $('#dc-bot-step-3').classList.toggle('hidden', step !== 3);
+    $('#dc-bot-step-4').classList.toggle('hidden', step !== 4);
+    const dots = overlay.querySelectorAll('.dc-step-dot');
+    dots.forEach((d, i) => {
+      d.classList.toggle('bg-indigo-400', i < step);
+      d.classList.toggle('bg-surface-600', i >= step);
+    });
+    if (step >= 2) { $('#dc-bar-1').style.width = '100%'; $('#dc-bar-1').classList.add('bg-indigo-400'); }
+    if (step >= 3) { $('#dc-bar-2').style.width = '100%'; $('#dc-bar-2').classList.add('bg-indigo-400'); }
+    if (step >= 4) { $('#dc-bar-3').style.width = '100%'; $('#dc-bar-3').classList.add('bg-indigo-400'); }
+    $('#dc-mode-select').classList.toggle('hidden', step > 1);
+  };
+
+  // ── Webhook flow ──────────────────────────────────
+  const webhookInput = $('#dc-webhook-url');
+  const webhookStatus = $('#dc-webhook-status');
+  const whSaveBtn = $('#dc-wh-save');
+  let whValidateTimeout = null;
+
+  const validateWebhook = async (url) => {
+    if (!url || !url.startsWith('https://discord.com/api/webhooks/')) {
+      webhookStatus.classList.add('hidden');
+      whSaveBtn.disabled = true;
+      whSaveBtn.classList.add('opacity-50', 'cursor-not-allowed');
+      return;
+    }
+    webhookStatus.classList.remove('hidden');
+    webhookStatus.textContent = t('channels.validatingWebhook');
+    webhookStatus.className = 'text-[11px] mt-2 text-zinc-400 animate-pulse';
+
+    try {
+      const res = await api.post('/api/channels/discord/validate-webhook', { webhook_url: url });
+      if (res.ok) {
+        webhookStatus.textContent = t('channels.webhookVerified', { name: res.name || 'webhook' });
+        webhookStatus.className = 'text-[11px] mt-2 text-emerald-400';
+        whSaveBtn.disabled = false;
+        whSaveBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+      } else {
+        webhookStatus.textContent = t('channels.invalidWebhook');
+        webhookStatus.className = 'text-[11px] mt-2 text-red-400';
+        whSaveBtn.disabled = true;
+        whSaveBtn.classList.add('opacity-50', 'cursor-not-allowed');
+      }
+    } catch (_) {
+      webhookStatus.textContent = t('channels.invalidWebhook');
+      webhookStatus.className = 'text-[11px] mt-2 text-red-400';
+    }
+  };
+
+  webhookInput.addEventListener('input', () => {
+    if (whValidateTimeout) clearTimeout(whValidateTimeout);
+    whValidateTimeout = setTimeout(() => validateWebhook(webhookInput.value.trim()), 600);
+  });
+  webhookInput.addEventListener('paste', () => {
+    setTimeout(() => validateWebhook(webhookInput.value.trim()), 100);
+  });
+
+  $('#dc-wh-back').addEventListener('click', () => switchMode('bot'));
+
+  whSaveBtn.addEventListener('click', async () => {
+    try {
+      await api.post('/api/channels/discord/configure', {
+        webhook_url: webhookInput.value.trim(),
+        enabled: true,
+      });
+      webhookStatus.textContent = t('channels.discordConnected');
+      webhookStatus.className = 'text-[11px] mt-2 text-emerald-400';
+      setTimeout(() => { cleanup(); render(pageContainer); }, 1200);
+    } catch (e) {
+      webhookStatus.textContent = e.message;
+      webhookStatus.className = 'text-[11px] mt-2 text-red-400';
+    }
+  });
+
+  // ── Bot flow: Step 1 — Token ──────────────────────
+  const tokenInput = $('#dc-token');
+  const tokenStatus = $('#dc-token-status');
+  const nextBtn1 = $('#dc-next-1');
+  let btValidateTimeout = null;
+
+  const validateBotToken = async (token) => {
+    if (!token) {
+      tokenStatus.classList.add('hidden');
+      nextBtn1.disabled = true;
+      nextBtn1.classList.add('opacity-50', 'cursor-not-allowed');
+      return;
+    }
+    tokenStatus.classList.remove('hidden');
+    tokenStatus.textContent = t('channels.validatingToken');
+    tokenStatus.className = 'text-[11px] mt-2 text-zinc-400 animate-pulse';
+
+    try {
+      const res = await api.post('/api/channels/discord/bot-info', { bot_token: token });
+      if (res.ok) {
+        validatedToken = token;
+        botName = res.username;
+        inviteUrl = res.invite_url;
+        tokenStatus.textContent = t('channels.discordBotVerified', { username: res.username });
+        tokenStatus.className = 'text-[11px] mt-2 text-emerald-400';
+        nextBtn1.disabled = false;
+        nextBtn1.classList.remove('opacity-50', 'cursor-not-allowed');
+      } else {
+        tokenStatus.textContent = t('channels.invalidBotToken');
+        tokenStatus.className = 'text-[11px] mt-2 text-red-400';
+        nextBtn1.disabled = true;
+        nextBtn1.classList.add('opacity-50', 'cursor-not-allowed');
+      }
+    } catch (_) {
+      tokenStatus.textContent = t('channels.invalidBotToken');
+      tokenStatus.className = 'text-[11px] mt-2 text-red-400';
+      nextBtn1.disabled = true;
+      nextBtn1.classList.add('opacity-50', 'cursor-not-allowed');
+    }
+  };
+
+  tokenInput.addEventListener('input', () => {
+    if (btValidateTimeout) clearTimeout(btValidateTimeout);
+    btValidateTimeout = setTimeout(() => validateBotToken(tokenInput.value.trim()), 600);
+  });
+  tokenInput.addEventListener('paste', () => {
+    setTimeout(() => validateBotToken(tokenInput.value.trim()), 100);
+  });
+
+  nextBtn1.addEventListener('click', () => {
+    if (!validatedToken) return;
+    $('#dc-bot-name').textContent = botName;
+    $('#dc-invite-link').href = inviteUrl;
+    showBotStep(2);
+  });
+
+  // ── Bot flow: Step 2 — Invite ─────────────────────
+  $('#dc-back-2').addEventListener('click', () => showBotStep(1));
+  $('#dc-next-2').addEventListener('click', () => {
+    showBotStep(3);
+    loadGuilds();
+  });
+
+  // ── Bot flow: Step 3 — Server & Channel ───────────
+  const guildSelect = $('#dc-guild-select');
+  const channelSelect = $('#dc-channel-select');
+  const nextBtn3 = $('#dc-next-3');
+
+  const loadGuilds = async () => {
+    guildSelect.innerHTML = `<option value="">${t('channels.loadingServers')}</option>`;
+    guildSelect.disabled = true;
+    channelSelect.innerHTML = '<option value="">—</option>';
+    channelSelect.disabled = true;
+    nextBtn3.disabled = true;
+    nextBtn3.classList.add('opacity-50', 'cursor-not-allowed');
+
+    try {
+      const res = await api.post('/api/channels/discord/guilds', { bot_token: validatedToken });
+      if (res.ok && res.guilds.length > 0) {
+        guildSelect.innerHTML = '<option value="">' + t('channels.selectServer') + '</option>' +
+          res.guilds.map(g => `<option value="${g.id}">${u.escapeHtml(g.name)}</option>`).join('');
+        guildSelect.disabled = false;
+      } else {
+        guildSelect.innerHTML = `<option value="">${t('channels.noServers')}</option>`;
+      }
+    } catch (_) {
+      guildSelect.innerHTML = `<option value="">${t('channels.noServers')}</option>`;
+    }
+  };
+
+  $('#dc-refresh-guilds').addEventListener('click', loadGuilds);
+
+  guildSelect.addEventListener('change', async () => {
+    selectedGuildId = guildSelect.value;
+    if (!selectedGuildId) {
+      channelSelect.innerHTML = '<option value="">—</option>';
+      channelSelect.disabled = true;
+      nextBtn3.disabled = true;
+      nextBtn3.classList.add('opacity-50', 'cursor-not-allowed');
+      return;
+    }
+    channelSelect.innerHTML = `<option value="">${t('channels.loadingChannels')}</option>`;
+    channelSelect.disabled = true;
+
+    try {
+      const res = await api.post('/api/channels/discord/channels', {
+        bot_token: validatedToken,
+        guild_id: selectedGuildId,
+      });
+      if (res.ok && res.channels.length > 0) {
+        channelSelect.innerHTML = '<option value="">' + t('channels.selectChannel') + '</option>' +
+          res.channels.map(c => `<option value="${c.id}">#${u.escapeHtml(c.name)}</option>`).join('');
+        channelSelect.disabled = false;
+      } else {
+        channelSelect.innerHTML = '<option value="">No text channels found</option>';
+      }
+    } catch (_) {
+      channelSelect.innerHTML = '<option value="">Error loading channels</option>';
+    }
+  });
+
+  channelSelect.addEventListener('change', () => {
+    if (channelSelect.value) {
+      nextBtn3.disabled = false;
+      nextBtn3.classList.remove('opacity-50', 'cursor-not-allowed');
+    } else {
+      nextBtn3.disabled = true;
+      nextBtn3.classList.add('opacity-50', 'cursor-not-allowed');
+    }
+  });
+
+  $('#dc-back-3').addEventListener('click', () => showBotStep(2));
+
+  nextBtn3.addEventListener('click', async () => {
+    if (!channelSelect.value) return;
+    nextBtn3.disabled = true;
+    nextBtn3.textContent = '...';
+
+    try {
+      await api.post('/api/channels/discord/configure', {
+        bot_token: validatedToken,
+        default_channel_id: channelSelect.value,
+        enabled: true,
+      });
+    } catch (_) {}
+
+    showBotStep(4);
+
+    const resultEl = $('#dc-test-result');
+    try {
+      const res = await api.post('/api/channels/discord/test', {
+        message: '\u{2705} Ghost is connected to Discord! Setup complete.',
+      });
+      if (res.ok) {
+        resultEl.textContent = 'Test message sent to your Discord channel!';
+        resultEl.className = 'text-[10px] text-emerald-400/70 mt-3';
+      }
+    } catch (_) {}
+    setTimeout(() => { cleanup(); render(pageContainer); }, 2500);
+  });
 }
 
 

@@ -474,6 +474,126 @@ def telegram_bot_info():
 
 
 # ═══════════════════════════════════════════════════════════════
+#  Discord Setup Wizard
+# ═══════════════════════════════════════════════════════════════
+
+DISCORD_API = "https://discord.com/api/v10"
+
+
+@bp.route("/api/channels/discord/bot-info", methods=["POST"])
+def discord_bot_info():
+    """Validate a Discord bot token and return bot info + invite URL."""
+    data = request.get_json(force=True) or {}
+    bot_token = data.get("bot_token", "")
+    if not bot_token:
+        return jsonify({"ok": False, "error": "No bot token provided"}), 400
+
+    import requests as http_requests
+    try:
+        headers = {"Authorization": f"Bot {bot_token}"}
+        resp = http_requests.get(f"{DISCORD_API}/users/@me", headers=headers, timeout=10)
+        if resp.status_code == 200:
+            bot = resp.json()
+            client_id = bot.get("id", "")
+            invite_url = (
+                f"https://discord.com/api/oauth2/authorize?client_id={client_id}"
+                f"&permissions=274877975552&scope=bot"
+            )
+            return jsonify({
+                "ok": True,
+                "username": bot.get("username", ""),
+                "discriminator": bot.get("discriminator", ""),
+                "bot_id": client_id,
+                "invite_url": invite_url,
+            })
+        return jsonify({"ok": False, "error": f"Invalid token (HTTP {resp.status_code})"})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)})
+
+
+@bp.route("/api/channels/discord/guilds", methods=["POST"])
+def discord_guilds():
+    """List servers the bot is a member of."""
+    data = request.get_json(force=True) or {}
+    bot_token = data.get("bot_token", "")
+    if not bot_token:
+        registry = _get_registry()
+        if registry:
+            prov = registry.get("discord")
+            if prov:
+                bot_token = prov.bot_token
+    if not bot_token:
+        return jsonify({"ok": False, "error": "No bot token"}), 400
+
+    import requests as http_requests
+    try:
+        headers = {"Authorization": f"Bot {bot_token}"}
+        resp = http_requests.get(f"{DISCORD_API}/users/@me/guilds",
+                                 headers=headers, timeout=10)
+        if resp.status_code == 200:
+            guilds = [
+                {"id": g["id"], "name": g["name"], "icon": g.get("icon", "")}
+                for g in resp.json()
+            ]
+            return jsonify({"ok": True, "guilds": guilds})
+        return jsonify({"ok": False, "error": f"HTTP {resp.status_code}"})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)})
+
+
+@bp.route("/api/channels/discord/channels", methods=["POST"])
+def discord_channels():
+    """List text channels in a Discord server."""
+    data = request.get_json(force=True) or {}
+    bot_token = data.get("bot_token", "")
+    guild_id = data.get("guild_id", "")
+    if not bot_token or not guild_id:
+        return jsonify({"ok": False, "error": "bot_token and guild_id required"}), 400
+
+    import requests as http_requests
+    try:
+        headers = {"Authorization": f"Bot {bot_token}"}
+        resp = http_requests.get(f"{DISCORD_API}/guilds/{guild_id}/channels",
+                                 headers=headers, timeout=10)
+        if resp.status_code == 200:
+            text_channels = [
+                {"id": c["id"], "name": c["name"],
+                 "category": c.get("parent_id", "")}
+                for c in resp.json()
+                if c.get("type") == 0  # GUILD_TEXT
+            ]
+            text_channels.sort(key=lambda c: c["name"])
+            return jsonify({"ok": True, "channels": text_channels})
+        return jsonify({"ok": False, "error": f"HTTP {resp.status_code}"})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)})
+
+
+@bp.route("/api/channels/discord/validate-webhook", methods=["POST"])
+def discord_validate_webhook():
+    """Validate a Discord webhook URL."""
+    data = request.get_json(force=True) or {}
+    webhook_url = data.get("webhook_url", "")
+    if not webhook_url:
+        return jsonify({"ok": False, "error": "No webhook URL provided"}), 400
+
+    import requests as http_requests
+    try:
+        resp = http_requests.get(webhook_url, timeout=10)
+        if resp.status_code == 200:
+            info = resp.json()
+            return jsonify({
+                "ok": True,
+                "name": info.get("name", ""),
+                "channel_id": info.get("channel_id", ""),
+                "guild_id": info.get("guild_id", ""),
+            })
+        return jsonify({"ok": False, "error": f"Invalid webhook (HTTP {resp.status_code})"})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)})
+
+
+# ═══════════════════════════════════════════════════════════════
 #  Phase 2 Endpoints
 # ═══════════════════════════════════════════════════════════════
 
