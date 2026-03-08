@@ -246,6 +246,10 @@ export async function render(container) {
         showWhatsAppModal(container);
         return;
       }
+      if (id === 'telegram') {
+        showTelegramModal(container);
+        return;
+      }
       try {
         const schemaData = await api.get(`/api/channels/${id}/schema`);
         showConfigModal(id, schemaData.schema, schemaData.current, container);
@@ -593,6 +597,237 @@ function showWhatsAppModal(pageContainer) {
       }
     } catch (_) {}
   })();
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+//  Telegram Setup Wizard
+// ═══════════════════════════════════════════════════════════════
+
+function showTelegramModal(pageContainer) {
+  const { GhostAPI: api, GhostUtils: u } = window;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4';
+  overlay.innerHTML = `
+    <div class="bg-surface-800 rounded-xl border border-surface-600 p-6 w-full max-w-md shadow-2xl">
+      <div class="flex items-center gap-3 mb-5">
+        <span class="text-3xl">\u{1f4e8}</span>
+        <div>
+          <h3 class="text-sm font-semibold text-white">${t('channels.telegramSetup')}</h3>
+          <p class="text-[11px] text-zinc-500">${t('channels.linkTelegram')}</p>
+        </div>
+      </div>
+
+      <!-- Step indicator -->
+      <div id="tg-steps" class="flex items-center gap-2 mb-5">
+        <div class="tg-step-dot w-2 h-2 rounded-full bg-emerald-400"></div>
+        <div class="tg-step-bar flex-1 h-0.5 bg-surface-600 rounded"><div id="tg-bar-1" class="h-full rounded bg-surface-600 transition-all duration-500" style="width:0%"></div></div>
+        <div class="tg-step-dot w-2 h-2 rounded-full bg-surface-600"></div>
+        <div class="tg-step-bar flex-1 h-0.5 bg-surface-600 rounded"><div id="tg-bar-2" class="h-full rounded bg-surface-600 transition-all duration-500" style="width:0%"></div></div>
+        <div class="tg-step-dot w-2 h-2 rounded-full bg-surface-600"></div>
+      </div>
+
+      <!-- Step 1: Bot Token -->
+      <div id="tg-step-1">
+        <div class="text-[10px] text-zinc-600 mb-3">${t('channels.telegramStep', {n: '1'})}</div>
+        <label class="block text-[11px] text-zinc-400 mb-1.5">${t('channels.enterBotToken')}</label>
+        <input id="tg-token" type="password" placeholder="${t('channels.botTokenPlaceholder')}"
+          class="w-full bg-surface-700 border border-surface-600 rounded px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 font-mono" />
+        <div id="tg-token-status" class="text-[11px] mt-2 hidden"></div>
+        <p class="text-[10px] text-zinc-600 mt-3">${t('channels.createBotHint')}</p>
+        <div class="flex justify-end gap-2 mt-4">
+          <button id="tg-cancel-1" class="px-3 py-1.5 rounded bg-surface-600 text-zinc-400 text-sm hover:bg-surface-500">${t('common.cancel')}</button>
+          <button id="tg-next-1" class="px-4 py-1.5 rounded bg-emerald-600 text-white text-sm hover:bg-emerald-500 font-medium opacity-50 cursor-not-allowed" disabled>${t('common.next')}</button>
+        </div>
+      </div>
+
+      <!-- Step 2: Send message to bot -->
+      <div id="tg-step-2" class="hidden">
+        <div class="text-[10px] text-zinc-600 mb-3">${t('channels.telegramStep', {n: '2'})}</div>
+        <div class="flex flex-col items-center py-4">
+          <div class="w-14 h-14 rounded-full bg-blue-500/15 flex items-center justify-center mb-4">
+            <svg class="w-7 h-7 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+            </svg>
+          </div>
+          <p class="text-xs text-zinc-300 text-center font-medium">${t('channels.sendStartToBot')}</p>
+          <p id="tg-bot-handle" class="text-sm text-emerald-400 font-semibold mt-1">@bot</p>
+          <div id="tg-detect-status" class="flex items-center gap-2 mt-4">
+            <div class="w-3 h-3 rounded-full bg-amber-400/80 animate-pulse"></div>
+            <span class="text-[11px] text-zinc-400">${t('channels.waitingForMessage')}</span>
+          </div>
+          <div id="tg-detect-timer" class="text-[10px] text-zinc-600 mt-1"></div>
+        </div>
+        <div class="flex justify-end gap-2 mt-2">
+          <button id="tg-back-2" class="px-3 py-1.5 rounded bg-surface-600 text-zinc-400 text-sm hover:bg-surface-500">${t('common.back')}</button>
+          <button id="tg-cancel-2" class="px-3 py-1.5 rounded bg-surface-600 text-zinc-400 text-sm hover:bg-surface-500">${t('common.cancel')}</button>
+        </div>
+      </div>
+
+      <!-- Step 3: Connected -->
+      <div id="tg-step-3" class="hidden">
+        <div class="flex flex-col items-center py-6">
+          <div class="w-16 h-16 rounded-full bg-emerald-500/20 flex items-center justify-center mb-3">
+            <svg class="w-8 h-8 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+            </svg>
+          </div>
+          <p class="text-sm font-semibold text-emerald-400">${t('channels.telegramConnected')}</p>
+          <p class="text-[11px] text-zinc-400 mt-1">${t('channels.telegramConnectedDesc')}</p>
+          <div id="tg-test-result" class="text-[10px] text-zinc-500 mt-3"></div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  const $ = (sel) => overlay.querySelector(sel);
+  let pollTimer = null;
+  let validatedToken = '';
+  let botUsername = '';
+
+  const cleanup = () => {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    overlay.remove();
+  };
+
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(); });
+  $('#tg-cancel-1').addEventListener('click', cleanup);
+  $('#tg-cancel-2').addEventListener('click', cleanup);
+
+  const showStep = (step) => {
+    $('#tg-step-1').classList.toggle('hidden', step !== 1);
+    $('#tg-step-2').classList.toggle('hidden', step !== 2);
+    $('#tg-step-3').classList.toggle('hidden', step !== 3);
+    const dots = overlay.querySelectorAll('.tg-step-dot');
+    dots.forEach((d, i) => {
+      d.classList.toggle('bg-emerald-400', i < step);
+      d.classList.toggle('bg-surface-600', i >= step);
+    });
+    if (step >= 2) { $('#tg-bar-1').style.width = '100%'; $('#tg-bar-1').classList.add('bg-emerald-400'); }
+    if (step >= 3) { $('#tg-bar-2').style.width = '100%'; $('#tg-bar-2').classList.add('bg-emerald-400'); }
+  };
+
+  // Step 1: Token validation with debounce
+  const tokenInput = $('#tg-token');
+  const tokenStatus = $('#tg-token-status');
+  const nextBtn = $('#tg-next-1');
+  let validateTimeout = null;
+
+  const validateToken = async (token) => {
+    if (!token || !token.match(/^\d+:.+$/)) {
+      tokenStatus.classList.add('hidden');
+      nextBtn.disabled = true;
+      nextBtn.classList.add('opacity-50', 'cursor-not-allowed');
+      return;
+    }
+    tokenStatus.classList.remove('hidden');
+    tokenStatus.textContent = t('channels.validatingToken');
+    tokenStatus.className = 'text-[11px] mt-2 text-zinc-400 animate-pulse';
+
+    try {
+      const res = await api.post('/api/channels/telegram/bot-info', { bot_token: token });
+      if (res.ok) {
+        validatedToken = token;
+        botUsername = res.username;
+        tokenStatus.textContent = t('channels.botVerified', { username: res.username });
+        tokenStatus.className = 'text-[11px] mt-2 text-emerald-400';
+        nextBtn.disabled = false;
+        nextBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+      } else {
+        tokenStatus.textContent = t('channels.invalidBotToken');
+        tokenStatus.className = 'text-[11px] mt-2 text-red-400';
+        nextBtn.disabled = true;
+        nextBtn.classList.add('opacity-50', 'cursor-not-allowed');
+      }
+    } catch (_) {
+      tokenStatus.textContent = t('channels.invalidBotToken');
+      tokenStatus.className = 'text-[11px] mt-2 text-red-400';
+      nextBtn.disabled = true;
+      nextBtn.classList.add('opacity-50', 'cursor-not-allowed');
+    }
+  };
+
+  tokenInput.addEventListener('input', () => {
+    if (validateTimeout) clearTimeout(validateTimeout);
+    validateTimeout = setTimeout(() => validateToken(tokenInput.value.trim()), 600);
+  });
+
+  tokenInput.addEventListener('paste', () => {
+    setTimeout(() => validateToken(tokenInput.value.trim()), 100);
+  });
+
+  // Step 1 → Step 2
+  nextBtn.addEventListener('click', async () => {
+    if (!validatedToken) return;
+
+    try {
+      await api.post('/api/channels/telegram/configure', {
+        bot_token: validatedToken,
+        enabled: true,
+      });
+    } catch (_) {}
+
+    $('#tg-bot-handle').textContent = `@${botUsername}`;
+    showStep(2);
+    startDetection();
+  });
+
+  // Step 2 → back to Step 1
+  $('#tg-back-2').addEventListener('click', () => {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    showStep(1);
+  });
+
+  // Step 2: Poll for chat detection
+  const startDetection = () => {
+    if (pollTimer) clearInterval(pollTimer);
+    let elapsed = 0;
+    const timerEl = $('#tg-detect-timer');
+    const statusEl = $('#tg-detect-status');
+
+    pollTimer = setInterval(async () => {
+      elapsed += 3;
+      if (timerEl) timerEl.textContent = `${elapsed}s`;
+
+      try {
+        const res = await api.post('/api/channels/telegram/detect-chat', {
+          bot_token: validatedToken,
+        });
+        if (res.ok) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+
+          statusEl.innerHTML = `
+            <div class="w-3 h-3 rounded-full bg-emerald-400"></div>
+            <span class="text-[11px] text-emerald-400">${t('channels.chatDetected', { name: res.sender_name || res.chat_id })}</span>
+          `;
+
+          setTimeout(() => {
+            showStep(3);
+            sendTestMessage();
+          }, 800);
+        }
+      } catch (_) {}
+    }, 3000);
+  };
+
+  const sendTestMessage = async () => {
+    const resultEl = $('#tg-test-result');
+    try {
+      const res = await api.post('/api/channels/telegram/test', {
+        message: '\u{2705} Ghost is connected to Telegram! Setup complete.',
+      });
+      if (res.ok) {
+        resultEl.textContent = 'Test message sent to your Telegram!';
+        resultEl.className = 'text-[10px] text-emerald-400/70 mt-3';
+      }
+    } catch (_) {}
+    setTimeout(() => { cleanup(); render(pageContainer); }, 2500);
+  };
 }
 
 

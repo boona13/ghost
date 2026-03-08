@@ -364,6 +364,94 @@ def whatsapp_logout():
 
 
 # ═══════════════════════════════════════════════════════════════
+#  Telegram Setup Wizard
+# ═══════════════════════════════════════════════════════════════
+
+@bp.route("/api/channels/telegram/detect-chat", methods=["POST"])
+def telegram_detect_chat():
+    """Poll Telegram getUpdates to auto-detect the user's chat ID."""
+    registry = _get_registry()
+    if not registry:
+        return jsonify({"ok": False, "error": "Channels not initialized"}), 503
+    prov = registry.get("telegram")
+    if not prov:
+        return jsonify({"ok": False, "error": "Telegram provider not loaded"}), 404
+
+    data = request.get_json(force=True) or {}
+    bot_token = data.get("bot_token") or prov.bot_token
+    if not bot_token:
+        return jsonify({"ok": False, "error": "No bot token configured"}), 400
+
+    import requests as http_requests
+    try:
+        url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
+        resp = http_requests.get(
+            url, params={"limit": 10, "allowed_updates": ["message"]}, timeout=10
+        )
+        body = resp.json()
+        if not body.get("ok"):
+            return jsonify({"ok": False, "error": body.get("description", "API error")})
+
+        for update in reversed(body.get("result", [])):
+            msg = update.get("message", {})
+            chat = msg.get("chat", {})
+            chat_id = chat.get("id")
+            if chat_id:
+                chat_id_str = str(chat_id)
+                sender = msg.get("from", {})
+                sender_name = (
+                    (sender.get("first_name", "") + " " + sender.get("last_name", "")).strip()
+                    or sender.get("username", "")
+                )
+
+                all_cfg = load_channels_config()
+                tg_cfg = all_cfg.get("telegram", {})
+                tg_cfg["default_chat_id"] = chat_id_str
+                all_cfg["telegram"] = tg_cfg
+                save_channels_config(all_cfg)
+
+                if hasattr(prov, "default_chat_id"):
+                    prov.default_chat_id = chat_id_str
+
+                return jsonify({
+                    "ok": True,
+                    "chat_id": chat_id_str,
+                    "sender_name": sender_name,
+                    "chat_type": chat.get("type", "private"),
+                })
+
+        return jsonify({"ok": False, "error": "no_messages"})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)})
+
+
+@bp.route("/api/channels/telegram/bot-info", methods=["POST"])
+def telegram_bot_info():
+    """Validate a bot token and return bot info."""
+    data = request.get_json(force=True) or {}
+    bot_token = data.get("bot_token", "")
+    if not bot_token:
+        return jsonify({"ok": False, "error": "No bot token provided"}), 400
+
+    import requests as http_requests
+    try:
+        url = f"https://api.telegram.org/bot{bot_token}/getMe"
+        resp = http_requests.get(url, timeout=10)
+        body = resp.json()
+        if body.get("ok"):
+            bot = body["result"]
+            return jsonify({
+                "ok": True,
+                "username": bot.get("username", ""),
+                "first_name": bot.get("first_name", ""),
+                "bot_id": bot.get("id", ""),
+            })
+        return jsonify({"ok": False, "error": body.get("description", "Invalid token")})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)})
+
+
+# ═══════════════════════════════════════════════════════════════
 #  Phase 2 Endpoints
 # ═══════════════════════════════════════════════════════════════
 
