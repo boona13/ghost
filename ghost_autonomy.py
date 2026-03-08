@@ -1328,6 +1328,24 @@ def build_autonomy_tools(action_store: ActionItemStore, growth_logger: GrowthLog
 #  SELF-REPAIR — runs on startup if crash report exists
 # ═══════════════════════════════════════════════════════════════
 
+def _check_supervisor_race_condition():
+    """Check if multiple supervisor processes are running (causes SIGKILL -9)."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", "ghost_supervisor.py"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            pids = [p.strip() for p in result.stdout.strip().split("\n") if p.strip()]
+            return len(pids) > 1, pids
+    except Exception:
+        pass
+    return False, []
+
+
 def run_self_repair(daemon):
     """If a crash report exists, feed it to the LLM for diagnosis and fix."""
     if not CRASH_REPORT_FILE.exists():
@@ -1342,6 +1360,32 @@ def run_self_repair(daemon):
     stderr_text = "\n".join(report.get("stderr_tail", []))
     exit_code = report.get("exit_code", "unknown")
     crash_count = report.get("crash_count", 1)
+
+    # Detect supervisor race condition causing SIGKILL (-9)
+    if exit_code == -9 and not any("Traceback" in line for line in report.get("stderr_tail", [])):
+        has_race, pids = _check_supervisor_race_condition()
+        if has_race:
+            print(f"  [AUTONOMY] Detected supervisor race condition: {len(pids)} supervisor instances running")
+            store = ActionItemStore()
+            store.add(
+                title="Multiple supervisor instances detected",
+                description=(
+                    f"Ghost crashed with SIGKILL (-9) and no Python traceback. "
+                    f"Detected {len(pids)} concurrent supervisor processes (PIDs: {', '.join(pids)}). "
+                    f"This race condition causes duplicate Ghost launches and resource contention. "
+                    f"Run: pkill -f ghost_supervisor.py && ghost start"
+                ),
+                category="config",
+                priority="critical"
+            )
+            log_growth_activity(
+                routine="self_repair",
+                summary="Detected supervisor race condition causing SIGKILL",
+                details=f"Found {len(pids)} concurrent supervisor instances: {pids}",
+                category="fix"
+            )
+            CRASH_REPORT_FILE.unlink(missing_ok=True)
+            return False
 
     if crash_count >= report.get("max_crashes_before_rollback", 5) - 1:
         print("  [AUTONOMY] Too many crashes — skipping self-repair, supervisor will rollback")
