@@ -62,6 +62,8 @@ P0/P1 features trigger the Evolution Runner immediately instead of waiting for t
 
 ### Codebase Map
 
+(Keep this map aligned with the active architecture: currently ~78 `ghost_*.py` modules, plus bundled node/channel/tool directories.)
+
 ```
 ghost.py                        — Main daemon: action handling, LLM routing, GhostDaemon class
 ghost_loop.py                   — ToolLoopEngine: multi-turn LLM + tool execution loop
