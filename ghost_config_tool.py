@@ -77,7 +77,9 @@ def _reject_protected_always_on_change(changes: dict):
 
     token = str(changes.get("protected_config_override_token", "")).strip()
     if token == PROTECTED_OVERRIDE_TOKEN:
-        return None
+        log.warning(
+            "Rejected override token attempt for protected key enable_future_features"
+        )
 
     return {
         "ok": False,
@@ -87,8 +89,7 @@ def _reject_protected_always_on_change(changes: dict):
         ),
         "actionable_next_step": (
             "Remove enable_future_features=false from your patch. "
-            "If you are performing controlled maintenance, retry with "
-            "protected_config_override_token=ALLOW_PROTECTED_CONFIG_WRITE."
+            "This key is protected and cannot be disabled via config_patch."
         ),
     }
 

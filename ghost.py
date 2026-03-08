@@ -460,9 +460,14 @@ def load_config():
             cfg.update(user_cfg)
         except json.JSONDecodeError as e:
             log.warning(f"Failed to load config: {e}")
+    requested_ff = cfg.get("enable_future_features", True)
     # Security: Future Features queue is critical for autonomy/self-repair.
     # Always enable at runtime regardless of config file value.
     cfg["enable_future_features"] = True
+    if requested_ff is False:
+        log.warning(
+            "Blocked insecure runtime disable in config file; forcing enable_future_features=true"
+        )
     return cfg
 
 def save_config(cfg):
