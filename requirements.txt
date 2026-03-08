@@ -68,7 +68,7 @@ accelerate>=1.0           # Hugging Face Accelerate — device placement & mixed
 safetensors>=0.4          # Fast model weight loading
 sentencepiece>=0.2        # Tokenizer support for multilingual models
 protobuf>=4.25            # Protocol Buffers for model configs
-Pillow>=12.0              # Image processing (used by most vision nodes)
+Pillow>=11.1              # Image processing (used by most vision nodes, >=11.1 for neonize)
 
 # Image generation (stable-diffusion node)
 # Models auto-download from HuggingFace on first use (SDXL-Turbo ~6GB, FLUX ~12-20GB)
@@ -120,7 +120,7 @@ scipy>=1.12               # Audio processing / wav file writing
 
 # Video generation (video-gen node) — Wan2.1 (primary), LTX-Video/CogVideoX (fallback)
 # Models: Wan-AI/Wan2.1-T2V-1.3B-Diffusers (~3GB), Wan-AI/Wan2.1-I2V-14B-480P-Diffusers (~28GB)
-imageio>=2.30                # Video frame encoding/decoding
+imageio>=2.36                # Video frame encoding/decoding (>=2.36 drops old Pillow upper bound)
 imageio-ffmpeg>=0.4          # FFmpeg backend for imageio
 
 # MLX-native video generation (macOS Apple Silicon only — optional)
