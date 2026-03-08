@@ -263,6 +263,22 @@ def _wipe_paths(names):
             p.unlink()
 
 
+def _is_ghost_running():
+    """Check if ghost daemon or supervisor is alive via PID files."""
+    import os as _os
+    for pid_name in ("ghost.pid", "supervisor.pid"):
+        pf = GHOST_HOME / pid_name
+        if not pf.exists():
+            continue
+        try:
+            pid = int(pf.read_text(encoding="utf-8").strip())
+            _os.kill(pid, 0)
+            return True, pid_name.replace(".pid", ""), pid
+        except (ValueError, ProcessLookupError, PermissionError, OSError):
+            continue
+    return False, None, None
+
+
 @bp.route("/api/config/reset", methods=["POST"])
 @rate_limit(requests_per_minute=5)
 def reset_ghost():
@@ -274,6 +290,15 @@ def reset_ghost():
 
     if not GHOST_HOME.exists():
         return jsonify({"ok": False, "error": "~/.ghost/ does not exist"}), 404
+
+    running, proc_name, proc_pid = _is_ghost_running()
+    if running and mode in ("all", "config"):
+        return jsonify({
+            "ok": False,
+            "error": f"Ghost is still running ({proc_name}, PID {proc_pid}). "
+                     f"Stop Ghost first (bash stop.sh), then reset. "
+                     f"On Windows, open files cannot be deleted while a process holds them.",
+        }), 409
 
     try:
         backup = _backup_ghost_home()
@@ -291,6 +316,14 @@ def reset_ghost():
 
         log.warning("Ghost reset (mode=%s) — backup at %s", mode, backup)
         return jsonify({"ok": True, "message": msg, "backup": str(backup)})
+
+    except PermissionError as e:
+        log.error("Reset blocked by file lock (likely Windows): %s", e)
+        return jsonify({
+            "ok": False,
+            "error": "Could not delete files — they may be locked by a running process. "
+                     "Stop Ghost first, then retry.",
+        }), 409
 
     except Exception as e:
         log.error("Reset failed: %s", e, exc_info=True)

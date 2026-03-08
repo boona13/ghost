@@ -3254,6 +3254,19 @@ def cmd_reset(sub_args):
     ]
     MEMORY_PATHS = ["memory.db", "vector_memory.db", "memory"]
 
+    def _is_ghost_running():
+        for pid_name in ("ghost.pid", "supervisor.pid"):
+            pf = GHOST_HOME / pid_name
+            if not pf.exists():
+                continue
+            try:
+                pid = int(pf.read_text(encoding="utf-8").strip())
+                os.kill(pid, 0)
+                return True, pid_name.replace(".pid", ""), pid
+            except (ValueError, ProcessLookupError, PermissionError, OSError):
+                continue
+        return False, None, None
+
     def _backup_ghost_home():
         ts = _dt.now().strftime("%Y%m%d_%H%M%S")
         backup = GHOST_HOME.parent / f".ghost.backup.{ts}"
@@ -3283,6 +3296,13 @@ def cmd_reset(sub_args):
         return
 
     flag = sub_args[0]
+
+    running, proc_name, proc_pid = _is_ghost_running()
+    if running:
+        print(f"  {RED}Ghost is still running ({proc_name}, PID {proc_pid}).{RST}")
+        print(f"  {DIM}Stop it first:  bash stop.sh{RST}")
+        print(f"  {DIM}On Windows, files locked by the running process cannot be deleted.{RST}")
+        return
 
     if flag == "--all":
         answer = input(f"  {YLW}This will wipe ALL Ghost data. Continue? [y/N] {RST}").strip().lower()
