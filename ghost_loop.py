@@ -772,9 +772,16 @@ def _check_incomplete_workflows(tool_calls_log: list) -> str | None:
     used_evolve_resume = "evolve_resume" in tools_used
     used_evolve_start = used_evolve_plan or used_evolve_resume
     used_evolve_apply = "evolve_apply" in tools_used
-    used_evolve_deploy = "evolve_deploy" in tools_used or "evolve_submit_pr" in tools_used
     used_fail = "fail_future_feature" in tools_used
     used_reject = "reject_future_feature" in tools_used
+
+    deploy_succeeded = False
+    for tc in tool_calls_log:
+        if tc["tool"] in ("evolve_deploy", "evolve_submit_pr"):
+            result = tc.get("result", "")
+            if "BLOCKED" not in result and "REJECTED" not in result:
+                deploy_succeeded = True
+    used_evolve_deploy = deploy_succeeded
 
     if used_evolve_start and not used_evolve_deploy and not used_fail:
         if not used_evolve_apply:
@@ -784,9 +791,19 @@ def _check_incomplete_workflows(tool_calls_log: list) -> str | None:
                 "You MUST apply changes. Call evolve_apply now for each file, "
                 "then evolve_test, then evolve_submit_pr. Do NOT rollback or quit."
             )
+        last_submit_result = ""
+        for tc in tool_calls_log:
+            if tc["tool"] == "evolve_submit_pr":
+                last_submit_result = tc.get("result", "")
+        if "BLOCKED" in last_submit_result:
+            return (
+                "Your evolve_submit_pr was BLOCKED (verification required). "
+                "You MUST: 1) file_read each modified file to verify your changes, "
+                "2) then call evolve_submit_pr again. Do NOT give up or respond with text."
+            )
         return (
-            "You started an evolution but never called evolve_submit_pr. "
-            "Finish: evolve_test → evolve_submit_pr. "
+            "You started an evolution but evolve_submit_pr hasn't succeeded yet. "
+            "Finish: evolve_test → file_read verification → evolve_submit_pr. "
             "Do NOT call task_complete until evolve_submit_pr succeeds."
         )
 
