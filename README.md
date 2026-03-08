@@ -29,7 +29,7 @@ Most AI assistants wait for you to type something. Ghost doesn't.
 curl -fsSL https://raw.githubusercontent.com/boona13/ghost/main/install.sh | bash
 ```
 
-This clones the repo, creates a virtual environment, installs all dependencies, and offers to start Ghost immediately. It also accepts flags for unattended installs:
+This clones the repo, creates a virtual environment, installs all dependencies, starts Ghost, and opens the dashboard in your browser. It also accepts flags for unattended installs:
 
 ```bash
 # Non-interactive with Playwright and API key
@@ -37,6 +37,9 @@ curl -fsSL https://raw.githubusercontent.com/boona13/ghost/main/install.sh | bas
 
 # Skip all prompts
 curl -fsSL https://raw.githubusercontent.com/boona13/ghost/main/install.sh | bash -s -- --no-interactive
+
+# Fresh install — wipe existing ~/.ghost/ data and start clean (creates a backup first)
+curl -fsSL https://raw.githubusercontent.com/boona13/ghost/main/install.sh | bash -s -- --fresh
 ```
 
 Or clone first, then install:
@@ -354,6 +357,10 @@ python ghost.py cron list              # Scheduled jobs
 python ghost.py soul show              # View personality
 python ghost.py soul edit              # Edit SOUL.md
 python ghost.py user show              # View user profile
+python ghost.py reset                  # Show reset options
+python ghost.py reset --all            # Full factory reset (backs up first)
+python ghost.py reset --config         # Reset config & credentials only
+python ghost.py reset --memory         # Clear memory databases only
 python ghost.py dashboard              # Dashboard standalone
 python ghost.py dashboard 8080         # Custom port
 ```
@@ -388,6 +395,20 @@ All runtime data lives in `~/.ghost/`:
   screenshots/              Captured screenshots
   state_backups/            State file backups from repair
 ```
+
+## Reset / Fresh Start
+
+Three ways to reset Ghost to a clean state. All resets create a timestamped backup (`~/.ghost.backup.<timestamp>/`) before wiping anything — your data is always recoverable.
+
+| Method | Command | What It Wipes |
+|---|---|---|
+| **Installer** | `bash install.sh --fresh` | Moves entire `~/.ghost/` to backup, starts from scratch |
+| **CLI — full** | `python ghost.py reset --all` | Everything in `~/.ghost/` — next start shows setup wizard |
+| **CLI — config** | `python ghost.py reset --config` | Config, API keys, OAuth tokens — memory and skills preserved |
+| **CLI — memory** | `python ghost.py reset --memory` | memory.db, vector_memory.db, session history — config preserved |
+| **Dashboard** | Configuration page → "Reset Ghost" | Same three options via buttons in the UI |
+
+Ghost must be stopped before running a full or config reset. The CLI checks for running processes and refuses if Ghost is still alive — this prevents file-lock failures on Windows.
 
 ## Configuration
 
