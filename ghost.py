@@ -3243,6 +3243,77 @@ def cmd_user(sub_args):
         print(f"  Available: show (default), edit, reset, path, set <field> <value>")
 
 
+def cmd_reset(sub_args):
+    """Reset Ghost data — selective or full wipe of ~/.ghost/."""
+    import shutil
+    from datetime import datetime as _dt
+
+    CONFIG_FILES = [
+        "config.json", "auth_profiles.json", "credentials.json",
+        "google_oauth.json", "integrations.json",
+    ]
+    MEMORY_PATHS = ["memory.db", "vector_memory.db", "memory"]
+
+    def _backup_ghost_home():
+        ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+        backup = GHOST_HOME.parent / f".ghost.backup.{ts}"
+        shutil.copytree(GHOST_HOME, backup)
+        return backup
+
+    def _wipe_paths(paths):
+        for name in paths:
+            p = GHOST_HOME / name
+            if p.is_dir():
+                shutil.rmtree(p)
+            elif p.is_file():
+                p.unlink()
+
+    if not GHOST_HOME.exists():
+        print(f"  {DIM}Nothing to reset — {GHOST_HOME} does not exist.{RST}")
+        return
+
+    if not sub_args:
+        print(f"\n  {B}👻 GHOST — Reset{RST}\n")
+        print(f"  {CYN}ghost.py reset --all{RST}      Wipe everything (backs up first)")
+        print(f"  {CYN}ghost.py reset --config{RST}   Reset config & credentials only")
+        print(f"  {CYN}ghost.py reset --memory{RST}   Clear memory databases only")
+        print()
+        print(f"  {DIM}All resets create a backup at ~/.ghost.backup.<timestamp>/{RST}")
+        print()
+        return
+
+    flag = sub_args[0]
+
+    if flag == "--all":
+        answer = input(f"  {YLW}This will wipe ALL Ghost data. Continue? [y/N] {RST}").strip().lower()
+        if answer != "y":
+            print(f"  {DIM}Cancelled.{RST}")
+            return
+        backup = _backup_ghost_home()
+        shutil.rmtree(GHOST_HOME)
+        GHOST_HOME.mkdir(parents=True, exist_ok=True)
+        print(f"  {GRN}✓ Full reset complete.{RST}")
+        print(f"  {DIM}Backup saved to: {backup}{RST}")
+        print(f"  {DIM}Start Ghost to run the setup wizard.{RST}")
+
+    elif flag == "--config":
+        backup = _backup_ghost_home()
+        _wipe_paths(CONFIG_FILES)
+        print(f"  {GRN}✓ Config & credentials reset.{RST}")
+        print(f"  {DIM}Backup saved to: {backup}{RST}")
+        print(f"  {DIM}Start Ghost to run the setup wizard.{RST}")
+
+    elif flag == "--memory":
+        backup = _backup_ghost_home()
+        _wipe_paths(MEMORY_PATHS)
+        print(f"  {GRN}✓ Memory cleared.{RST}")
+        print(f"  {DIM}Backup saved to: {backup}{RST}")
+
+    else:
+        print(f"  {RED}Unknown flag: {flag}{RST}")
+        print(f"  Available: --all, --config, --memory")
+
+
 def cmd_cron(sub_args):
     """Handle cron subcommands."""
     from ghost_cron import CronService, describe_schedule
@@ -3428,11 +3499,13 @@ def main():
                "  python ghost.py soul edit              Edit SOUL.md in your editor\n"
                "  python ghost.py user                   View user profile\n"
                "  python ghost.py user set name <name>   Set user info\n"
+               "  python ghost.py reset                  Show reset options\n"
+               "  python ghost.py reset --all            Full factory reset\n"
                "  python ghost.py dashboard              Open web dashboard\n"
                "  python ghost.py dashboard 8080         Dashboard on custom port\n"
     )
     ap.add_argument("command", nargs="?", default="start",
-                    help="start (default), log, status, context, cron, soul, user, dashboard")
+                    help="start (default), log, status, context, cron, soul, user, reset, dashboard")
     ap.add_argument("rest", nargs="*", help=argparse.SUPPRESS)
     ap.add_argument("--api-key", default=None,
                     help="OpenRouter API key (or set OPENROUTER_API_KEY)")
@@ -3452,6 +3525,9 @@ def main():
         return
     if args.command == "context":
         cmd_context()
+        return
+    if args.command == "reset":
+        cmd_reset(args.rest)
         return
     if args.command == "cron":
         cmd_cron(args.rest)

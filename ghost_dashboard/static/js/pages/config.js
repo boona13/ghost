@@ -491,6 +491,24 @@ export async function render(container) {
       <button id="btn-save-config" class="btn btn-primary">${t('config.saveConfig')}</button>
       <button id="btn-reset-config" class="btn btn-danger btn-sm">${t('config.resetDefaults')}</button>
     </div>
+
+    <!-- ── Factory Reset ─────────────────────────────────────── -->
+    <div class="stat-card mt-8 border border-red-900/30">
+      <h3 class="text-sm font-semibold text-red-400 mb-1">Reset Ghost</h3>
+      <div class="text-[10px] text-zinc-600 mb-4">Wipe Ghost's runtime data in ~/.ghost/ and start fresh. A timestamped backup is always created before any reset.</div>
+      <div class="flex flex-wrap gap-3">
+        <button id="btn-reset-memory" class="btn btn-sm" style="border:1px solid rgba(239,68,68,0.3); color:#f87171;">
+          Clear Memory
+        </button>
+        <button id="btn-reset-creds" class="btn btn-sm" style="border:1px solid rgba(239,68,68,0.3); color:#f87171;">
+          Reset Config &amp; Credentials
+        </button>
+        <button id="btn-reset-all" class="btn btn-sm btn-danger">
+          Full Factory Reset
+        </button>
+      </div>
+      <div id="reset-status" class="text-xs mt-3"></div>
+    </div>
   `;
 
   // ── Tab switching ────────────────────────────────────────────
@@ -1122,6 +1140,28 @@ export async function render(container) {
       });
     }
   });
+
+  // ── Ghost Reset ────────────────────────────────────────────────
+  async function doReset(mode, label) {
+    const statusEl = document.getElementById('reset-status');
+    if (!confirm(`Are you sure you want to ${label}? A backup will be created, but this action cannot be easily undone.`)) return;
+    if (mode === 'all' && !confirm('This will erase ALL Ghost data (config, memory, skills, cron, channels, evolution history). Are you absolutely sure?')) return;
+    statusEl.innerHTML = '<span class="text-zinc-400">Resetting...</span>';
+    try {
+      const res = await api.post('/api/config/reset', { mode });
+      if (res.ok) {
+        statusEl.innerHTML = `<span class="text-green-400">✓ ${u.escapeHtml(res.message)}</span><br><span class="text-[10px] text-zinc-600">Backup: ${u.escapeHtml(res.backup)}</span>`;
+      } else {
+        statusEl.innerHTML = `<span class="text-red-400">${u.escapeHtml(res.error)}</span>`;
+      }
+    } catch (e) {
+      statusEl.innerHTML = `<span class="text-red-400">${u.escapeHtml(e.message)}</span>`;
+    }
+  }
+
+  document.getElementById('btn-reset-memory')?.addEventListener('click', () => doReset('memory', 'clear all memory'));
+  document.getElementById('btn-reset-creds')?.addEventListener('click', () => doReset('config', 'reset config & credentials'));
+  document.getElementById('btn-reset-all')?.addEventListener('click', () => doReset('all', 'factory reset Ghost'));
 
   // ── Cloud Providers ───────────────────────────────────────────
   const cpContainer = container.querySelector('#cloud-providers-container');

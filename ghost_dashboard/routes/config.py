@@ -1,6 +1,8 @@
 """Config API — read/write ~/.ghost/config.json with live daemon reload."""
 
 import logging
+import shutil
+from datetime import datetime as _dt
 from flask import Blueprint, jsonify, request
 
 from ghost_dashboard.rate_limiter import rate_limit
@@ -11,7 +13,7 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from ghost import CONFIG_FILE, load_config, save_config, DEFAULT_CONFIG
+from ghost import CONFIG_FILE, GHOST_HOME, load_config, save_config, DEFAULT_CONFIG
 
 bp = Blueprint("config", __name__)
 
@@ -234,3 +236,62 @@ def cloud_provider_costs():
     if not daemon or not getattr(daemon, "cloud_providers", None):
         return jsonify({"costs": {}, "error": "Cloud providers not initialized"})
     return jsonify(daemon.cloud_providers.get_costs_summary())
+
+
+# ── Reset API ─────────────────────────────────────────────────────
+
+_CONFIG_FILES = [
+    "config.json", "auth_profiles.json", "credentials.json",
+    "google_oauth.json", "integrations.json",
+]
+_MEMORY_PATHS = ["memory.db", "vector_memory.db", "memory"]
+
+
+def _backup_ghost_home():
+    ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+    backup = GHOST_HOME.parent / f".ghost.backup.{ts}"
+    shutil.copytree(GHOST_HOME, backup)
+    return backup
+
+
+def _wipe_paths(names):
+    for name in names:
+        p = GHOST_HOME / name
+        if p.is_dir():
+            shutil.rmtree(p)
+        elif p.is_file():
+            p.unlink()
+
+
+@bp.route("/api/config/reset", methods=["POST"])
+@rate_limit(requests_per_minute=5)
+def reset_ghost():
+    data = request.get_json(silent=True) or {}
+    mode = data.get("mode", "all")
+
+    if mode not in ("all", "config", "memory"):
+        return jsonify({"ok": False, "error": f"Invalid reset mode: {mode}"}), 400
+
+    if not GHOST_HOME.exists():
+        return jsonify({"ok": False, "error": "~/.ghost/ does not exist"}), 404
+
+    try:
+        backup = _backup_ghost_home()
+
+        if mode == "all":
+            shutil.rmtree(GHOST_HOME)
+            GHOST_HOME.mkdir(parents=True, exist_ok=True)
+            msg = "Full reset complete. Restart Ghost to run the setup wizard."
+        elif mode == "config":
+            _wipe_paths(_CONFIG_FILES)
+            msg = "Config & credentials reset. Restart Ghost to run the setup wizard."
+        elif mode == "memory":
+            _wipe_paths(_MEMORY_PATHS)
+            msg = "Memory cleared. Config and skills preserved."
+
+        log.warning("Ghost reset (mode=%s) — backup at %s", mode, backup)
+        return jsonify({"ok": True, "message": msg, "backup": str(backup)})
+
+    except Exception as e:
+        log.error("Reset failed: %s", e, exc_info=True)
+        return jsonify({"ok": False, "error": str(e)[:300]}), 500

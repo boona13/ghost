@@ -10,6 +10,7 @@ set -euo pipefail
 #   --no-interactive    Skip prompts (Playwright=no, API key=skip)
 #   --with-playwright   Auto-install Playwright without asking
 #   --api-key KEY       Set the OpenRouter API key non-interactively
+#   --fresh             Wipe ~/.ghost/ and start clean (backs up existing data)
 # ─────────────────────────────────────────────────────────────────────
 
 GHOST_REPO="https://github.com/boona13/ghost.git"
@@ -20,12 +21,14 @@ RED="\033[31m"; GRN="\033[32m"; YLW="\033[33m"; CYN="\033[36m"
 
 NO_INTERACTIVE=false
 WITH_PLAYWRIGHT=false
+FRESH_INSTALL=false
 API_KEY_ARG=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --no-interactive) NO_INTERACTIVE=true; shift ;;
     --with-playwright) WITH_PLAYWRIGHT=true; shift ;;
+    --fresh) FRESH_INSTALL=true; shift ;;
     --api-key) API_KEY_ARG="$2"; shift 2 ;;
     *) shift ;;
   esac
@@ -75,6 +78,16 @@ fi
 
 VENV_DIR="$GHOST_DIR/.venv"
 GHOST_HOME="$HOME/.ghost"
+
+# ── 0b. Fresh install — back up and wipe ~/.ghost/ ───────────────────
+
+if [ "$FRESH_INSTALL" = true ] && [ -d "$GHOST_HOME" ]; then
+  step "Fresh install requested..."
+  BACKUP_DIR="$GHOST_HOME.backup.$(date +%s)"
+  mv "$GHOST_HOME" "$BACKUP_DIR"
+  ok "Backed up existing data to $BACKUP_DIR"
+  ok "Ghost will start fresh with the setup wizard"
+fi
 
 # ── 1. Check Python ───────────────────────────────────────────────────
 
