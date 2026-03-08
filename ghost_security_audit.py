@@ -456,31 +456,43 @@ def auto_fix(findings: list) -> list[dict]:
             fpath = GHOST_HOME / fname
             if fpath.exists():
                 try:
+                    previous_mode = oct(stat.S_IMODE(fpath.stat().st_mode))
                     ghost_platform.chmod_safe(fpath, 0o600)
+                    current_mode = oct(stat.S_IMODE(fpath.stat().st_mode))
                     actions.append({
                         "action": "chmod",
                         "file": str(fpath),
+                        "previous_mode": previous_mode,
+                        "current_mode": current_mode,
+                        "fixed_at": datetime.now().isoformat(),
                         "result": "Fixed: set to mode 600",
                     })
-                except Exception as e:
+                except OSError as e:
                     actions.append({
                         "action": "chmod",
                         "file": str(fpath),
+                        "fixed_at": datetime.now().isoformat(),
                         "result": f"Failed: {e}",
                     })
 
         if finding.get("category") == "filesystem" and "world-writable" in finding.get("title", ""):
             try:
+                previous_mode = oct(stat.S_IMODE(GHOST_HOME.stat().st_mode))
                 ghost_platform.chmod_safe(GHOST_HOME, 0o700)
+                current_mode = oct(stat.S_IMODE(GHOST_HOME.stat().st_mode))
                 actions.append({
                     "action": "chmod",
                     "file": str(GHOST_HOME),
+                    "previous_mode": previous_mode,
+                    "current_mode": current_mode,
+                    "fixed_at": datetime.now().isoformat(),
                     "result": "Fixed: set to mode 700",
                 })
-            except Exception as e:
+            except OSError as e:
                 actions.append({
                     "action": "chmod",
                     "file": str(GHOST_HOME),
+                    "fixed_at": datetime.now().isoformat(),
                     "result": f"Failed: {e}",
                 })
 

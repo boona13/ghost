@@ -7,8 +7,10 @@ Inspired by OpenClaw's session-transcript-repair.ts and session-file-repair.ts.
 
 import json
 import logging
+import os
 import shutil
 import sqlite3
+import stat
 import time
 from pathlib import Path
 
@@ -16,6 +18,13 @@ log = logging.getLogger("ghost.state_repair")
 
 GHOST_HOME = Path.home() / ".ghost"
 BACKUP_DIR = GHOST_HOME / "state_backups"
+SENSITIVE_FILES = (
+    GHOST_HOME / "config.json",
+    GHOST_HOME / "auth_profiles.json",
+)
+SENSITIVE_DIRS = (
+    GHOST_HOME / "credentials",
+)
 
 
 def _backup(path: Path) -> Path | None:
@@ -149,11 +158,85 @@ def repair_jsonl(jsonl_path: Path, label: str = "log") -> dict:
     return report
 
 
+def _mode_label(path: Path) -> str:
+    try:
+        return oct(stat.S_IMODE(path.stat().st_mode))
+    except OSError as exc:
+        log.warning("Failed to read mode for %s: %s", path, exc)
+        return "unknown"
+
+
+def harden_sensitive_permissions() -> list[dict]:
+    """Enforce owner-only permissions on sensitive Ghost state paths."""
+    reports: list[dict] = []
+
+    if os.name == "nt":
+        reports.append({
+            "file": str(GHOST_HOME),
+            "status": "skipped",
+            "repairs": ["Permission mode hardening skipped on Windows (ACL-based)."],
+        })
+        return reports
+
+    targets: list[tuple[Path, int, str]] = []
+    for directory in SENSITIVE_DIRS:
+        if directory.exists() and directory.is_dir():
+            targets.append((directory, 0o700, "directory"))
+            for item in directory.glob("*"):
+                if item.is_file():
+                    targets.append((item, 0o600, "file"))
+
+    for fpath in SENSITIVE_FILES:
+        if fpath.exists() and fpath.is_file():
+            targets.append((fpath, 0o600, "file"))
+
+    for path, desired_mode, label in targets:
+        report = {"file": str(path), "label": f"Sensitive {label}", "status": "ok", "repairs": []}
+        try:
+            current_mode = stat.S_IMODE(path.stat().st_mode)
+        except OSError as exc:
+            report["status"] = "error"
+            report["repairs"].append(f"Failed to read current mode: {exc}")
+            reports.append(report)
+            continue
+
+        if current_mode == desired_mode:
+            reports.append(report)
+            continue
+
+        previous_mode = _mode_label(path)
+        bak = _backup(path)
+        report["repairs"].append(f"Backed up target to {bak}")
+        report["previous_mode"] = previous_mode
+        try:
+            path.chmod(desired_mode)
+            current_mode = _mode_label(path)
+            report["current_mode"] = current_mode
+            if current_mode == oct(desired_mode):
+                report["status"] = "repaired"
+                report["fixed_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+                report["repairs"].append(
+                    f"Adjusted mode from {previous_mode} to {current_mode}"
+                )
+            else:
+                report["status"] = "error"
+                report["repairs"].append(
+                    f"chmod attempted from {previous_mode} to {oct(desired_mode)} but observed {current_mode}"
+                )
+        except OSError as exc:
+            report["status"] = "error"
+            report["repairs"].append(f"chmod failed: {exc}")
+        reports.append(report)
+
+    return reports
+
+
 def run_full_repair() -> list[dict]:
     """Run repair on all Ghost state files. Returns list of repair reports."""
     reports = []
 
     reports.append(repair_config())
+    reports.extend(harden_sensitive_permissions())
 
     for db_name, label in [
         ("memory.db", "Memory database"),
