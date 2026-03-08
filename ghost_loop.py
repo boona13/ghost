@@ -776,12 +776,17 @@ def _check_incomplete_workflows(tool_calls_log: list) -> str | None:
     used_reject = "reject_future_feature" in tools_used
 
     deploy_succeeded = False
+    deploy_rejected = False
     for tc in tool_calls_log:
         if tc["tool"] in ("evolve_deploy", "evolve_submit_pr"):
             result = tc.get("result", "")
-            if "BLOCKED" not in result and "REJECTED" not in result:
+            if "BLOCKED" in result:
+                continue
+            if "REJECTED" in result:
+                deploy_rejected = True
+            else:
                 deploy_succeeded = True
-    used_evolve_deploy = deploy_succeeded
+    used_evolve_deploy = deploy_succeeded or deploy_rejected
 
     if used_evolve_start and not used_evolve_deploy and not used_fail:
         if not used_evolve_apply:
