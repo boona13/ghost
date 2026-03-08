@@ -11,7 +11,8 @@ Outbound always uses raw HTTP (no SDK needed for sending).
 import time
 import threading
 import logging
-from typing import Dict, Any, Callable, Optional
+from pathlib import Path
+from typing import Dict, Any, Callable, Optional, List
 
 import requests
 
@@ -186,18 +187,35 @@ class Provider(ChannelProvider, ActionsMixin, StreamingMixin,
         async def on_message(message):
             if message.author == client.user or message.author.bot:
                 return
+
+            media_urls: List[str] = []
+            for att in message.attachments:
+                try:
+                    media_dir = Path.home() / ".ghost" / "inbound_media"
+                    media_dir.mkdir(parents=True, exist_ok=True)
+                    suffix = Path(att.filename).suffix if att.filename else ".bin"
+                    dest = media_dir / f"dc_{int(time.time())}_{att.id}{suffix}"
+                    await att.save(dest)
+                    media_urls.append(str(dest))
+                except Exception as exc:
+                    log.debug("Discord attachment download failed: %s", exc)
+
+            text = message.content
+            if not text and not media_urls:
+                return
+
             msg = InboundMessage(
                 channel_id="discord",
                 sender_id=str(message.author.id),
                 sender_name=str(message.author),
-                text=message.content,
+                text=text,
                 thread_id=str(message.channel.id),
                 reply_to_id=str(message.reference.message_id) if message.reference else None,
+                media_urls=media_urls,
                 timestamp=message.created_at.timestamp(),
                 raw={"guild_id": str(message.guild.id) if message.guild else ""},
             )
-            if msg.text:
-                _inbound_callback(msg)
+            _inbound_callback(msg)
 
         def _run():
             try:

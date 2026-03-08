@@ -2335,6 +2335,81 @@ class GhostDaemon:
         # Build channel chat history from recent feed entries
         channel_history = self._build_channel_history(msg.channel_id)
 
+        # ── Process inbound media (images, PDFs, text files) ──
+        IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+        TEXT_EXTS = {
+            ".txt", ".py", ".js", ".ts", ".json", ".csv", ".xml", ".html",
+            ".css", ".md", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".sh",
+            ".bash", ".rs", ".go", ".java", ".c", ".cpp", ".h", ".hpp",
+            ".rb", ".php", ".sql", ".r", ".swift", ".kt", ".lua", ".log",
+        }
+        image_b64 = None
+        media_text_parts: list[str] = []
+
+        for fpath_str in (msg.media_urls or []):
+            fpath = Path(fpath_str)
+            if not fpath.exists():
+                continue
+            ext = fpath.suffix.lower()
+
+            if ext in IMAGE_EXTS:
+                try:
+                    img_data = fpath.read_bytes()
+                    image_b64 = base64.b64encode(img_data).decode()
+                    if not msg.text:
+                        msg.text = "The user sent an image. Describe and analyze it."
+                except Exception as exc:
+                    log.debug("Failed to read inbound image %s: %s", fpath, exc)
+
+            elif ext == ".pdf":
+                try:
+                    import subprocess as _sp
+                    result = _sp.run(
+                        [sys.executable, "-c",
+                         "import sys; "
+                         "from pathlib import Path; "
+                         "try:\n"
+                         "  import fitz; doc=fitz.open(sys.argv[1]); "
+                         "  print('\\n'.join(p.get_text() for p in doc))\n"
+                         "except ImportError:\n"
+                         "  try:\n"
+                         "    from pypdf import PdfReader; r=PdfReader(sys.argv[1]); "
+                         "    print('\\n'.join(p.extract_text() or '' for p in r.pages))\n"
+                         "  except ImportError:\n"
+                         "    print('[PDF received but no PDF library available. "
+                         "Install pymupdf or pypdf to extract text.]')",
+                         str(fpath)],
+                        capture_output=True, text=True, timeout=30,
+                    )
+                    pdf_text = result.stdout.strip()
+                    if pdf_text:
+                        media_text_parts.append(
+                            f"[PDF: {fpath.name}]\n{pdf_text[:8000]}"
+                        )
+                    else:
+                        media_text_parts.append(f"[PDF: {fpath.name} — empty or unreadable]")
+                except Exception as exc:
+                    log.debug("PDF extraction failed for %s: %s", fpath, exc)
+                    media_text_parts.append(f"[PDF: {fpath.name} — extraction failed]")
+
+            elif ext in TEXT_EXTS:
+                try:
+                    content = fpath.read_text(encoding="utf-8", errors="replace")[:8000]
+                    media_text_parts.append(
+                        f"[File: {fpath.name}]\n```\n{content}\n```"
+                    )
+                except Exception as exc:
+                    log.debug("Failed to read text file %s: %s", fpath, exc)
+
+            else:
+                media_text_parts.append(f"[Attachment: {fpath.name} ({ext})]")
+
+        if media_text_parts:
+            msg.text = (msg.text + "\n\n" + "\n\n".join(media_text_parts)).strip()
+
+        if image_b64 and not msg.text:
+            msg.text = "The user sent an image. Describe and analyze it."
+
         # Detect URLs to force tool use (same as dashboard)
         _url_re = re.compile(r'https?://[^\s<>"\']+')
         has_url = bool(_url_re.search(msg.text))
@@ -2349,7 +2424,7 @@ class GhostDaemon:
 
             loop_result = self.engine.run(
                 system_prompt=system_prompt,
-                user_message=msg.text[:self.cfg.get("max_input_chars", 4000)],
+                user_message=msg.text[:self.cfg.get("max_input_chars", 16000)],
                 tool_registry=inbound_registry,
                 max_steps=self.cfg.get("tool_loop_max_steps", 200),
                 temperature=0.3,
@@ -2361,13 +2436,20 @@ class GhostDaemon:
                 tool_intent_security=self.tool_intent_security,
                 model_override=skill_model,
                 tool_event_bus=self.tool_event_bus,
+                image_b64=image_b64,
             )
             reply = loop_result.text
             self._tool_count += len(loop_result.tool_calls)
             tools_used = [tc["tool"] for tc in loop_result.tool_calls]
             self._cleanup_browser_after_task(tools_used)
         else:
-            reply = self.llm.analyze("long_text", msg.text)
+            if image_b64:
+                reply = self.llm.analyze_image(
+                    msg.media_urls[0],
+                    context_prefix=msg.text + "\n\n" if msg.text else "",
+                )
+            else:
+                reply = self.llm.analyze("long_text", msg.text)
             tools_used = []
 
         typing_stop.set()

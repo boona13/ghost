@@ -9,6 +9,8 @@ import json
 import time
 import threading
 import logging
+import tempfile
+from pathlib import Path
 from typing import Dict, Any, List, Callable, Optional
 
 import requests
@@ -199,6 +201,23 @@ class Provider(ChannelProvider, ActionsMixin, ThreadingMixin, StreamingMixin,
             self._poll_thread.join(timeout=5)
             self._poll_thread = None
 
+    def _download_tg_file(self, file_id: str, suffix: str = "") -> str:
+        """Download a Telegram file by file_id, return local path."""
+        resp = self._api("getFile", file_id=file_id)
+        file_path = resp.get("file_path", "")
+        if not file_path:
+            return ""
+        url = f"{API_BASE}/file/bot{self.bot_token}/{file_path}"
+        dl = requests.get(url, timeout=60)
+        dl.raise_for_status()
+        if not suffix:
+            suffix = Path(file_path).suffix or ".bin"
+        media_dir = Path.home() / ".ghost" / "inbound_media"
+        media_dir.mkdir(parents=True, exist_ok=True)
+        dest = media_dir / f"tg_{int(time.time())}_{file_id[:8]}{suffix}"
+        dest.write_bytes(dl.content)
+        return str(dest)
+
     def _poll_updates(self, on_message: Callable[[InboundMessage], None]):
         """Long-poll Telegram getUpdates and relay messages."""
         while not self._stop_event.is_set():
@@ -216,9 +235,55 @@ class Provider(ChannelProvider, ActionsMixin, ThreadingMixin, StreamingMixin,
                     self._last_update_id = max(self._last_update_id,
                                                update.get("update_id", 0))
                     message = update.get("message", {})
-                    text = message.get("text", "")
-                    if not text:
+                    text = message.get("text", "") or message.get("caption", "")
+                    media_urls: List[str] = []
+
+                    # Photos — pick the largest resolution
+                    photos = message.get("photo")
+                    if photos:
+                        best = max(photos, key=lambda p: p.get("file_size", 0))
+                        try:
+                            local = self._download_tg_file(best["file_id"], ".jpg")
+                            if local:
+                                media_urls.append(local)
+                        except Exception as exc:
+                            log.debug("Telegram photo download failed: %s", exc)
+
+                    # Documents (PDF, text, code files, etc.)
+                    doc = message.get("document")
+                    if doc:
+                        try:
+                            fname = doc.get("file_name", "")
+                            suffix = Path(fname).suffix if fname else ".bin"
+                            local = self._download_tg_file(doc["file_id"], suffix)
+                            if local:
+                                media_urls.append(local)
+                        except Exception as exc:
+                            log.debug("Telegram document download failed: %s", exc)
+
+                    # Voice / audio
+                    voice = message.get("voice") or message.get("audio")
+                    if voice:
+                        try:
+                            local = self._download_tg_file(voice["file_id"], ".ogg")
+                            if local:
+                                media_urls.append(local)
+                        except Exception as exc:
+                            log.debug("Telegram audio download failed: %s", exc)
+
+                    # Video
+                    video = message.get("video")
+                    if video:
+                        try:
+                            local = self._download_tg_file(video["file_id"], ".mp4")
+                            if local:
+                                media_urls.append(local)
+                        except Exception as exc:
+                            log.debug("Telegram video download failed: %s", exc)
+
+                    if not text and not media_urls:
                         continue
+
                     sender = message.get("from", {})
                     msg = InboundMessage(
                         channel_id="telegram",
@@ -230,6 +295,7 @@ class Provider(ChannelProvider, ActionsMixin, ThreadingMixin, StreamingMixin,
                         thread_id=str(message.get("chat", {}).get("id", "")),
                         reply_to_id=str(message.get("reply_to_message", {}).get(
                             "message_id", "")) if message.get("reply_to_message") else None,
+                        media_urls=media_urls,
                         timestamp=message.get("date", time.time()),
                         raw=update,
                     )
