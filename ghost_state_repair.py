@@ -56,6 +56,7 @@ def repair_config(config_path: Path = None) -> dict:
         report["status"] = "corrupted"
         bak = _backup(config_path)
         report["repairs"].append(f"Backed up corrupted config to {bak}")
+        config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text("{}", encoding="utf-8")
         report["repairs"].append("Reset config to empty object — Ghost will use defaults")
         return report
@@ -68,6 +69,7 @@ def repair_config(config_path: Path = None) -> dict:
 
     if report["repairs"]:
         _backup(config_path)
+        config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         report["status"] = "repaired"
 
@@ -151,6 +153,7 @@ def repair_jsonl(jsonl_path: Path, label: str = "log") -> dict:
 
     if dropped > 0:
         _backup(jsonl_path)
+        jsonl_path.parent.mkdir(parents=True, exist_ok=True)
         jsonl_path.write_text(("\n".join(valid_lines) + "\n") if valid_lines else "", encoding="utf-8")
         report["status"] = "repaired"
         report["repairs"].append(f"Dropped {dropped} malformed line(s) out of {len(raw_lines)}")
