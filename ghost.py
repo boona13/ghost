@@ -1979,6 +1979,9 @@ class GhostDaemon:
             self.context_memory.add(entry)
             log_action("cron", f"[{job_name}] {prompt[:60]}", result)
 
+            if self.channel_router and result and job_name != _FEATURE_IMPLEMENTER_JOB:
+                self._send_cron_summary(job, result, tools_used)
+
         elif ptype == "notify":
             title = payload.get("title", job.get("name", "Ghost Cron"))
             message = payload.get("message", "")
@@ -2033,6 +2036,44 @@ class GhostDaemon:
             except Exception as e:
                 log.warning("Session maintenance failed: %s", e)
                 console_bus.emit("error", "cron", job_name, f"Session maintenance failed: {e}")
+
+    _CRON_JOB_LABELS = {
+        "_ghost_growth_tech_scout": "Tech Scout",
+        "_ghost_growth_health_check": "Health Check",
+        "_ghost_growth_user_context": "User Context Sync",
+        "_ghost_growth_skill_improver": "Skill Improver",
+        "_ghost_growth_soul_evolver": "Soul Evolver",
+        "_ghost_growth_bug_hunter": "Bug Hunter",
+        "_ghost_growth_competitive_intel": "AI Landscape Research",
+        "_ghost_growth_visual_monitor": "Visual Monitor",
+        "_ghost_growth_security_patrol": "Security Patrol",
+        "_ghost_growth_content_health": "Content Health Check",
+    }
+
+    def _send_cron_summary(self, job, result, tools_used):
+        """Send a rich post-completion summary to messaging channels."""
+        job_name = job.get("name", "unnamed")
+        label = self._CRON_JOB_LABELS.get(job_name, job_name.replace("_ghost_growth_", "").replace("_", " ").title())
+        description = job.get("description", "")
+
+        clean = result.strip()
+        if len(clean) > 600:
+            clean = clean[:600].rsplit(" ", 1)[0] + "..."
+
+        lines = [f"*{label}*"]
+        if description:
+            lines.append(f"_{description}_")
+        lines.append("")
+        lines.append(clean)
+        if tools_used:
+            lines.append(f"\n`{len(tools_used)} tools used`")
+
+        try:
+            self.channel_router.send(
+                "\n".join(lines), priority="low", title=f"Ghost: {label}",
+            )
+        except Exception as exc:
+            log.debug("Cron summary notification failed: %s", exc)
 
     def stop(self, *_):
         console_bus.emit("warn", "system", "daemon_stop", "Ghost shutting down")

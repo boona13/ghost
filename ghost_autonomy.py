@@ -1270,12 +1270,7 @@ def build_autonomy_tools(action_store: ActionItemStore, growth_logger: GrowthLog
         entry = growth_logger.log(routine, summary, details, category)
         warning = entry.get("_warning", "")
         if warning:
-            return f"{warning}\nDuplicate not sent to notifications. Entry ID: [{entry['id']}]"
-        _try_channel_notify(
-            channel_router,
-            f"**Growth [{routine}]**: {summary}",
-            priority="low",
-        )
+            return f"{warning}\nEntry ID: [{entry['id']}]"
         return f"Growth logged: [{entry['id']}] {summary}"
 
     return [
