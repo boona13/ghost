@@ -14,6 +14,7 @@ import random
 import re as _re
 import time
 import hashlib
+import threading as _threading
 import uuid
 import requests
 import traceback
@@ -24,6 +25,45 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 log = logging.getLogger("ghost.loop")
+
+# ═════════════════════════════════════════════════════════════════════
+#  CHAT PRIORITY — interactive chat gets exclusive LLM API access
+# ═════════════════════════════════════════════════════════════════════
+# Chat and background tasks (cron, evolve) share the same API key and
+# provider rate limits.  When chat is active, background engines PAUSE
+# their LLM calls entirely (up to CHAT_PRIORITY_WAIT_S) so chat gets
+# full API bandwidth.  This prevents cron traffic from starving chat.
+#
+# _chat_idle is SET when no chat is running (background may proceed)
+# and CLEARED when chat is active (background must wait).
+
+_chat_priority_lock = _threading.Lock()
+_chat_active_count = 0
+_chat_idle = _threading.Event()
+_chat_idle.set()
+CHAT_PRIORITY_WAIT_S = 60
+
+
+def _acquire_chat_priority():
+    """Signal that an interactive chat LLM session is active."""
+    global _chat_active_count
+    with _chat_priority_lock:
+        _chat_active_count += 1
+        _chat_idle.clear()
+
+
+def _release_chat_priority():
+    """Signal that an interactive chat LLM session has ended."""
+    global _chat_active_count
+    with _chat_priority_lock:
+        _chat_active_count = max(0, _chat_active_count - 1)
+        if _chat_active_count == 0:
+            _chat_idle.set()
+
+
+def is_chat_active() -> bool:
+    """Check if an interactive chat session is currently active."""
+    return not _chat_idle.is_set()
 
 
 def _build_date_context() -> str:
@@ -47,8 +87,10 @@ MAX_RETRIES = 2
 RETRY_DELAY = 1.5
 DEFAULT_MAX_TOKENS = 4096
 DEFAULT_TOOL_RESULT_LIMIT = 6000
-DEFAULT_TIMEOUT = 30
-MAX_LLM_WALL_CLOCK = 90   # 90s hard deadline per LLM call (fail fast, let fallback handle it)
+CONNECT_TIMEOUT = 10
+STREAM_READ_TIMEOUT = 30      # max silence between SSE chunks (seconds)
+DEFAULT_TIMEOUT = 30           # legacy non-streaming fallback
+MAX_LLM_WALL_CLOCK = 120      # wall clock safety net (streaming makes this rarely hit)
 DEFAULT_MAX_STEPS = 200
 FALLBACK_COOLDOWN_SEC = 60    # 1 min before probing failed model again
 FALLBACK_PROBE_INTERVAL = 15  # probe every 15s so primary recovers quickly
@@ -196,11 +238,20 @@ class ModelFallbackChain:
         )
         return any(m in error for m in transient_markers)
 
+    @staticmethod
+    def _is_timeout_error(error: str) -> bool:
+        """Detect timeout failures (OpenClaw pattern: skip cooldown for timeouts)."""
+        timeout_markers = ("Timeout", "no data for", "timed out", "deadline exceeded")
+        return any(m in error for m in timeout_markers)
+
     def record_failure(self, provider: str, model: str, error: str = ""):
         k = f"{provider}:{model}"
         self._stats.setdefault(k, {"ok": 0, "fail": 0})
         self._stats[k]["fail"] += 1
-        if self._is_transient_error(error):
+        if self._is_timeout_error(error):
+            log.warning("%s:%s timeout (%s), no cooldown (try next candidate immediately)",
+                        provider, model, error[:80])
+        elif self._is_transient_error(error):
             self._failures[k] = time.time() - (self._cooldown_sec - NETWORK_COOLDOWN_SEC)
             log.warning("%s:%s transient error (%s), short cooldown %ds",
                         provider, model, error[:80], NETWORK_COOLDOWN_SEC)
@@ -227,6 +278,120 @@ def _jittered_delay(base: float, attempt: int) -> float:
     delay = base * (attempt + 1)
     jitter = delay * JITTER_FACTOR * (2 * random.random() - 1)
     return max(0.5, delay + jitter)
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  SSE STREAMING — accumulate deltas into a complete response
+# ═════════════════════════════════════════════════════════════════════
+# OpenClaw always streams LLM calls so the per-chunk read timeout
+# catches dead connections quickly (seconds) instead of waiting for
+# a full-response timeout (90s).  We adopt the same pattern.
+
+def _accumulate_sse_stream(response, on_token=None) -> dict:
+    """Read an SSE stream and return a Chat Completions-style response dict.
+
+    The SSE format from OpenRouter/OpenAI streaming:
+      data: {"choices":[{"delta":{"content":"tok"}}]}
+      data: {"choices":[{"delta":{"tool_calls":[...]}}]}
+      data: [DONE]
+
+    Deltas are accumulated into a single message with complete content
+    and tool_calls, matching the non-streaming response format so the
+    rest of the engine doesn't need to change.
+
+    If *on_token* is provided, it is called with each text-content delta
+    so callers can forward partial text to the UI in real time.
+    For tool calls, *on_token* receives the ``summary`` argument of
+    ``task_complete`` as it streams in.
+    """
+    role = "assistant"
+    content_parts: list[str] = []
+    tool_calls_by_idx: dict[int, dict] = {}
+    finish_reason = None
+    usage = {}
+    model = ""
+    resp_id = ""
+
+    _tc_name_complete = {}
+
+    for raw_line in response.iter_lines():
+        if not raw_line:
+            continue
+        line = raw_line.decode("utf-8", errors="replace") if isinstance(raw_line, bytes) else raw_line
+        if not line.startswith("data: "):
+            continue
+        data_str = line[6:]
+        if data_str.strip() == "[DONE]":
+            break
+        try:
+            chunk = json.loads(data_str)
+        except (json.JSONDecodeError, ValueError):
+            continue
+
+        if not resp_id and chunk.get("id"):
+            resp_id = chunk["id"]
+        if not model and chunk.get("model"):
+            model = chunk["model"]
+        if chunk.get("usage"):
+            usage = chunk["usage"]
+
+        choices = chunk.get("choices", [])
+        if not choices:
+            continue
+        choice = choices[0]
+        delta = choice.get("delta", {})
+
+        if delta.get("role"):
+            role = delta["role"]
+        if delta.get("content"):
+            content_parts.append(delta["content"])
+            if on_token:
+                try:
+                    on_token(delta["content"])
+                except Exception:
+                    pass
+        if choice.get("finish_reason"):
+            finish_reason = choice["finish_reason"]
+
+        for tc_delta in delta.get("tool_calls", []):
+            idx = tc_delta.get("index", 0)
+            if idx not in tool_calls_by_idx:
+                tool_calls_by_idx[idx] = {
+                    "id": tc_delta.get("id", ""),
+                    "type": tc_delta.get("type", "function"),
+                    "function": {"name": "", "arguments": ""},
+                }
+            tc = tool_calls_by_idx[idx]
+            if tc_delta.get("id"):
+                tc["id"] = tc_delta["id"]
+            fn_delta = tc_delta.get("function", {})
+            if fn_delta.get("name"):
+                tc["function"]["name"] += fn_delta["name"]
+                if tc["function"]["name"] == "task_complete":
+                    _tc_name_complete[idx] = True
+            if fn_delta.get("arguments"):
+                tc["function"]["arguments"] += fn_delta["arguments"]
+                if on_token and _tc_name_complete.get(idx):
+                    try:
+                        on_token(fn_delta["arguments"])
+                    except Exception:
+                        pass
+
+    message: dict = {"role": role, "content": "".join(content_parts) or None}
+    if tool_calls_by_idx:
+        message["tool_calls"] = [tool_calls_by_idx[i] for i in sorted(tool_calls_by_idx)]
+    if not message.get("content") and not message.get("tool_calls"):
+        message["content"] = ""
+
+    return {
+        "id": resp_id,
+        "model": model,
+        "choices": [{"message": message, "finish_reason": finish_reason or "stop"}],
+        "usage": usage,
+    }
+
+
+_STREAMING_BLACKLIST_PROVIDERS = {"openai-codex"}
 DEBUG_LOG_DIR = GHOST_HOME / "logs"
 DEBUG_LOG_FILE = DEBUG_LOG_DIR / "tool_loop_debug.jsonl"
 MAX_DEBUG_LOG_SIZE = 10 * 1024 * 1024  # 10MB before rotation
@@ -1333,6 +1498,7 @@ class ToolLoopEngine:
         self.base_url = base_url
         self._auth_store = auth_store
         self._usage_tracker = usage_tracker
+        self._is_chat_priority = False
         self._fallback_chain = ModelFallbackChain(
             model, fallback_models or [],
             provider_chain=provider_chain,
@@ -1608,17 +1774,24 @@ class ToolLoopEngine:
 
         return provider.base_url, headers, adapted
 
-    def _call_llm(self, payload, timeout=DEFAULT_TIMEOUT):
+    def _call_llm(self, payload, timeout=DEFAULT_TIMEOUT, on_token=None):
         """Make an LLM API call with provider-aware fallback chain and jittered retry.
+
+        Uses SSE streaming by default (mirrors OpenClaw pattern) so the
+        per-chunk read timeout catches dead connections in seconds instead
+        of waiting for a full-response timeout.
 
         Flow:  for each (provider, model) in fallback chain →
                  resolve base_url, headers, adapted payload →
                  for each retry attempt →
-                   call API, handle errors
+                   call API (streaming), handle errors
                on success → adapt response, record_success, return
                on retriable failure → jittered backoff, next attempt
                on exhausted retries → record_failure, try next candidate
         """
+        if not self._is_chat_priority and not _chat_idle.is_set():
+            _chat_idle.wait(timeout=CHAT_PRIORITY_WAIT_S)
+
         candidates = self._fallback_chain.get_candidates()
         all_errors = []
 
@@ -1627,22 +1800,29 @@ class ToolLoopEngine:
                 provider_id, model, payload
             )
 
-            is_codex_stream = provider_id == "openai-codex"
+            is_codex = provider_id == "openai-codex"
+            use_sse = not is_codex and provider_id not in _STREAMING_BLACKLIST_PROVIDERS
+            if use_sse:
+                adapted_payload["stream"] = True
 
             last_err = None
-            # Notify usage tracker that call is starting
             if self._usage_tracker:
                 self._usage_tracker.call_started(provider_id, model)
 
             for attempt in range(MAX_RETRIES + 1):
+                resp = None
                 try:
-                    if is_codex_stream and attempt == 0:
+                    if is_codex and attempt == 0:
                         log.debug("Codex request to %s | keys: %s", url, list(adapted_payload.keys()))
 
+                    req_timeout = (
+                        (CONNECT_TIMEOUT, STREAM_READ_TIMEOUT) if (use_sse or is_codex)
+                        else timeout
+                    )
                     resp = requests.post(
                         url, json=adapted_payload,
-                        headers=headers, timeout=timeout,
-                        stream=is_codex_stream,
+                        headers=headers, timeout=req_timeout,
+                        stream=(use_sse or is_codex),
                     )
                     if resp.status_code == 429:
                         wait = _jittered_delay(RETRY_DELAY, attempt)
@@ -1652,18 +1832,19 @@ class ToolLoopEngine:
                         last_err = f"HTTP 429 on {provider_id}:{model}"
                         continue
 
-                    if is_codex_stream and resp.status_code != 200:
+                    if (use_sse or is_codex) and resp.status_code != 200:
                         body = resp.text[:500]
-                        log.error("Codex %s:%s returned HTTP %d: %s | Payload keys: %s",
-                                  provider_id, model, resp.status_code, body,
-                                  list(adapted_payload.keys()))
+                        if is_codex:
+                            log.error("Codex %s:%s returned HTTP %d: %s | Payload keys: %s",
+                                      provider_id, model, resp.status_code, body,
+                                      list(adapted_payload.keys()))
                         err_body = body[:200] if resp.status_code == 400 else body[:100]
                         last_err = f"HTTP {resp.status_code} on {provider_id}:{model}: {err_body}"
                         break
 
                     resp.raise_for_status()
 
-                    if is_codex_stream:
+                    if is_codex:
                         try:
                             from ghost_providers import parse_codex_sse_response, adapt_response, get_provider
                             raw = parse_codex_sse_response(resp)
@@ -1672,6 +1853,15 @@ class ToolLoopEngine:
                         except RuntimeError as stream_err:
                             last_err = f"Codex stream error on {provider_id}:{model}: {stream_err}"
                             break
+                    elif use_sse:
+                        data = _accumulate_sse_stream(resp, on_token=on_token)
+                        try:
+                            from ghost_providers import get_provider, adapt_response
+                            provider = get_provider(provider_id)
+                            if provider:
+                                data = adapt_response(provider, data)
+                        except ImportError:
+                            pass
                     else:
                         data = resp.json()
                         try:
@@ -1686,19 +1876,17 @@ class ToolLoopEngine:
                     primary = self._fallback_chain._chain[0] if self._fallback_chain._chain else None
                     if primary and (provider_id, model) != primary:
                         log.info("Served by fallback: %s:%s", provider_id, model)
-                    
-                    # Extract and report token usage
+
                     if self._usage_tracker:
                         usage = data.get("usage", {}) if isinstance(data, dict) else {}
                         total_tokens = usage.get("total_tokens", 0) if isinstance(usage, dict) else 0
                         self._usage_tracker.call_completed(total_tokens, success=True)
-                    
+
                     return data, None
 
                 except requests.exceptions.HTTPError as e:
                     status = e.response.status_code if e.response else 0
                     body = e.response.text[:300] if e.response else str(e)
-                    # 404 = model not found (permanent error) - remove from chain
                     if status == 404:
                         log.warning("Model %s:%s returned 404 (invalid model ID), removing from chain", provider_id, model)
                         self._fallback_chain.remove_from_chain(provider_id, model)
@@ -1713,28 +1901,35 @@ class ToolLoopEngine:
                     last_err = f"HTTP {status} on {provider_id}:{model}: {err_body}"
                     break
                 except requests.exceptions.Timeout:
+                    last_err = f"Timeout on {provider_id}:{model} (no data for {STREAM_READ_TIMEOUT}s)"
                     if attempt < MAX_RETRIES:
                         time.sleep(_jittered_delay(RETRY_DELAY, attempt))
-                        last_err = f"Timeout on {provider_id}:{model}"
                         continue
-                    last_err = f"Timeout on {provider_id}:{model} after retries"
                     break
                 except requests.exceptions.ConnectionError as e:
+                    last_err = f"Connection error on {provider_id}:{model}: {str(e)[:80]}"
                     if attempt < MAX_RETRIES:
                         time.sleep(_jittered_delay(RETRY_DELAY, attempt))
-                        last_err = f"Connection error on {provider_id}:{model}: {str(e)[:80]}"
                         continue
-                    last_err = f"Connection error on {provider_id}:{model} after retries: {str(e)[:80]}"
                     break
                 except Exception as e:
                     last_err = f"Error on {provider_id}:{model}: {e}"
                     break
+                finally:
+                    if resp is not None and (use_sse or is_codex):
+                        try:
+                            resp.close()
+                        except Exception:
+                            pass
 
-            # Report call failure to usage tracker
             if self._usage_tracker:
                 self._usage_tracker.call_completed(0, success=False)
 
-            self._fallback_chain.record_failure(provider_id, model, last_err or "unknown")
+            is_timeout = last_err and ("Timeout" in last_err or "no data for" in last_err)
+            if is_timeout:
+                self._fallback_chain.record_failure(provider_id, model, last_err or "timeout")
+            else:
+                self._fallback_chain.record_failure(provider_id, model, last_err or "unknown")
             all_errors.append(last_err or f"{provider_id}:{model} failed")
 
         error_summary = " → ".join(all_errors)
@@ -1744,7 +1939,8 @@ class ToolLoopEngine:
             max_steps=DEFAULT_MAX_STEPS, temperature=0.3, max_tokens=DEFAULT_MAX_TOKENS,
             image_b64=None, images=None, on_step=None, force_tool=False, history=None,
             cancel_check=None, hook_runner=None, tool_intent_security=None, model_override=None,
-            enable_reasoning=False, tool_event_bus=None, skip_evolve_cleanup=False):
+            enable_reasoning=False, tool_event_bus=None, skip_evolve_cleanup=False,
+            on_token=None):
         """
         Run the autonomous tool loop.
 
@@ -1768,8 +1964,37 @@ class ToolLoopEngine:
         Returns:
             ToolLoopResult with final text, tool calls made, and token usage.
         """
+        if self._is_chat_priority:
+            _acquire_chat_priority()
+
+        try:
+            return self._run_inner(
+                system_prompt=system_prompt, user_message=user_message,
+                tool_registry=tool_registry, max_steps=max_steps,
+                temperature=temperature, max_tokens=max_tokens,
+                image_b64=image_b64, images=images, on_step=on_step,
+                force_tool=force_tool, history=history,
+                cancel_check=cancel_check, hook_runner=hook_runner,
+                tool_intent_security=tool_intent_security,
+                model_override=model_override,
+                enable_reasoning=enable_reasoning,
+                tool_event_bus=tool_event_bus,
+                skip_evolve_cleanup=skip_evolve_cleanup,
+                on_token=on_token,
+            )
+        finally:
+            if self._is_chat_priority:
+                _release_chat_priority()
+
+    def _run_inner(self, system_prompt, user_message, tool_registry=None,
+            max_steps=DEFAULT_MAX_STEPS, temperature=0.3, max_tokens=DEFAULT_MAX_TOKENS,
+            image_b64=None, images=None, on_step=None, force_tool=False, history=None,
+            cancel_check=None, hook_runner=None, tool_intent_security=None, model_override=None,
+            enable_reasoning=False, tool_event_bus=None, skip_evolve_cleanup=False,
+            on_token=None):
+        """Inner implementation of run(), wrapped by chat priority in run()."""
         date_context = _build_date_context()
-        
+
         # Apply reasoning mode instruction if enabled
         if enable_reasoning:
             try:
@@ -1939,12 +2164,23 @@ class ToolLoopEngine:
                     payload["tool_choice"] = "auto"
 
             pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-            future = pool.submit(self._call_llm, payload)
+            future = pool.submit(self._call_llm, payload, DEFAULT_TIMEOUT, on_token)
+            _wall_start = time.time()
+            data, error = None, None
             try:
-                data, error = future.result(timeout=MAX_LLM_WALL_CLOCK)
-            except concurrent.futures.TimeoutError:
-                data, error = None, f"Wall-clock timeout ({MAX_LLM_WALL_CLOCK}s) — model too slow"
-                log.warning("LLM call exceeded %ds wall clock at step %d", MAX_LLM_WALL_CLOCK, step)
+                while True:
+                    try:
+                        data, error = future.result(timeout=1.0)
+                        break
+                    except concurrent.futures.TimeoutError:
+                        if cancel_check and cancel_check():
+                            future.cancel()
+                            data, error = None, "Cancelled by user"
+                            break
+                        if time.time() - _wall_start > MAX_LLM_WALL_CLOCK:
+                            data, error = None, f"Wall-clock timeout ({MAX_LLM_WALL_CLOCK}s) — model too slow"
+                            log.warning("LLM call exceeded %ds wall clock at step %d", MAX_LLM_WALL_CLOCK, step)
+                            break
             finally:
                 pool.shutdown(wait=False, cancel_futures=True)
 
@@ -1954,6 +2190,11 @@ class ToolLoopEngine:
                 break
 
             if error:
+                if error == "Cancelled by user":
+                    final_text = "(Stopped by user)"
+                    exit_reason = "cancelled"
+                    break
+
                 consecutive_errors += 1
                 _debug_logger.step_error(step, f"LLM error ({consecutive_errors}/3): {error}")
 

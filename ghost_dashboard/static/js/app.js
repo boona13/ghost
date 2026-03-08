@@ -101,11 +101,13 @@ document.querySelectorAll('.nav-section-toggle').forEach(toggle => {
   if (isExpanded) {
     body.style.display = '';
     toggle.classList.add('expanded');
+    toggle.setAttribute('aria-expanded', 'true');
   }
   toggle.addEventListener('click', () => {
     const nowExpanded = body.style.display === 'none';
     body.style.display = nowExpanded ? '' : 'none';
     toggle.classList.toggle('expanded', nowExpanded);
+    toggle.setAttribute('aria-expanded', String(nowExpanded));
     localStorage.setItem(storageKey, nowExpanded ? '1' : '0');
   });
 });

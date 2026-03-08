@@ -941,6 +941,7 @@ class GhostDaemon:
                 provider_chain=provider_chain,
                 usage_tracker=self.usage_tracker,
             )
+            self.chat_engine._is_chat_priority = True
 
         # New: Tool registry (security: strict mode prevents tool shadowing)
         strict_tools = cfg.get("strict_tool_registration", False)

@@ -202,6 +202,7 @@ class ChatSession:
         self.pending_approval = None
         self.cancelled = False
         self.enable_reasoning = enable_reasoning
+        self.streaming_text = ""
 
 
 def _build_chat_history(daemon, max_turns=10):
@@ -591,6 +592,8 @@ def _process_message(session, daemon):
         def on_step(step_num, tool_name, tool_result):
             import re
             result_str = str(tool_result)[:500]
+            if tool_name != "task_complete":
+                session.streaming_text = ""
             session.steps.append({
                 "step": step_num,
                 "tool": tool_name,
@@ -657,6 +660,51 @@ def _process_message(session, daemon):
                     if scoped_names:
                         chat_registry = chat_registry.subset(scoped_names)
 
+            _CORE_CHAT_TOOLS = {
+                "task_complete", "memory_search", "memory_save",
+                "web_search", "web_fetch", "shell_exec",
+                "file_read", "file_write", "file_search",
+                "grep", "glob", "notify", "uptime", "app_control",
+                "add_future_feature", "list_future_features",
+                "get_future_feature", "get_feature_stats",
+                "project_list", "project_get", "project_resolve",
+                "add_action_item", "log_growth_activity",
+            }
+            _MEDIA_KEYWORDS = {
+                "image", "photo", "picture", "video", "audio", "voice",
+                "music", "sound", "upscale", "enhance", "inpaint", "depth",
+                "ocr", "transcribe", "animate", "style transfer", "background",
+                "face", "kling", "runway", "minimax", "generate video",
+                "generate image", "text to image", "text to video",
+                "remove background", "clone voice", "tts", "speak",
+                "screenshot", "browse", "open", "navigate", "canvas",
+            }
+            msg_lower = session.user_message.lower()
+            needs_full_tools = any(kw in msg_lower for kw in _MEDIA_KEYWORDS)
+
+            if not needs_full_tools and not active_project:
+                core_names = [n for n in chat_registry.names() if n in _CORE_CHAT_TOOLS]
+                if core_names:
+                    chat_registry = chat_registry.subset(core_names)
+
+            _stream_raw = []
+
+            def on_token(delta):
+                _stream_raw.append(delta)
+                raw = "".join(_stream_raw)
+                import re as _re
+                m = _re.search(r'"summary"\s*:\s*"((?:[^"\\]|\\.)*)"?', raw)
+                if m:
+                    text = m.group(1)
+                    text = (text
+                            .replace("\\n", "\n")
+                            .replace("\\t", "\t")
+                            .replace('\\"', '"')
+                            .replace("\\\\", "\\"))
+                    session.streaming_text = text
+                elif not raw.lstrip().startswith("{"):
+                    session.streaming_text = raw
+
             engine = getattr(daemon, "chat_engine", None) or daemon.engine
             loop_result = engine.run(
                 system_prompt=system_prompt,
@@ -670,7 +718,8 @@ def _process_message(session, daemon):
                 cancel_check=lambda: session.cancelled,
                 images=image_attachments if image_attachments else None,
                 enable_reasoning=enable_reasoning,
-                    tool_event_bus=getattr(daemon, "tool_event_bus", None),
+                tool_event_bus=getattr(daemon, "tool_event_bus", None),
+                on_token=on_token,
             )
             session.result = loop_result.text
             session.tools_used = [tc["tool"] for tc in loop_result.tool_calls]
@@ -995,10 +1044,11 @@ def message_status(message_id):
 
 @bp.route("/api/chat/stream/<message_id>")
 def stream_status(message_id):
-    """SSE endpoint for real-time step updates."""
+    """SSE endpoint for real-time step updates with token streaming."""
     def generate():
         last_step_count = 0
         last_progress_count = 0
+        last_stream_len = 0
         approval_sent = False
         while True:
             with _chat_lock:
@@ -1019,6 +1069,14 @@ def stream_status(message_id):
                     yield f"data: {json.dumps({'type': 'step', 'step': step})}\n\n"
                 last_step_count = len(session.steps)
 
+            cur_stream = session.streaming_text
+            if len(cur_stream) < last_stream_len:
+                last_stream_len = 0
+            if cur_stream and len(cur_stream) > last_stream_len:
+                delta = cur_stream[last_stream_len:]
+                last_stream_len = len(cur_stream)
+                yield f"data: {json.dumps({'type': 'token', 'text': delta})}\n\n"
+
             if session.pending_approval and not approval_sent:
                 yield f"data: {json.dumps({'type': 'approval_needed', 'approval': session.pending_approval})}\n\n"
                 approval_sent = True
@@ -1030,7 +1088,7 @@ def stream_status(message_id):
                 yield f"data: {json.dumps({'type': 'error', 'error': session.error})}\n\n"
                 return
 
-            time.sleep(0.5)
+            time.sleep(0.3)
 
     return Response(generate(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

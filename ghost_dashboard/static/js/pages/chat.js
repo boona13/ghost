@@ -86,7 +86,6 @@ export async function render(container) {
             </svg>
             ${t('chat.canvas')}
           </button>
-          <button id="chat-clear" class="btn btn-sm btn-ghost text-xs">${t('common.clear')}</button>
         </div>
       </div>
 
@@ -104,7 +103,13 @@ export async function render(container) {
           <div id="chat-empty" class="chat-empty">
             <div class="text-3xl mb-3 opacity-40">&#x1F47B;</div>
             <div class="text-sm font-medium text-zinc-400">${t('chat.noMessages')}</div>
-            <div class="text-xs text-zinc-600 mt-1">${t('chat.typeBelow')}</div>
+            <div class="text-xs text-zinc-600 mt-1 mb-4">${t('chat.typeBelow')}</div>
+            <div class="flex flex-wrap gap-2 justify-center max-w-md">
+              <button class="chat-hint-chip" data-hint="What can you do?">${t('chat.hintCapabilities')}</button>
+              <button class="chat-hint-chip" data-hint="Help me with my project">${t('chat.hintProject')}</button>
+              <button class="chat-hint-chip" data-hint="Search the web for the latest news">${t('chat.hintWeb')}</button>
+              <button class="chat-hint-chip" data-hint="Remember that I prefer dark mode">${t('chat.hintMemory')}</button>
+            </div>
           </div>
         ` : ''}
       </div>
@@ -112,6 +117,13 @@ export async function render(container) {
       <div class="chat-input-area chat-drop-zone" id="chat-drop-zone">
         <div id="chat-attachments" class="chat-attachments" style="display:none"></div>
         <div class="chat-input-wrapper">
+          <button id="chat-clear" class="chat-new-session-btn" title="${t('chat.newSessionTitle')}">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M12 4v16m8-8H4"/>
+            </svg>
+            <span>${t('chat.newSessionTitle')}</span>
+          </button>
           <button id="chat-attach" class="chat-attach-btn" title="${t('chat.attachFile')}">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -263,6 +275,14 @@ export async function render(container) {
     } catch (err) {
       console.warn('Failed to interrupt generation:', err);
     }
+  });
+
+  container.addEventListener('click', (e) => {
+    const chip = e.target.closest('.chat-hint-chip');
+    if (!chip) return;
+    inputEl.value = chip.dataset.hint;
+    inputEl.focus();
+    inputEl.dispatchEvent(new Event('input'));
   });
 
   clearBtn.addEventListener('click', async () => {
@@ -699,9 +719,42 @@ export async function render(container) {
     eventSource = new EventSource(`/api/chat/stream/${messageId}`);
     let stepCount = 0;
     let progressEl = null;
+    let streamingEl = null;
+    let streamBuf = '';
+
+    function _ensureStreamingEl() {
+      if (streamingEl) return;
+      thinkingEl.style.display = 'none';
+      streamingEl = document.createElement('div');
+      streamingEl.className = 'chat-msg chat-msg-assistant';
+      streamingEl.innerHTML = `
+        <div class="chat-avatar">
+          <svg class="w-4 h-4 text-ghost-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+          </svg>
+        </div>
+        <div class="chat-bubble chat-bubble-assistant">
+          <div class="prose-ghost chat-streaming-text"></div>
+        </div>
+      `;
+      messagesEl.appendChild(streamingEl);
+    }
 
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data);
+
+      if (data.type === 'token') {
+        _ensureStreamingEl();
+        streamBuf += data.text;
+        const textEl = streamingEl.querySelector('.chat-streaming-text');
+        if (textEl) {
+          textEl.innerHTML = formatMarkdown(streamBuf);
+        }
+        statusEl.textContent = t('chat.streaming') || 'Streaming...';
+        scrollToBottom(messagesEl);
+        return;
+      }
 
       if (data.type === 'progress') {
         const msg = data.progress?.message || '';
@@ -723,6 +776,12 @@ export async function render(container) {
       if (data.type === 'step') {
         if (progressEl) { progressEl.remove(); progressEl = null; }
         stepCount++;
+        if (data.step.tool !== 'task_complete' && streamingEl) {
+          streamBuf = '';
+          const textEl = streamingEl.querySelector('.chat-streaming-text');
+          if (textEl) textEl.innerHTML = '';
+          streamingEl.style.display = 'none';
+        }
         statusEl.textContent = t('chat.stepProgress', {n: stepCount, tool: data.step.tool});
         appendStep(stepsContainer, data.step);
         scrollToBottom(messagesEl);
@@ -746,7 +805,16 @@ export async function render(container) {
           stepsContainer.remove();
         }
 
-        appendMessage(messagesEl, 'assistant', data.result || t('chat.noResponse'));
+        if (streamingEl) {
+          const textEl = streamingEl.querySelector('.chat-streaming-text');
+          if (textEl) {
+            textEl.classList.remove('chat-streaming-text');
+            textEl.innerHTML = formatMarkdown(data.result || t('chat.noResponse'));
+          }
+          streamingEl = null;
+        } else {
+          appendMessage(messagesEl, 'assistant', data.result || t('chat.noResponse'));
+        }
 
         if (data.elapsed) {
           const meta = document.createElement('div');
@@ -768,6 +836,7 @@ export async function render(container) {
         eventSource.close();
         eventSource = null;
         thinkingEl.remove();
+        if (streamingEl) { streamingEl.remove(); streamingEl = null; }
         stepsContainer.remove();
         appendMessage(messagesEl, 'error', data.error);
         scrollToBottom(messagesEl);
@@ -778,6 +847,7 @@ export async function render(container) {
         eventSource.close();
         eventSource = null;
         thinkingEl.remove();
+        if (streamingEl) { streamingEl.remove(); streamingEl = null; }
         stepsContainer.remove();
         appendMessage(messagesEl, 'error', data.error);
         scrollToBottom(messagesEl);

@@ -80,6 +80,8 @@ export default {
     toggleCanvas: "Alternar Canvas", canvas: "Canvas",
     noProject: "Sem Projeto (global)",
     noMessages: "Nenhuma mensagem ainda", typeBelow: "Digite abaixo ou use a voz para falar com o Ghost",
+    newSessionTitle: "Nova sessão", hintCapabilities: "O que você pode fazer?", hintProject: "Me ajude com meu projeto",
+    hintWeb: "Pesquise na web", hintMemory: "Lembre algo sobre mim",
     attachFile: "Anexar arquivo", messagePlaceholder: "Mensagem para o Ghost...",
     pushToTalk: "Pressione para falar", toggleReasoning: "Alternar modo raciocínio (/think)",
     sendEnter: "Enviar (Enter)", enterToSend: "Pressione Enter para enviar, Shift+Enter para nova linha",
@@ -153,7 +155,7 @@ export default {
     removed: "removido",
   },
   config: {
-    title: "Configuração", subtitle: "Todas as configurações do Ghost — salvas em ~/.ghost/config.json",
+    title: "Configurações", subtitle: "Todas as configurações do Ghost em um só lugar",
     general: "Geral", features: "Funcionalidades", voice: "Voz",
     growth: "Crescimento", security: "Segurança", modelsTab: "Modelos",
     timingLimits: "Temporização e Limites", pollInterval: "Intervalo de Polling (s)",
@@ -328,7 +330,7 @@ export default {
     cpModels: "Modelos", cpResolutions: "Resoluções", cpDurations: "Durações",
   },
   soul: {
-    title: "Alma", subtitle: "Personalidade, tom e limites do Ghost — injetados em cada prompt",
+    title: "Personalidade", subtitle: "Defina a personalidade, tom e limites do Ghost",
     saveSoul: "Salvar SOUL.md", resetDefault: "Restaurar Padrão",
     resetConfirm: "Restaurar SOUL.md para o padrão? Sua alma atual será perdida.",
     saved: "SOUL.md salvo", resetDone: "SOUL.md restaurado",
@@ -370,7 +372,7 @@ export default {
     binaries: "Binários: ", envVars: "Variáveis de ambiente: ",
   },
   cron: {
-    title: "Tarefas Agendadas", subtitle: "Tarefas programadas que executam automaticamente",
+    title: "Tarefas Agendadas", subtitle: "Tarefas automatizadas que são executadas de forma programada",
     totalJobs: "Total de Tarefas", enabledJobs: "Ativadas", nextWake: "Próxima Execução",
     addNewJob: "Adicionar Nova Tarefa", jobName: "Nome", jobNamePlaceholder: "ex: verificar-noticias",
     scheduleType: "Tipo de Agendamento",
@@ -401,7 +403,7 @@ export default {
     allCount: "Todos ({n})", noActivity: "Sem atividade",
   },
   evolve: {
-    title: "Autoevolução", subtitle: "O Ghost pode modificar seu próprio código, testar alterações e implantá-las com segurança",
+    title: "Autoaperfeiçoamento", subtitle: "O Ghost pode modificar seu próprio código, testar alterações e implantá-las com segurança",
     evolutions: "evolução(ões)",
     deployed: "Implantado", rolledBack: "Revertido", backups: "Backups",
     history: "Histórico", pendingApprovals: "Aprovações Pendentes",
@@ -491,7 +493,7 @@ export default {
     toolSecurityAuditDesc: "Varredura de segurança e correção automática",
   },
   autonomy: {
-    title: "Autonomia", subtitle: "Sistema de crescimento autônomo do Ghost — automelhoria, itens de ação e registro de atividades",
+    title: "Crescimento e Tarefas", subtitle: "Sistema de crescimento autônomo do Ghost — itens de ação e registro de atividades",
     crashDetected: "Falha Detectada",
     crashMsg: "Código de saída {code} — o Ghost está tentando se autorreparar (falha #{n})",
     actionItems: "Itens de Ação", noActionItems: "Nenhum item de ação pendente",
@@ -572,7 +574,7 @@ export default {
     failedLoadSchema: "Falha ao carregar esquema: {error}",
   },
   future_features: {
-    title: "Funcionalidades Futuras", addFeature: "Adicionar Funcionalidade",
+    title: "Roteiro", addFeature: "Adicionar Funcionalidade",
     subtitle: "Backlog autônomo de funcionalidades — Tech Scout e Inteligência Competitiva adicionam funcionalidades aqui. O Implementador de Funcionalidades executa diariamente para implementá-las.",
     activeCount: "Ativas", pendingCount: "Pendentes",
     needApproval: "Precisam de Aprovação", implemented: "Implementadas",

@@ -80,6 +80,8 @@ export default {
     toggleCanvas: "تبديل اللوحة", canvas: "اللوحة",
     noProject: "بدون مشروع (عام)",
     noMessages: "لا توجد رسائل بعد", typeBelow: "اكتب أدناه أو استخدم الصوت للتحدث مع Ghost",
+    newSessionTitle: "جلسة جديدة", hintCapabilities: "ماذا يمكنك أن تفعل؟", hintProject: "ساعدني في مشروعي",
+    hintWeb: "ابحث في الإنترنت", hintMemory: "تذكر شيئاً عني",
     attachFile: "إرفاق ملف", messagePlaceholder: "أرسل رسالة إلى Ghost...",
     pushToTalk: "اضغط للتحدث", toggleReasoning: "تبديل وضع التفكير (/think)",
     sendEnter: "إرسال (Enter)", enterToSend: "اضغط Enter للإرسال، Shift+Enter لسطر جديد",
@@ -153,7 +155,7 @@ export default {
     removed: "تمت الإزالة",
   },
   config: {
-    title: "الإعدادات", subtitle: "جميع إعدادات Ghost — محفوظة في ~/.ghost/config.json",
+    title: "الإعدادات", subtitle: "جميع إعدادات Ghost في مكان واحد",
     general: "عام", features: "الميزات", voice: "الصوت",
     growth: "النمو", security: "الأمان", modelsTab: "النماذج",
     timingLimits: "التوقيت والحدود", pollInterval: "فترة الاستقصاء (ثانية)",
@@ -328,7 +330,7 @@ export default {
     cpModels: "النماذج", cpResolutions: "الدقة", cpDurations: "المدة",
   },
   soul: {
-    title: "الروح", subtitle: "شخصية Ghost ونبرته وحدوده — تُحقن في كل طلب",
+    title: "الشخصية", subtitle: "حدد شخصية Ghost ونبرته وحدوده",
     saveSoul: "حفظ SOUL.md", resetDefault: "إعادة التعيين للافتراضي",
     resetConfirm: "إعادة تعيين SOUL.md للافتراضي؟ ستُفقد الروح الحالية.",
     saved: "تم حفظ SOUL.md", resetDone: "تم إعادة تعيين SOUL.md",
@@ -370,7 +372,7 @@ export default {
     binaries: "الملفات التنفيذية: ", envVars: "متغيرات البيئة: ",
   },
   cron: {
-    title: "المهام المجدولة", subtitle: "مهام مجدولة تعمل تلقائياً",
+    title: "المهام المجدولة", subtitle: "المهام التلقائية التي تعمل وفقًا لجدول زمني",
     totalJobs: "إجمالي المهام", enabledJobs: "مفعّلة", nextWake: "الإيقاظ التالي",
     addNewJob: "إضافة مهمة جديدة", jobName: "الاسم", jobNamePlaceholder: "مثال: فحص-الأخبار",
     scheduleType: "نوع الجدولة",
@@ -401,7 +403,7 @@ export default {
     allCount: "الكل ({n})", noActivity: "لا يوجد نشاط",
   },
   evolve: {
-    title: "التطور الذاتي", subtitle: "يمكن لـ Ghost تعديل كوده الخاص واختبار التغييرات ونشرها بأمان",
+    title: "التطوير الذاتي", subtitle: "يمكن لـ Ghost تعديل كوده الخاص واختبار التغييرات ونشرها بأمان",
     evolutions: "تطور(ات)",
     deployed: "تم النشر", rolledBack: "تم التراجع", backups: "النسخ الاحتياطية",
     history: "السجل", pendingApprovals: "الموافقات المعلّقة",
@@ -491,7 +493,7 @@ export default {
     toolSecurityAuditDesc: "فحص أمني وإصلاح تلقائي",
   },
   autonomy: {
-    title: "الاستقلالية", subtitle: "نظام النمو المستقل لـ Ghost — التحسين الذاتي وعناصر العمل وسجل النشاط",
+    title: "النمو والمهام", subtitle: "نظام النمو الذاتي لـ Ghost — عناصر العمل وسجل النشاط",
     crashDetected: "تم اكتشاف انهيار",
     crashMsg: "رمز الخروج {code} — يحاول Ghost إصلاح نفسه (انهيار #{n})",
     actionItems: "عناصر العمل", noActionItems: "لا توجد عناصر عمل معلّقة",
@@ -572,7 +574,7 @@ export default {
     failedLoadSchema: "فشل تحميل المخطط: {error}",
   },
   future_features: {
-    title: "ميزات مستقبلية", addFeature: "إضافة ميزة",
+    title: "خريطة الطريق", addFeature: "إضافة ميزة",
     subtitle: "قائمة الميزات المستقلة — يضيف كشّاف التقنية والاستخبارات التنافسية الميزات هنا. منفّذ الميزات يعمل يومياً لتنفيذها.",
     activeCount: "نشطة", pendingCount: "قيد الانتظار",
     needApproval: "تحتاج موافقة", implemented: "مُنفّذة",

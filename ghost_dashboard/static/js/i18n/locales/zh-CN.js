@@ -81,6 +81,8 @@ export default {
     toggleCanvas: "切换画布", canvas: "画布",
     noProject: "无项目（全局）",
     noMessages: "暂无消息", typeBelow: "在下方输入或使用语音与 Ghost 对话",
+    newSessionTitle: "新会话", hintCapabilities: "你能做什么？", hintProject: "帮我做项目",
+    hintWeb: "搜索网络", hintMemory: "记住关于我的事情",
     attachFile: "附加文件", messagePlaceholder: "给 Ghost 发消息...",
     pushToTalk: "按住说话", toggleReasoning: "切换推理模式 (/think)",
     sendEnter: "发送 (Enter)", enterToSend: "按 Enter 发送，Shift+Enter 换行",
@@ -154,7 +156,7 @@ export default {
     removed: "已移除",
   },
   config: {
-    title: "配置", subtitle: "所有 Ghost 设置——保存在 ~/.ghost/config.json",
+    title: "设置", subtitle: "Ghost 所有设置",
     general: "通用", features: "功能", voice: "语音",
     growth: "成长", security: "安全", modelsTab: "模型",
     timingLimits: "时间与限制", pollInterval: "轮询间隔（秒）",
@@ -329,7 +331,7 @@ export default {
     cpModels: "模型", cpResolutions: "分辨率", cpDurations: "时长",
   },
   soul: {
-    title: "灵魂", subtitle: "Ghost 的个性、语调和边界——注入到每个提示中",
+    title: "个性", subtitle: "定义 Ghost 的个性、语气和边界",
     saveSoul: "保存 SOUL.md", resetDefault: "恢复默认",
     resetConfirm: "将 SOUL.md 恢复为默认值？您当前的灵魂设置将丢失。",
     saved: "SOUL.md 已保存", resetDone: "SOUL.md 已重置",
@@ -371,7 +373,7 @@ export default {
     binaries: "二进制文件：", envVars: "环境变量：",
   },
   cron: {
-    title: "定时任务", subtitle: "自动运行的计划任务",
+    title: "定时任务", subtitle: "按计划自动运行的任务",
     totalJobs: "总任务数", enabledJobs: "已启用", nextWake: "下次唤醒",
     addNewJob: "添加新任务", jobName: "名称", jobNamePlaceholder: "例如 news-check",
     scheduleType: "调度类型",
@@ -402,7 +404,7 @@ export default {
     allCount: "全部 ({n})", noActivity: "暂无活动",
   },
   evolve: {
-    title: "自我进化", subtitle: "Ghost 可以修改自身代码库、测试更改并安全部署",
+    title: "自我改进", subtitle: "Ghost 可以修改自身代码库、测试更改并安全部署",
     evolutions: "次进化",
     deployed: "已部署", rolledBack: "已回滚", backups: "备份",
     history: "历史记录", pendingApprovals: "待审批",
@@ -492,7 +494,7 @@ export default {
     toolSecurityAuditDesc: "安全扫描和自动修复",
   },
   autonomy: {
-    title: "自主性", subtitle: "Ghost 的自主成长系统——自我改进、待办事项和活动日志",
+    title: "成长与任务", subtitle: "Ghost 的自主成长系统 — 行动项目和活动日志",
     crashDetected: "检测到崩溃",
     crashMsg: "退出代码 {code}——Ghost 正在尝试自我修复（第 {n} 次崩溃）",
     actionItems: "待办事项", noActionItems: "无待处理事项",
@@ -573,7 +575,7 @@ export default {
     failedLoadSchema: "加载配置架构失败：{error}",
   },
   future_features: {
-    title: "未来功能", addFeature: "添加功能",
+    title: "路线图", addFeature: "添加功能",
     subtitle: "自主功能积压——技术侦察和竞争情报在此添加功能。功能实施器每天运行以实现它们。",
     activeCount: "活跃", pendingCount: "待处理",
     needApproval: "需要审批", implemented: "已实现",

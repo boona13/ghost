@@ -1968,6 +1968,10 @@ def run_phased_evolution(daemon, feature_id=None):
     if attempt >= max_attempts:
         _log_phase("ORCHESTRATOR", feature_id,
                    f"Feature exceeded max attempts ({attempt}/{max_attempts}) — skipping")
+        FutureFeaturesStore().mark_failed(
+            feature_id,
+            f"Exceeded max implementation attempts ({attempt}/{max_attempts})"
+        )
         _archive_scratch(scratch_path)
         return
     _increment_attempt_count(feature_id)
@@ -2446,6 +2450,10 @@ def _run_fix_phase(daemon, feature_id, scratch_path):
             skip_evolve_cleanup=True,
         )
         _log_phase("FIX", feature_id, f"Completed in {result.steps} steps")
+
+        evolution_id = _extract_evolution_id_from_tool_calls(result.tool_calls or [])
+        if evolution_id:
+            _ensure_scratch_has_evolution_id(scratch_path, evolution_id)
 
         submitted = any(
             tc.get("tool") == "evolve_submit_pr" for tc in (result.tool_calls or [])
