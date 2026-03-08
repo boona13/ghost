@@ -1341,9 +1341,8 @@ def _check_supervisor_race_condition():
         if result.returncode == 0:
             pids = [p.strip() for p in result.stdout.strip().split("\n") if p.strip()]
             return len(pids) > 1, pids
-    except Exception:
-        pass
-    return False, []
+    except (subprocess.TimeoutExpired, OSError, FileNotFoundError):
+        return False, []
 
 
 def run_self_repair(daemon):

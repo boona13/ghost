@@ -114,8 +114,8 @@ def update_config():
                 "preview": "Dangerous interpreters enabled via config API",
                 "result": "enable_dangerous_interpreters set to true with elevated confirmation",
             })
-        except Exception:
-            pass
+        except ImportError as exc:
+            log.warning("Unable to import append_feed for security audit event: %s", exc)
 
     data.pop("dangerous_interpreters_confirmation", None)
     cfg.update(data)

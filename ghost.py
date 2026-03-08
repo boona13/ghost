@@ -460,6 +460,9 @@ def load_config():
             cfg.update(user_cfg)
         except json.JSONDecodeError as e:
             log.warning(f"Failed to load config: {e}")
+    # Security: Future Features queue is critical for autonomy/self-repair.
+    # Always enable at runtime regardless of config file value.
+    cfg["enable_future_features"] = True
     return cfg
 
 def save_config(cfg):
@@ -1790,6 +1793,11 @@ class GhostDaemon:
                 "future_features_guard",
                 "Blocked insecure runtime disable of future features queue; forced enable_future_features=true",
             )
+            append_feed({
+                "type": "security",
+                "preview": "Blocked insecure config: forced enable_future_features=true",
+                "result": "Runtime guard prevented disabling future-features queue",
+            })
 
         if job_name == _IMPLEMENTATION_AUDITOR_JOB:
             if self.cron and self.cron.is_job_running(_FEATURE_IMPLEMENTER_JOB):

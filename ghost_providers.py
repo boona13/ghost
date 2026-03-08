@@ -405,6 +405,16 @@ def _adapt_to_codex_responses(payload: dict) -> dict:
                 "output": content if isinstance(content, str) else json.dumps(content),
             })
 
+    valid_call_ids = {
+        item["call_id"] for item in input_items
+        if item.get("type") == "function_call" and item.get("call_id")
+    }
+    input_items = [
+        item for item in input_items
+        if item.get("type") != "function_call_output"
+        or item.get("call_id", "") in valid_call_ids
+    ]
+
     result = {
         "model": model,
         "input": input_items,

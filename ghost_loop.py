@@ -1587,6 +1587,32 @@ class ToolLoopEngine:
                     return content.strip()
         return "(Task completed — results were delivered through tool actions above)"
 
+    @staticmethod
+    def _sanitize_tool_messages(recent: list) -> list:
+        """Ensure every tool-result message has a matching assistant tool_call.
+
+        After slicing the recent window, an assistant message with tool_calls
+        may land just outside the window while its tool-result messages are
+        inside.  The API rejects orphaned tool results ('No tool call found
+        for function call output').  Fix by removing orphaned tool messages.
+        """
+        valid_call_ids: set[str] = set()
+        for m in recent:
+            if m.get("role") == "assistant":
+                for tc in (m.get("tool_calls") or []):
+                    tc_id = tc.get("id", "")
+                    if tc_id:
+                        valid_call_ids.add(tc_id)
+
+        sanitized = []
+        for m in recent:
+            if m.get("role") == "tool":
+                tc_id = m.get("tool_call_id", "")
+                if tc_id and tc_id not in valid_call_ids:
+                    continue
+            sanitized.append(m)
+        return sanitized
+
     def _compact_messages(self, messages: list, step: int = -1) -> list:
         """Two-phase context compaction mirroring OpenClaw/OpenCode/Cursor.
 
@@ -1603,7 +1629,7 @@ class ToolLoopEngine:
         msgs_before = len(messages)
 
         system_msg = messages[0]
-        recent = messages[-20:]
+        recent = self._sanitize_tool_messages(messages[-20:])
 
         # Find the actual user message — the request that started this run.
         # When chat/channel history is provided, messages[1] is the first
@@ -1730,13 +1756,13 @@ class ToolLoopEngine:
         system_msg = messages[0]
 
         if attempt == 2:
-            recent = messages[-10:]
+            recent = self._sanitize_tool_messages(messages[-10:])
             for i, m in enumerate(recent):
                 if m.get("role") == "tool" and len(m.get("content") or "") > 1000:
                     recent[i] = {**m, "content": _smart_compact_tool_result(m["content"], 400)}
             result = [system_msg, {"role": "user", "content": "[Context aggressively compacted due to overflow]"}] + recent
         else:
-            recent = messages[-5:]
+            recent = self._sanitize_tool_messages(messages[-5:])
             for i, m in enumerate(recent):
                 if m.get("role") == "tool" and len(m.get("content") or "") > 500:
                     recent[i] = {**m, "content": (m["content"])[:300] + "\n...(emergency trim)"}

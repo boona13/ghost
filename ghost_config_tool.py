@@ -39,6 +39,12 @@ SENSITIVE_KEYS = frozenset({
     "enable_future_features",
 })
 
+PROTECTED_ALWAYS_ON_KEYS = frozenset({
+    "enable_future_features",
+})
+
+PROTECTED_OVERRIDE_TOKEN = "ALLOW_PROTECTED_CONFIG_WRITE"
+
 _HARDENING_VALUES = {
     "strict_tool_registration": True,
 }
@@ -56,6 +62,35 @@ def _is_hardening_change(key, value):
         if missing:
             return False
     return True
+
+
+def _reject_protected_always_on_change(changes: dict):
+    """Reject attempts to disable protected always-on safety controls."""
+    if not isinstance(changes, dict):
+        return None
+    if "enable_future_features" not in changes:
+        return None
+
+    requested = changes.get("enable_future_features")
+    if requested is True:
+        return None
+
+    token = str(changes.get("protected_config_override_token", "")).strip()
+    if token == PROTECTED_OVERRIDE_TOKEN:
+        return None
+
+    return {
+        "ok": False,
+        "error": (
+            "Rejected insecure config change: enable_future_features cannot be false. "
+            "Future Features queue is security-critical and always enabled at runtime."
+        ),
+        "actionable_next_step": (
+            "Remove enable_future_features=false from your patch. "
+            "If you are performing controlled maintenance, retry with "
+            "protected_config_override_token=ALLOW_PROTECTED_CONFIG_WRITE."
+        ),
+    }
 
 
 def _backup_config() -> str | None:
@@ -470,6 +505,14 @@ def build_config_tools(cfg=None):
         if not isinstance(updates, dict):
             return "Error: updates must be a JSON object"
 
+        protected_rejection = _reject_protected_always_on_change(updates)
+        if protected_rejection:
+            log.warning(
+                "Rejected protected config toggle attempt for enable_future_features: %r",
+                updates.get("enable_future_features"),
+            )
+            return json.dumps(protected_rejection, ensure_ascii=False)
+
         ok, err = _validate_patch(updates)
         if not ok:
             return f"Validation error: {err}"
@@ -491,7 +534,9 @@ def build_config_tools(cfg=None):
         backup_path = _backup_config()
         current = _load_config()
         old_values = {k: current.get(k) for k in updates}
-        current.update(updates)
+        sanitized_updates = dict(updates)
+        sanitized_updates.pop("protected_config_override_token", None)
+        current.update(sanitized_updates)
         _save_config(current)
 
         changes = []
