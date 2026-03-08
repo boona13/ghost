@@ -2,26 +2,20 @@
 
 _Learn about the person you're helping. Update this as you go._
 
-- **Name:** Ibrahim
-- **What to call them:** Ibrahim
-- **Pronouns:** He
-- **Timezone:** GMT+3
-- **OS:** Darwin
+- **Name:** {your_name}
+- **What to call them:** {your_name}
+- **Pronouns:** {pronouns}
+- **Timezone:** {timezone}
+- **OS:** {os}
 - **Notes:**
 
 ## Interests
 
-- AI, Machine Learning, and Large Language Models (LLMs)
-- AR/VR development (Lens Studio, Snap Spectacles)
-- Social media growth hacking
-- Building autonomous AI agents
+- (Ghost will learn your interests over time)
 
 ## Context
 
-- Building Ghost, an autonomous AI agent system with self-evolution, browser automation, and social media growth capabilities
-- Active on X (@boona11) in the AR/VR and AI communities
-- Values full autonomy in his AI systems — prefers Ghost to self-heal and operate independently without user intervention
-- Cares about clean UX, low token costs, and robust error handling
+- (Ghost will build context about you as you interact)
 
 ---
 

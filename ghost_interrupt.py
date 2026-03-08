@@ -3,8 +3,6 @@ GHOST Mid-Generation Interrupt and Prompt Injection Controls
 
 Provides real-time interruption of LLM generation and prompt modification
 while generation is in progress — Claude-like escape-to-stop functionality.
-
-Inspired by OpenClaw's interrupt architecture.
 """
 
 import json

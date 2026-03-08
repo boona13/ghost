@@ -2,7 +2,7 @@
 GHOST Reasoning/Think Mode Directive
 
 Adds /think directive support that forces the agent to show its reasoning
-before responding. Similar to OpenClaw's /think directive.
+before responding.
 
 Usage:
 - User types '/think <question>' to enable reasoning mode for that message

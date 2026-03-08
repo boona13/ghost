@@ -1,7 +1,7 @@
 """
 Ghost Security Audit — Comprehensive self-auditing system.
 
-Modeled after OpenClaw's security audit architecture, adapted for Ghost's
+Adapted for Ghost's
 Self-Evolution and Autonomy style. Runs as a tool + autonomy growth routine.
 
 Audit categories:

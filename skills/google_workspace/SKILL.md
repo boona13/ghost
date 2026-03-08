@@ -243,7 +243,7 @@ google_calendar(action="delete_event", event_id="event_id_here")
 
 ### Calendar Best Practices
 
-- **Use the user's timezone** (UTC-5 / America/New_York for Ibrahim)
+- **Use the user's timezone** (check USER.md for timezone preference)
 - **Always confirm before creating events with attendees** — sends invites
 - **Use quick_add for simple events** — faster and more natural
 - **Check for conflicts** before scheduling — list events for that time first
@@ -430,7 +430,7 @@ google_sheets(
     range="Sheet1!A1:C2",
     values=[
         ["Name", "Email", "Role"],
-        ["Ibrahim", "ibrahim@example.com", "Developer"]
+        ["Alice", "alice@example.com", "Developer"]
     ]
 )
 ```
@@ -525,7 +525,7 @@ google_sheets(action="append_values", spreadsheet_id=sheet_id, range="Sheet1!A:D
 
 ## Notes
 
-- Ibrahim's timezone is UTC-5 (America/New_York) — always use this for calendar operations
+- Check USER.md for the user's timezone — always use it for calendar operations
 - Gmail search uses the same query syntax as the Gmail web interface
 - Drive file IDs can be extracted from Google URLs: `docs.google.com/document/d/{ID}/edit`
 - Sheets ranges use A1 notation: `Sheet1!A1:C10`

@@ -1,7 +1,6 @@
 """
 ghost_hybrid_memory.py — Hybrid Memory with SQLite FTS5 + Vector Search
 
-Mirrored from OpenClaw's memory-core architecture.
 Combines full-text search (BM25 via FTS5) with vector embeddings (cosine similarity),
 temporal decay, and MMR diversity reranking.
 """

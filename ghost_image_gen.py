@@ -7,7 +7,6 @@ Generate images via multiple providers with automatic fallback:
   3. OpenAI direct (DALL-E 3 / gpt-image-1) — uses OpenAI API key
 
 If the primary provider fails or isn't configured, falls through to the next.
-Inspired by OpenClaw's runWithImageModelFallback architecture.
 """
 
 import base64

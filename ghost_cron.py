@@ -6,7 +6,6 @@ Persistent cron job scheduler with three schedule types:
   - "every": repeating interval (e.g. every 5 minutes)
   - "cron":  standard cron expression (requires croniter)
 
-Inspired by OpenClaw's cron service.
 Jobs stored in ~/.ghost/cron/jobs.json with atomic writes.
 """
 

@@ -241,7 +241,7 @@ class _WebSession:
     def _handle_inbound(self, client, event):
         """Handle inbound messages from WhatsApp Web.
 
-        Filtering logic (mirrors openclaw_ref):
+        Filtering logic:
         - Skip @status and @broadcast JIDs
         - If IsFromMe and NOT self-chat → skip (echo from user's own typing)
         - If IsFromMe and IS self-chat → process (user talking to Ghost)

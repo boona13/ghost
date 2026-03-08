@@ -4,8 +4,6 @@ GHOST Auth Profile Store
 Manages API keys and OAuth tokens for multiple LLM providers.
 Stores credentials in ~/.ghost/auth_profiles.json.
 Syncs credentials from external CLIs (~/.codex/auth.json).
-
-Inspired by OpenClaw's auth-profiles/ architecture.
 """
 
 import json

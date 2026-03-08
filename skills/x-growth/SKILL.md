@@ -200,7 +200,7 @@ browser(action='snapshot')
 
 3. **Attach the image using `paste_image`** (copies to clipboard + Cmd+V — the most reliable method):
 ```
-browser(action='paste_image', file_path='/Users/ibrahimboona/.ghost/generated_images/YOUR_IMAGE.png', ref='eComposeRef')
+browser(action='paste_image', file_path='~/.ghost/generated_images/YOUR_IMAGE.png', ref='eComposeRef')
 ```
 This copies the image to macOS clipboard and pastes it into the focused compose box. Wait and verify:
 ```
@@ -210,7 +210,7 @@ browser(action='snapshot')
 
 **Fallback** — If `paste_image` doesn't work, use `upload` to set the hidden file input directly:
 ```
-browser(action='upload', file_path='/Users/ibrahimboona/.ghost/generated_images/YOUR_IMAGE.png')
+browser(action='upload', file_path='~/.ghost/generated_images/YOUR_IMAGE.png')
 ```
 This uses Playwright's `set_input_files()` on `input[type="file"]` — bypasses Finder entirely.
 

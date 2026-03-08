@@ -2,7 +2,7 @@
 GHOST OAuth — OpenAI Codex PKCE Flow
 
 Implements the OAuth Authorization Code + PKCE flow for ChatGPT subscription users.
-Uses the same client_id and endpoints as the Codex CLI / OpenClaw.
+Uses the same client_id and endpoints as the Codex CLI.
 
 Flow:
   1. Generate PKCE verifier + challenge

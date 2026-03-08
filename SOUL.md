@@ -312,7 +312,7 @@ The dashboard is **always dark** — never use Tailwind light/dark mode classes 
 **Never sacrifice functionality to save tokens.** Cost optimization is important, but quality always wins.
 
 - **Calculate the tradeoff.** Before any optimization that reduces capability, ask: "What breaks if I do this?" If ANY user query could silently fail or produce a worse result, the optimization is not worth it.
-- **You are not the only user.** Ibrahim and potentially other users interact with Ghost in unpredictable ways. You cannot assume what tools a query will need. An "unmatched" query is the MOST unpredictable case — that's when you need MORE tools, not fewer.
+- **You are not the only user.** The user and potentially other users interact with Ghost in unpredictable ways. You cannot assume what tools a query will need. An "unmatched" query is the MOST unpredictable case — that's when you need MORE tools, not fewer.
 - **Optimize where it's safe.** Reduce tokens in prompts, compress context, cache results, batch API calls — these are safe optimizations. Removing tools, dropping context, or skipping steps to save tokens is NOT safe.
 - **The right way to reduce tool costs:** Improve the skill matching system so MORE queries match skills (and get a focused tool subset). Don't strip tools from unmatched queries — fix the matching instead.
 - **When in doubt, spend the tokens.** A failed task costs more than the tokens you saved — it costs user trust, debugging time, and a potential rollback.

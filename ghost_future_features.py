@@ -42,9 +42,11 @@ STATUS_IMPLEMENTED = "implemented"
 STATUS_COMPLETED = "completed"  # Alias
 STATUS_FAILED = "failed"
 STATUS_REJECTED = "rejected"
+STATUS_REVIEW_REJECTED = "review_rejected"
 STATUS_DEFERRED = "deferred"
 FEATURE_STATUSES = [STATUS_PENDING, STATUS_APPROVAL_REQUIRED, STATUS_IN_PROGRESS, 
-                    STATUS_IMPLEMENTED, STATUS_COMPLETED, STATUS_FAILED, STATUS_REJECTED, STATUS_DEFERRED]
+                    STATUS_IMPLEMENTED, STATUS_COMPLETED, STATUS_FAILED, STATUS_REJECTED,
+                    STATUS_REVIEW_REJECTED, STATUS_DEFERRED]
 
 # Feature sources
 SOURCE_TECH_SCOUT = "tech_scout"
@@ -128,14 +130,14 @@ class FutureFeaturesStore:
             f_status = f.get("status", "")
 
             if f_title == title_lower:
-                if f_status in [STATUS_PENDING, STATUS_APPROVAL_REQUIRED, STATUS_IN_PROGRESS]:
+                if f_status in [STATUS_PENDING, STATUS_APPROVAL_REQUIRED, STATUS_IN_PROGRESS, STATUS_REVIEW_REJECTED]:
                     return {**f, "_warning": "Duplicate feature (already in backlog)"}
                 if f_status in [STATUS_IMPLEMENTED, STATUS_COMPLETED]:
                     return {**f, "_warning": "Duplicate feature (already implemented)"}
 
             # Fuzzy match: if 70%+ of words overlap, likely the same feature
             if f_status in [STATUS_PENDING, STATUS_APPROVAL_REQUIRED, STATUS_IN_PROGRESS,
-                            STATUS_IMPLEMENTED, STATUS_COMPLETED]:
+                            STATUS_REVIEW_REJECTED, STATUS_IMPLEMENTED, STATUS_COMPLETED]:
                 f_words = set(f_title.split())
                 if title_words and f_words:
                     overlap = len(title_words & f_words) / max(len(title_words), len(f_words))
@@ -191,11 +193,15 @@ class FutureFeaturesStore:
         return None
 
     def get_pending(self, limit: Optional[int] = None) -> List[Dict]:
-        """Get pending features sorted by priority."""
+        """Get actionable features sorted by priority.
+
+        Includes ``pending``, ``approval_required``, and ``review_rejected``
+        (the latter have branch context for fix-and-resubmit).
+        """
         features = self._load()
         pending = [
             f for f in features 
-            if f.get("status") in [STATUS_PENDING, STATUS_APPROVAL_REQUIRED]
+            if f.get("status") in [STATUS_PENDING, STATUS_APPROVAL_REQUIRED, STATUS_REVIEW_REJECTED]
         ]
         pending.sort(key=lambda x: (-x.get("priority_score", 0), x.get("created_at", "")))
         if limit:
@@ -210,12 +216,17 @@ class FutureFeaturesStore:
         return features[:limit]
 
     def get_next_implementable(self) -> Optional[Dict]:
-        """Get the highest priority feature that can be implemented now."""
+        """Get the highest priority feature that can be implemented now.
+
+        Picks up both fresh ``pending`` features and ``review_rejected`` features
+        that are past their cooldown window (the latter have branch context
+        preserved for fix-and-resubmit).
+        """
         features = self._load()
-        # Only get truly pending (not approval_required)
         pending = [
             f for f in features 
-            if f.get("status") == STATUS_PENDING and f.get("auto_implement", True)
+            if f.get("status") in (STATUS_PENDING, STATUS_REVIEW_REJECTED)
+            and f.get("auto_implement", True)
         ]
         
         if not pending:
@@ -537,7 +548,7 @@ class FutureFeaturesStore:
                 f.pop("review_round", None)
                 final_status = STATUS_DEFERRED
             else:
-                f["status"] = STATUS_PENDING
+                f["status"] = STATUS_REVIEW_REJECTED
                 f["retry_after"] = (
                     datetime.now() + timedelta(minutes=15)
                 ).isoformat()
@@ -548,7 +559,7 @@ class FutureFeaturesStore:
                 if pr_id:
                     f["current_pr_id"] = pr_id
                 f["review_round"] = f.get("review_round", 0) + 1
-                final_status = STATUS_PENDING
+                final_status = STATUS_REVIEW_REJECTED
 
             f["updated_at"] = now
             f["last_error"] = reason
@@ -604,6 +615,7 @@ class FutureFeaturesStore:
             STATUS_IMPLEMENTED: 0,
             STATUS_FAILED: 0,
             STATUS_REJECTED: 0,
+            STATUS_REVIEW_REJECTED: 0,
             STATUS_DEFERRED: 0,
             "total": len(features),
         }
@@ -625,12 +637,13 @@ class FutureFeaturesStore:
             "implemented": counts[STATUS_IMPLEMENTED],
             "failed": counts[STATUS_FAILED],
             "rejected": counts[STATUS_REJECTED],
+            "review_rejected": counts[STATUS_REVIEW_REJECTED],
             "deferred": counts[STATUS_DEFERRED],
             "by_priority": {
-                "P0": len([f for f in features if f.get("priority") == "P0" and f.get("status") in [STATUS_PENDING, STATUS_APPROVAL_REQUIRED, STATUS_IN_PROGRESS]]),
-                "P1": len([f for f in features if f.get("priority") == "P1" and f.get("status") in [STATUS_PENDING, STATUS_APPROVAL_REQUIRED, STATUS_IN_PROGRESS]]),
-                "P2": len([f for f in features if f.get("priority") == "P2" and f.get("status") in [STATUS_PENDING, STATUS_APPROVAL_REQUIRED, STATUS_IN_PROGRESS]]),
-                "P3": len([f for f in features if f.get("priority") == "P3" and f.get("status") in [STATUS_PENDING, STATUS_APPROVAL_REQUIRED, STATUS_IN_PROGRESS]]),
+                "P0": len([f for f in features if f.get("priority") == "P0" and f.get("status") in [STATUS_PENDING, STATUS_APPROVAL_REQUIRED, STATUS_IN_PROGRESS, STATUS_REVIEW_REJECTED]]),
+                "P1": len([f for f in features if f.get("priority") == "P1" and f.get("status") in [STATUS_PENDING, STATUS_APPROVAL_REQUIRED, STATUS_IN_PROGRESS, STATUS_REVIEW_REJECTED]]),
+                "P2": len([f for f in features if f.get("priority") == "P2" and f.get("status") in [STATUS_PENDING, STATUS_APPROVAL_REQUIRED, STATUS_IN_PROGRESS, STATUS_REVIEW_REJECTED]]),
+                "P3": len([f for f in features if f.get("priority") == "P3" and f.get("status") in [STATUS_PENDING, STATUS_APPROVAL_REQUIRED, STATUS_IN_PROGRESS, STATUS_REVIEW_REJECTED]]),
             }
         }
         return stats
@@ -798,6 +811,7 @@ def build_future_features_tools(cfg, on_queue_change=None):
                 STATUS_IMPLEMENTED: "✅",
                 STATUS_COMPLETED: "✅",
                 STATUS_REJECTED: "❌",
+                STATUS_REVIEW_REJECTED: "🔁",
                 STATUS_FAILED: "⚠️",
                 STATUS_DEFERRED: "📋",
             }.get(f.get("status"), "❓")
@@ -1021,6 +1035,7 @@ def build_future_features_tools(cfg, on_queue_change=None):
             f"  Implemented: {stats['implemented']}\n"
             f"  Failed: {stats['failed']}\n"
             f"  Rejected: {stats['rejected']}\n"
+            f"  Review Rejected (awaiting retry): {stats['review_rejected']}\n"
             f"  Deferred: {stats['deferred']}\n"
             f"\nBy Priority (active):\n"
             f"  P0 (Critical): {stats['by_priority']['P0']}\n"
@@ -1069,7 +1084,7 @@ def build_future_features_tools(cfg, on_queue_change=None):
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "status": {"type": "string", "enum": ["", "pending", "approval_required", "in_progress", "implemented", "failed", "rejected", "deferred"], "default": "", "description": "Filter by status"},
+                    "status": {"type": "string", "enum": ["", "pending", "approval_required", "in_progress", "implemented", "failed", "rejected", "review_rejected", "deferred"], "default": "", "description": "Filter by status"},
                     "limit": {"type": "integer", "default": 50, "description": "Max features to return"},
                 },
             },

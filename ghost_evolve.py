@@ -86,7 +86,7 @@ PROTECTED_PATTERNS = [
 ]
 
 BACKUP_EXCLUDE_DIRS = {
-    "__pycache__", ".git", "openclaw_ref", "node_modules",
+    "__pycache__", ".git", "node_modules",
     ".venv", "venv", ".mypy_cache", ".pytest_cache",
 }
 BACKUP_EXCLUDE_FILES = {
@@ -1661,7 +1661,7 @@ class EvolutionEngine:
                         evolution_id=evolution_id,
                         branch_name=branch_name,
                         pr_id=pr["pr_id"])
-                    if ok_retry and retry_status == "pending":
+                    if ok_retry and retry_status == "review_rejected":
                         _delay = threading.Timer(905.0, _notify_queue_best_effort)
                         _delay.daemon = True
                         _delay.start()
@@ -1680,7 +1680,7 @@ class EvolutionEngine:
                 ghost_git.delete_branch(branch_name)
                 self._active_evolutions.pop(evolution_id, None)
                 retry_msg = "Feature was DEFERRED after max retry attempts."
-            elif retry_status == "pending":
+            elif retry_status == "review_rejected":
                 retry_msg = (
                     "Feature re-queued for fix-and-resubmit. "
                     "Branch preserved for targeted fixes."

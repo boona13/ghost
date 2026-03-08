@@ -40,7 +40,7 @@ Read this ENTIRE section before writing any code.
 
 ## Project Root
 
-`/Users/ibrahimboona/Downloads/IMG/` — all paths below are relative to this.
+`{project_dir}/` — all paths below are relative to this (the directory where Ghost is installed).
 
 ## Backend Python Modules
 

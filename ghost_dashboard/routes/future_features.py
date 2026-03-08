@@ -8,7 +8,7 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from ghost_future_features import FutureFeaturesStore, FeatureChangelog, FEATURE_STATUSES, FEATURE_SOURCES
+from ghost_future_features import FutureFeaturesStore, FeatureChangelog, FEATURE_STATUSES, FEATURE_SOURCES, STATUS_REVIEW_REJECTED
 
 bp = Blueprint("future_features", __name__, url_prefix="/api/future-features")
 store = FutureFeaturesStore()
@@ -200,8 +200,8 @@ def retry_feature(feature_id):
     item = store.get_by_id(feature_id)
     if not item:
         return jsonify({"ok": False, "error": "Feature not found"}), 404
-    if item.get("status") not in ("failed", "deferred"):
-        return jsonify({"ok": False, "error": "Only failed or deferred features can be retried"}), 400
+    if item.get("status") not in ("failed", "deferred", "review_rejected"):
+        return jsonify({"ok": False, "error": "Only failed, deferred, or review-rejected features can be retried"}), 400
     store._update_status(feature_id, "pending", "Retried by user")
     ok, error = store.mark_in_progress(feature_id)
     if not ok:
@@ -251,12 +251,13 @@ def get_changelog():
 @bp.route("/metadata")
 def get_metadata():
     """Get metadata for forms (statuses, priorities, sources)."""
-    from ghost_future_features import PRIORITY_LEVELS, STATUS_PENDING, STATUS_APPROVAL_REQUIRED, STATUS_IN_PROGRESS, STATUS_IMPLEMENTED, STATUS_COMPLETED, STATUS_FAILED, STATUS_REJECTED, STATUS_DEFERRED
+    from ghost_future_features import PRIORITY_LEVELS, STATUS_PENDING, STATUS_APPROVAL_REQUIRED, STATUS_IN_PROGRESS, STATUS_IMPLEMENTED, STATUS_COMPLETED, STATUS_FAILED, STATUS_REJECTED, STATUS_REVIEW_REJECTED, STATUS_DEFERRED
     
     statuses = [
         {"value": STATUS_PENDING, "label": "Pending", "emoji": "⏳"},
         {"value": STATUS_APPROVAL_REQUIRED, "label": "Approval Required", "emoji": "🛑"},
         {"value": STATUS_IN_PROGRESS, "label": "In Progress", "emoji": "🔄"},
+        {"value": STATUS_REVIEW_REJECTED, "label": "PR Rejected (retry queued)", "emoji": "🔁"},
         {"value": STATUS_IMPLEMENTED, "label": "Completed", "emoji": "✅"},
         {"value": STATUS_COMPLETED, "label": "Completed", "emoji": "✅"},
         {"value": STATUS_FAILED, "label": "Failed", "emoji": "⚠️"},

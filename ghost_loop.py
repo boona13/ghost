@@ -3,7 +3,6 @@ GHOST Tool Loop Engine
 
 Autonomous multi-turn LLM tool calling loop.
 The agent keeps going until it decides the task is DONE — like while(true).
-Loop detection mirrored from OpenClaw's tool-loop-detection architecture.
 """
 
 import concurrent.futures
@@ -58,7 +57,7 @@ DEFAULT_TIMEOUT = 30
 MAX_LLM_WALL_CLOCK = 180     # generous deadline — streaming keeps connection alive
 DEFAULT_MAX_STEPS = 200
 FALLBACK_COOLDOWN_SEC = 60    # base cooldown — escalates with consecutive failures
-FALLBACK_PROBE_INTERVAL = 30  # probe every 30s (OpenClaw MIN_PROBE_INTERVAL_MS)
+FALLBACK_PROBE_INTERVAL = 30  # probe every 30s
 NETWORK_COOLDOWN_SEC = 10     # short cooldown for DNS/connection errors (transient)
 JITTER_FACTOR = 0.3           # ±30% randomness on retry delays
 
@@ -77,13 +76,12 @@ _MIN_TOOLS_BEFORE_ACCEPT_DEFERRAL = 4
 
 
 # ═════════════════════════════════════════════════════════════════════
-#  MODEL FALLBACK CHAIN  (inspired by OpenClaw's model-fallback.ts)
+#  MODEL FALLBACK CHAIN
 # ═════════════════════════════════════════════════════════════════════
 
 class ModelFallbackChain:
     """Provider-aware model fallback with escalating cooldowns and probing.
 
-    Mirrors OpenClaw's model-fallback.ts:
     - Escalating cooldowns: 60s → 300s → 1500s → 3600s (based on error count)
     - Probe during cooldown every 30s to detect recovery
     - Error counts reset on success (circuit breaker half-open → closed)
@@ -166,7 +164,7 @@ class ModelFallbackChain:
         }
 
     def _effective_cooldown(self, key: str) -> float:
-        """Escalating cooldown based on consecutive error count (OpenClaw pattern)."""
+        """Escalating cooldown based on consecutive error count."""
         count = self._error_counts.get(key, 0)
         idx = min(count - 1, len(self._COOLDOWN_ESCALATION) - 1) if count > 0 else 0
         return self._COOLDOWN_ESCALATION[idx]
@@ -922,7 +920,7 @@ class LoopDetectionResult:
 
 
 class LoopDetector:
-    """Advanced loop detection mirrored from OpenClaw's detector priority chain.
+    """Advanced loop detection using a detector priority chain.
 
     Detectors (checked in order, first match wins):
     1. global_circuit_breaker — any tool no-progress streak >= 30 -> block
@@ -1438,8 +1436,6 @@ def _parse_openai_stream(response, on_token=None) -> dict:
 
     Accumulates delta chunks (content, tool_calls) and returns the same
     structure as a non-streaming response so callers don't need to change.
-    Mirrored from OpenClaw's always-streaming architecture.
-
     If *on_token* is provided it is called with each content-delta string
     as it arrives, enabling real-time token streaming to the frontend.
     """
@@ -1636,7 +1632,7 @@ class ToolLoopEngine:
         return sanitized
 
     def _compact_messages(self, messages: list, step: int = -1) -> list:
-        """Two-phase context compaction mirroring OpenClaw/OpenCode/Cursor.
+        """Two-phase context compaction.
 
         Phase 1 (always): Build a deterministic structured summary from old
                  messages, preserving tool call names and code signatures.
@@ -1763,7 +1759,7 @@ class ToolLoopEngine:
         """Aggressive compaction for context overflow recovery.
 
         Called when the API rejects our request as too large.  Each attempt
-        is more aggressive than the last (mirrors OpenClaw's overflow
+        is more aggressive than the last (overflow
         recovery loop):
           Attempt 1: Force normal compaction (even if < 30 messages).
           Attempt 2: Shrink recent window to 10 and truncate tool results.

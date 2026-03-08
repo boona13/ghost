@@ -165,7 +165,7 @@ def _flatten_ax_tree(node, results, depth=0, max_depth=8):
 
 
 def _get_ax_tree_via_cdp(page):
-    """Get accessibility tree via Chrome DevTools Protocol (like OpenClaw's cdp.ts)."""
+    """Get accessibility tree via Chrome DevTools Protocol."""
     try:
         cdp = page.context.new_cdp_session(page)
         result = cdp.send("Accessibility.getFullAXTree")
@@ -264,7 +264,7 @@ def _parse_cdp_nodes(cdp_nodes):
 def _build_snapshot(page, interactive_only=False, max_elements=150):
     """Efficient snapshot: CDP tree → filtered → compact text output.
 
-    Like OpenClaw's efficient mode: prioritizes interactive elements,
+    Prioritizes interactive elements,
     deduplicates, caps output to save tokens.
     """
     global _ref_store
@@ -333,7 +333,7 @@ def _build_snapshot(page, interactive_only=False, max_elements=150):
 
 
 def _get_locator(page, ref):
-    """Resolve a ref to a Playwright locator using get_by_role (like OpenClaw)."""
+    """Resolve a ref to a Playwright locator using get_by_role."""
     ref = ref.strip().lstrip("@").replace("ref=", "")
     info = _ref_store.get(ref)
     if not info:
@@ -476,7 +476,7 @@ def _do_browser(action, **kwargs):
                     page.wait_for_timeout(500)
                 return {"status": "ok", "typed": text[:50], "into": "focused_element"}
 
-        # ── fill (multi-field form fill like OpenClaw) ──
+        # ── fill (multi-field form fill) ──
         elif action == "fill":
             fields = kwargs.get("fields", [])
             if not fields:

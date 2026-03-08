@@ -49,9 +49,6 @@ supervisor.pid
 ghost_imgclip
 ghost_panel
 
-# Reference project (external, not part of Ghost)
-openclaw_ref/
-
 # User identity files contain personal data after first run.
 # Templates are generated on first start — the real SOUL.md and USER.md
 # are tracked in git as starter templates. Users will customize them.
@@ -73,3 +70,21 @@ crash_report.json
 htmlcov/
 .pytest_cache/
 .mypy_cache/
+
+# Generated output
+output/
+
+# User-specific Ghost data
+.ghost/
+
+# IDE configuration
+.cursor/
+
+# Test images (binary bloat)
+testing/*.jpg
+testing/*.png
+
+# Development artifacts
+ghost_mistakes_report.md
+seed_mistakes_memory.py
+start.ps1

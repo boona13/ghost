@@ -3,8 +3,6 @@ GHOST Multi-Provider LLM Support
 
 Provider registry with API format adapters for OpenRouter, OpenAI, Anthropic,
 OpenAI Codex (ChatGPT subscription), Google Gemini, xAI, and Ollama.
-
-Inspired by OpenClaw's models-config.providers.ts architecture.
 """
 
 import json
@@ -402,7 +400,7 @@ def _adapt_openai(provider: ProviderConfig, payload: dict) -> dict:
 # ── Codex Responses API adapter ──
 # Endpoint: chatgpt.com/backend-api/codex/responses
 # Uses OpenAI Responses API format (input/output) instead of Chat Completions (messages/choices).
-# Requires store=false per OpenClaw reference.
+# Requires store=false.
 
 def _adapt_to_codex_responses(payload: dict) -> dict:
     """Convert OpenAI Chat Completions → Codex Responses API format."""

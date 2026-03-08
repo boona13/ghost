@@ -573,7 +573,7 @@ def _container_to_text(container) -> str:
 
 
 # ═════════════════════════════════════════════════════════════════════
-#  HTML SANITIZATION (inspired by OpenClaw's web-fetch-visibility)
+#  HTML SANITIZATION
 # ═════════════════════════════════════════════════════════════════════
 
 _HIDDEN_STYLE_PATTERNS = [

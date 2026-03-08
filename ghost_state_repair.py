@@ -2,7 +2,6 @@
 GHOST State File Repair
 
 Validates and repairs Ghost's critical state files (config, databases, logs).
-Inspired by OpenClaw's session-transcript-repair.ts and session-file-repair.ts.
 """
 
 import json
