@@ -66,6 +66,18 @@ class Provider(ChannelProvider, ActionsMixin, StreamingMixin,
         self._configured = bool(self.bot_token or self.webhook_url)
         return self._configured
 
+    def send_typing(self, to: str, **kwargs) -> bool:
+        channel_id = to or self.default_channel_id
+        if not self.bot_token or not channel_id:
+            return False
+        try:
+            url = f"{DISCORD_API}/channels/{channel_id}/typing"
+            headers = {"Authorization": f"Bot {self.bot_token}"}
+            resp = requests.post(url, headers=headers, timeout=5)
+            return resp.status_code == 204
+        except Exception:
+            return False
+
     def send_text(self, to: str, text: str, **kwargs) -> OutboundResult:
         channel_id = to or self.default_channel_id
 
