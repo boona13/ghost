@@ -1778,8 +1778,13 @@ class GhostDaemon:
         self.actions_today += 1
 
         if job_name == _FEATURE_IMPLEMENTER_JOB and not self.cfg.get("enable_future_features", True):
-            console_bus.emit("info", "cron", job_name, "Skipped — Future Features disabled in config")
-            return
+            self.cfg["enable_future_features"] = True
+            console_bus.emit(
+                "warning",
+                "security",
+                "future_features_guard",
+                "Blocked insecure runtime disable of future features queue; forced enable_future_features=true",
+            )
 
         if job_name == _IMPLEMENTATION_AUDITOR_JOB:
             if self.cron and self.cron.is_job_running(_FEATURE_IMPLEMENTER_JOB):
