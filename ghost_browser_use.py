@@ -298,6 +298,16 @@ async def _run_browser_task(
         save_session(session)
         return {"success": False, "error": str(exc), "session_id": session_id}
 
+    finally:
+        browser = _get_runtime(session_id, "browser")
+        if browser:
+            try:
+                await browser.stop()
+            except Exception:
+                pass
+        with _runtime_lock:
+            _runtime.pop(session_id, None)
+
 
 # ── public tool functions ─────────────────────────────────────────────
 

@@ -1569,6 +1569,34 @@ class GhostDaemon:
             return ""
         return "\n\n".join(parts) + "\n\n---\n\n"
 
+    _BROWSER_TOOL_NAMES = frozenset({
+        "browser", "browser_use_create_session", "browser_use_run_task",
+        "browser_use_navigate", "browser_use_get_html", "browser_use_screenshot",
+    })
+
+    def _cleanup_browser_after_task(self, tools_used: list):
+        """Close browser windows opened during a tool loop session.
+
+        Called after each tool loop completes so Chromium windows don't
+        accumulate across autonomous tasks.
+        """
+        if not any(t in self._BROWSER_TOOL_NAMES for t in tools_used):
+            return
+        try:
+            _browser_stop()
+        except Exception as e:
+            log.warning("Post-task browser cleanup failed: %s", e)
+        try:
+            from ghost_browser_use import list_sessions, delete_session
+            for s in list_sessions():
+                if s.get("status") in ("completed", "error"):
+                    try:
+                        delete_session(s["id"])
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
     def _cleanup_stuck_features(self, tool_calls):
         """Auto-reset or auto-complete features after the implementer finishes.
 
@@ -1902,6 +1930,7 @@ class GhostDaemon:
 
                 if is_evolution_runner:
                     self._cleanup_stuck_features(tool_calls_log)
+                self._cleanup_browser_after_task(tools_used)
             else:
                 result = self.llm.analyze("long_text", prompt)
                 tools_used = []
@@ -2286,6 +2315,7 @@ class GhostDaemon:
             reply = loop_result.text
             self._tool_count += len(loop_result.tool_calls)
             tools_used = [tc["tool"] for tc in loop_result.tool_calls]
+            self._cleanup_browser_after_task(tools_used)
         else:
             reply = self.llm.analyze("long_text", msg.text)
             tools_used = []
@@ -2407,6 +2437,7 @@ class GhostDaemon:
             self._tool_count += len(loop_result.tool_calls)
             tools_used = [tc["tool"] for tc in loop_result.tool_calls]
             tokens_used = loop_result.total_tokens
+            self._cleanup_browser_after_task(tools_used)
         else:
             result = self.llm.analyze(content_type, llm_input, context_prefix="")
 
@@ -2519,6 +2550,7 @@ class GhostDaemon:
             result = loop_result.text
             tools_used = [tc["tool"] for tc in loop_result.tool_calls]
             tokens_used = loop_result.total_tokens
+            self._cleanup_browser_after_task(tools_used)
         else:
             result = self.llm.analyze_image(img_path, context_prefix=ctx)
 
@@ -2719,6 +2751,7 @@ class GhostDaemon:
                 result = loop_result.text
                 self._tool_count += len(loop_result.tool_calls)
                 tools_used = [tc["tool"] for tc in loop_result.tool_calls]
+                self._cleanup_browser_after_task(tools_used)
             else:
                 result = self.llm.analyze("long_text", source)
                 tools_used = []
