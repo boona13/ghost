@@ -168,6 +168,7 @@ class Provider(ChannelProvider, ActionsMixin, StreamingMixin,
         intents.message_content = True
         client = discord.Client(intents=intents)
         self._discord_client = client
+        _inbound_callback = on_message
 
         @client.event
         async def on_message(message):
@@ -184,7 +185,7 @@ class Provider(ChannelProvider, ActionsMixin, StreamingMixin,
                 raw={"guild_id": str(message.guild.id) if message.guild else ""},
             )
             if msg.text:
-                on_message(msg)
+                _inbound_callback(msg)
 
         def _run():
             try:

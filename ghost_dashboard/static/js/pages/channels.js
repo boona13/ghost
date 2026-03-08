@@ -1238,6 +1238,13 @@ function showDiscordModal(pageContainer) {
       });
     } catch (_) {}
 
+    try {
+      await api.post('/api/channels/discord/add-sender', {
+        bot_token: validatedToken,
+        channel_id: channelSelect.value,
+      });
+    } catch (_) {}
+
     showBotStep(4);
 
     const resultEl = $('#dc-test-result');

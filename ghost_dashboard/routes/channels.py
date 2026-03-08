@@ -532,7 +532,8 @@ def discord_guilds():
                                  headers=headers, timeout=10)
         if resp.status_code == 200:
             guilds = [
-                {"id": g["id"], "name": g["name"], "icon": g.get("icon", "")}
+                {"id": g["id"], "name": g["name"], "icon": g.get("icon", ""),
+                 "owner": g.get("owner", False)}
                 for g in resp.json()
             ]
             return jsonify({"ok": True, "guilds": guilds})
@@ -565,6 +566,59 @@ def discord_channels():
             text_channels.sort(key=lambda c: c["name"])
             return jsonify({"ok": True, "channels": text_channels})
         return jsonify({"ok": False, "error": f"HTTP {resp.status_code}"})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)})
+
+
+@bp.route("/api/channels/discord/add-sender", methods=["POST"])
+def discord_add_sender():
+    """Auto-add a Discord user to the global allowlist during setup."""
+    data = request.get_json(force=True) or {}
+    bot_token = data.get("bot_token", "")
+    channel_id = data.get("channel_id", "")
+    if not bot_token or not channel_id:
+        return jsonify({"ok": False, "error": "bot_token and channel_id required"}), 400
+
+    import requests as http_requests
+    try:
+        headers = {"Authorization": f"Bot {bot_token}"}
+        resp = http_requests.get(
+            f"{DISCORD_API}/channels/{channel_id}/messages?limit=5",
+            headers=headers, timeout=10,
+        )
+        if resp.status_code != 200:
+            return jsonify({"ok": False, "error": f"HTTP {resp.status_code}"})
+
+        added_ids = []
+        for msg in resp.json():
+            author = msg.get("author", {})
+            if author.get("bot"):
+                continue
+            sender_id = str(author.get("id", ""))
+            if not sender_id:
+                continue
+            try:
+                from ghost import load_config, save_config
+                ghost_cfg = load_config()
+                allowed = ghost_cfg.get("channel_allowed_senders", [])
+                if sender_id not in allowed:
+                    allowed.append(sender_id)
+                    ghost_cfg["channel_allowed_senders"] = allowed
+                    save_config(ghost_cfg)
+                    from ghost_dashboard import get_daemon
+                    daemon = get_daemon()
+                    if daemon:
+                        daemon.cfg["channel_allowed_senders"] = allowed
+                    added_ids.append(sender_id)
+            except Exception as exc:
+                log.warning("Failed to auto-add Discord sender to allowlist: %s", exc)
+            break  # only process the first human sender
+
+        return jsonify({
+            "ok": True,
+            "added_ids": added_ids,
+            "added_to_allowlist": len(added_ids) > 0,
+        })
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)})
 

@@ -49,7 +49,7 @@ huggingface-hub>=0.23
 # Optional: channel-specific SDKs (ghost_channels/ — install only what you need)
 neonize>=0.3.14           # WhatsApp Web (QR code linking via whatsmeow)
 # slack-sdk>=3.27          # Slack Socket Mode (bidirectional)
-# discord.py>=2.3          # Discord gateway (bidirectional)
+discord.py>=2.3            # Discord gateway (bidirectional)
 # matrix-nio>=0.24         # Matrix E2EE support
 # websocket-client>=1.7    # Mattermost/Nostr inbound
 
