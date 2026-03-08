@@ -587,6 +587,7 @@ export default {
     createBotHint: "ليس لديك بوت؟ أرسل رسالة إلى @BotFather على تيليجرام لإنشاء واحد.",
     invalidBotToken: "رمز غير صالح — تأكد من نسخ الرمز الكامل من @BotFather",
     telegramStep: "الخطوة {n} من 3",
+    senderAllowlisted: "تمت إضافة معرّف تيليجرام الخاص بك إلى قائمة المسموح بهم",
   },
   future_features: {
     title: "ميزات مستقبلية", addFeature: "إضافة ميزة",

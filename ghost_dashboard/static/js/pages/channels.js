@@ -805,11 +805,14 @@ function showTelegramModal(pageContainer) {
             <div class="w-3 h-3 rounded-full bg-emerald-400"></div>
             <span class="text-[11px] text-emerald-400">${t('channels.chatDetected', { name: res.sender_name || res.chat_id })}</span>
           `;
+          if (timerEl && res.added_to_allowlist) {
+            timerEl.innerHTML = `<span class="text-emerald-400/70">\u{1f512} ${t('channels.senderAllowlisted')}</span>`;
+          }
 
           setTimeout(() => {
             showStep(3);
             sendTestMessage();
-          }, 800);
+          }, 1200);
         }
       } catch (_) {}
     }, 3000);

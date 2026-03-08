@@ -413,11 +413,33 @@ def telegram_detect_chat():
                 if hasattr(prov, "default_chat_id"):
                     prov.default_chat_id = chat_id_str
 
+                sender_id_str = str(sender.get("id", ""))
+                added_to_allowlist = False
+                if sender_id_str:
+                    try:
+                        from ghost import load_config, save_config
+                        ghost_cfg = load_config()
+                        allowed = ghost_cfg.get("channel_allowed_senders", [])
+                        if sender_id_str not in allowed:
+                            allowed.append(sender_id_str)
+                            ghost_cfg["channel_allowed_senders"] = allowed
+                            save_config(ghost_cfg)
+                            added_to_allowlist = True
+
+                            from ghost_dashboard import get_daemon
+                            daemon = get_daemon()
+                            if daemon:
+                                daemon.cfg["channel_allowed_senders"] = allowed
+                    except Exception as exc:
+                        log.warning("Failed to auto-add sender to allowlist: %s", exc)
+
                 return jsonify({
                     "ok": True,
                     "chat_id": chat_id_str,
+                    "sender_id": sender_id_str,
                     "sender_name": sender_name,
                     "chat_type": chat.get("type", "private"),
+                    "added_to_allowlist": added_to_allowlist,
                 })
 
         return jsonify({"ok": False, "error": "no_messages"})

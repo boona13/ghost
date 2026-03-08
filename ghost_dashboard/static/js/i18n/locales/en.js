@@ -587,6 +587,7 @@ export default {
     createBotHint: "Don't have a bot? Message @BotFather on Telegram to create one.",
     invalidBotToken: "Invalid token — check that you copied the full token from @BotFather",
     telegramStep: "Step {n} of 3",
+    senderAllowlisted: "Your Telegram ID has been added to the allowlist",
   },
   future_features: {
     title: "Future Features", addFeature: "Add Feature",

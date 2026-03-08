@@ -587,6 +587,7 @@ export default {
     createBotHint: "还没有机器人？在 Telegram 上给 @BotFather 发消息来创建一个。",
     invalidBotToken: "无效令牌 — 请确认已完整复制 @BotFather 提供的令牌",
     telegramStep: "第 {n} 步，共 3 步",
+    senderAllowlisted: "你的 Telegram ID 已添加到允许列表",
   },
   future_features: {
     title: "未来功能", addFeature: "添加功能",
