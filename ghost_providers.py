@@ -143,8 +143,8 @@ PROVIDERS: dict[str, ProviderConfig] = {
         base_url="http://localhost:11434/v1/chat/completions",
         api_format="openai",
         auth_type="none",
-        default_model="llama3",
-        models=["llama3", "codellama", "mistral", "mixtral", "phi3"],
+        default_model="llama3.1",
+        models=["llama3.2", "llama3.1", "llama3", "codellama", "mistral", "mixtral", "phi3"],
         description="Run models locally — completely free",
     ),
     "deepseek": ProviderConfig(
@@ -167,6 +167,75 @@ PROVIDERS: dict[str, ProviderConfig] = {
 
 def get_provider(provider_id: str) -> ProviderConfig | None:
     return PROVIDERS.get(provider_id)
+
+
+def _normalize_ollama_model_name(name: str) -> str:
+    cleaned = (name or "").strip()
+    if not cleaned:
+        return ""
+    if cleaned.endswith(":latest"):
+        return cleaned[:-7]
+    return cleaned
+
+
+def _get_ollama_available_models(timeout: int = 3) -> list[str]:
+    try:
+        resp = requests.get("http://localhost:11434/api/tags", timeout=timeout)
+        resp.raise_for_status()
+        tags = resp.json().get("models", [])
+    except (requests.exceptions.RequestException, ValueError) as exc:
+        log.debug("Ollama model probe unavailable: %s", exc)
+        return []
+
+    names: list[str] = []
+    for item in tags:
+        if not isinstance(item, dict):
+            continue
+        normalized = _normalize_ollama_model_name(str(item.get("name", "")))
+        if normalized and normalized not in names:
+            names.append(normalized)
+    return names
+
+
+def _select_ollama_model(requested_model: str | None, provider_cfg: ProviderConfig) -> str:
+    installed = _get_ollama_available_models(timeout=3)
+    requested = _normalize_ollama_model_name(requested_model or "")
+    default = _normalize_ollama_model_name(provider_cfg.default_model)
+
+    if requested and requested in installed:
+        return requested
+    if default and default in installed:
+        if requested and requested != default:
+            log.warning(
+                "Ollama model '%s' not installed; switching to '%s'",
+                requested,
+                default,
+            )
+        return default
+
+    preferred = ["llama3.2", "llama3.1", "llama3", "mistral", "phi3", "codellama", "mixtral"]
+    for candidate in preferred:
+        for available in installed:
+            if available == candidate or available.startswith(candidate + ":") or available.startswith(candidate + "-"):
+                if requested and requested != available:
+                    log.warning(
+                        "Ollama model '%s' not installed; switching to '%s'",
+                        requested,
+                        available,
+                    )
+                return available
+
+    if installed:
+        fallback = installed[0]
+        if requested and requested != fallback:
+            log.warning(
+                "Ollama model '%s' not installed; switching to '%s'",
+                requested,
+                fallback,
+            )
+        return fallback
+
+    return requested or default or provider_cfg.default_model
 
 
 def validate_model_for_provider(provider_id: str, model: str) -> tuple[bool, str]:
@@ -292,7 +361,11 @@ def build_headers(provider: ProviderConfig, api_key: str = "") -> dict:
 def adapt_request(provider: ProviderConfig, payload: dict) -> dict:
     """Convert an OpenAI-format payload to the provider's native format."""
     if provider.api_format == "openai":
-        return _adapt_openai(provider, payload)
+        prepared = dict(payload)
+        if provider.id == "ollama":
+            selected_model = _select_ollama_model(prepared.get("model"), provider)
+            prepared["model"] = selected_model
+        return _adapt_openai(provider, prepared)
     elif provider.api_format == "anthropic":
         return _adapt_to_anthropic(payload)
     elif provider.api_format == "codex_responses":
