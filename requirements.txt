@@ -82,8 +82,9 @@ rembg>=2.0                # U2-Net background removal
 #   pip install git+https://github.com/openai/whisper.git
 openai-whisper>=20240930; sys_platform == "linux"  # Linux only (triton dep has no Windows/macOS wheels)
 
-# Document OCR (surya-ocr node)
-surya-ocr>=0.17           # Surya — 90+ language document OCR (Predictor API)
+# Document OCR (surya-ocr node) — optional, has Pillow version conflict with neonize
+# Install manually if needed: pip install surya-ocr>=0.17 (may require downgrading Pillow)
+# surya-ocr>=0.17           # Surya — 90+ language document OCR (Predictor API)
 
 # Music generation (music-gen node) — uses transformers MusicgenForConditionalGeneration
 scipy>=1.12               # Audio processing / wav file writing
