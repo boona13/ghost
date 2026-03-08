@@ -2037,41 +2037,30 @@ class GhostDaemon:
                 log.warning("Session maintenance failed: %s", e)
                 console_bus.emit("error", "cron", job_name, f"Session maintenance failed: {e}")
 
-    _CRON_JOB_LABELS = {
-        "_ghost_growth_tech_scout": "Tech Scout",
-        "_ghost_growth_health_check": "Health Check",
-        "_ghost_growth_user_context": "User Context Sync",
-        "_ghost_growth_skill_improver": "Skill Improver",
-        "_ghost_growth_soul_evolver": "Soul Evolver",
-        "_ghost_growth_bug_hunter": "Bug Hunter",
-        "_ghost_growth_competitive_intel": "AI Landscape Research",
-        "_ghost_growth_visual_monitor": "Visual Monitor",
-        "_ghost_growth_security_patrol": "Security Patrol",
-        "_ghost_growth_content_health": "Content Health Check",
-    }
-
     def _send_cron_summary(self, job, result, tools_used):
-        """Send a rich post-completion summary to messaging channels."""
+        """Use the LLM to compose a concise notification from the cron result."""
         job_name = job.get("name", "unnamed")
-        label = self._CRON_JOB_LABELS.get(job_name, job_name.replace("_ghost_growth_", "").replace("_", " ").title())
+        label = job_name.replace("_ghost_growth_", "").replace("_", " ").title()
         description = job.get("description", "")
 
-        clean = result.strip()
-        if len(clean) > 600:
-            clean = clean[:600].rsplit(" ", 1)[0] + "..."
-
-        lines = [f"*{label}*"]
-        if description:
-            lines.append(f"_{description}_")
-        lines.append("")
-        lines.append(clean)
-        if tools_used:
-            lines.append(f"\n`{len(tools_used)} tools used`")
-
+        prompt = (
+            f"You are Ghost, an autonomous AI agent. A scheduled task just finished.\n"
+            f"Task: {label}\n"
+            f"Description: {description}\n"
+            f"Tools used: {len(tools_used)}\n\n"
+            f"Full result:\n{result[:3000]}\n\n"
+            "Write a concise Telegram notification (3-8 lines) summarizing what was done "
+            "and any key findings. Use Markdown formatting. Lead with a bold title line. "
+            "Highlight anything that needs user attention. Be specific — include real data "
+            "points, not generic statements like 'all systems operational'. "
+            "Do NOT include greetings or sign-offs. Just the summary."
+        )
         try:
-            self.channel_router.send(
-                "\n".join(lines), priority="low", title=f"Ghost: {label}",
-            )
+            summary = self.llm.analyze("long_text", prompt)
+            if summary and not summary.startswith("LLM error"):
+                self.channel_router.send(
+                    summary, priority="low", title=f"Ghost: {label}",
+                )
         except Exception as exc:
             log.debug("Cron summary notification failed: %s", exc)
 
