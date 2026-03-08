@@ -115,6 +115,38 @@ ghost_webhooks.py               — Webhook triggers for external service integr
 ghost_integrations.py           — Third-party service integrations framework
 ghost_grok_api.py               — xAI Grok API integration
 ghost_x_tracker.py              — X/Twitter interaction tracking (anti-duplication)
+ghost_mcp.py                    — MCP client for external tool server integration
+
+# GhostNodes (AI Capability Plugins)
+ghost_node_manager.py           — Node lifecycle and execution management
+ghost_node_registry.py          — Node discovery and metadata registry
+ghost_node_sdk.py               — Node development SDK for community/bundled nodes
+ghost_nodes/                    — Bundled AI capability nodes (image, video, audio, vision, OCR, etc.)
+
+# Media & Storage
+ghost_media_store.py            — Media gallery storage, indexing, and retrieval
+
+# Task Delegation
+ghost_subagents.py              — Subagent task delegation and execution orchestration
+
+# Reasoning & Search
+ghost_reasoning.py              — Reasoning mode directives and prompt shaping
+ghost_query_expansion.py        — Query expansion for memory and web search quality
+
+# Version Control & Review
+ghost_git.py                    — Git helper operations (branch/checkout/merge/diff)
+ghost_pr.py                     — Internal pull-request and review workflow management
+
+# System & Platform
+ghost_resource_manager.py       — Runtime resource tracking and allocation safeguards
+ghost_platform.py               — Cross-platform process and OS utility helpers
+
+# Observability
+ghost_langfuse.py               — Langfuse tracing, telemetry, and observability tools
+
+# Generation Control
+ghost_interrupt.py              — Generation interrupt and prompt injection
+ghost_responses_capabilities.py — OpenAI Responses API integration for advanced skills
 
 # Security
 ghost_security_audit.py         — Security auditing and auto-remediation
@@ -122,6 +154,8 @@ ghost_tool_intent_security.py   — Tool intent signing and verification
 ghost_api_key_posture.py        — API key risk analysis
 ghost_secret_refs.py            — Secret reference management
 ghost_credentials.py            — Secure credential storage
+ghost_audit_log.py              — Security and configuration audit event logging
+ghost_device_auth.py            — Device authentication and linking flows
 
 # Diagnostics & Setup
 ghost_doctor.py                 — Health diagnostics and repair
@@ -141,6 +175,7 @@ ghost_shell_sessions.py         — Persistent shell session management
 ghost_console.py                — Console logging and output
 ghost_usage.py                  — Usage tracking and statistics
 ghost_uptime.py                 — Uptime monitoring
+ghost_session_export.py         — Session export and archive packaging
 
 # Growth & Intelligence
 ghost_tech_scout.py             — Technology scouting for new capabilities
@@ -151,6 +186,18 @@ ghost_implementation_auditor_filters.py — Audit deduplication and filtering lo
 ghost_tool_builder.py           — ToolManager, ToolAPI, ToolEventBus for ghost_tools/<name>/
 ghost_tools/                    — Isolated LLM-callable tools (each has TOOL.yaml + tool.py)
 ghost_community_hub.py          — Community Hub client: browse, install, publish nodes
+
+# Messaging Channels
+ghost_channels/                 — Multi-channel messaging integrations framework
+  __init__.py                   — Channel routing, config loading, and tool exports
+  health.py                     — Channel health checks and self-healing helpers
+  security.py                   — Inbound channel security filters and policy checks
+  directory.py                  — Contacts/groups/directory abstractions
+  gateway.py                    — Gateway lifecycle and transport connection management
+  threading_ext.py              — Thread/reply mapping and conversation linkage
+  actions.py                    — Channel actions (react, edit, delete, acknowledge)
+  agent_prompts.py              — Channel-specific prompt adaptation for agent replies
+  onboard.py                    — Channel onboarding and bootstrap flows
 
 # Dashboard
 ghost_dashboard/                — Flask web dashboard
