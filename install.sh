@@ -199,39 +199,58 @@ fi
 
 chmod +x "$GHOST_DIR/start.sh" "$GHOST_DIR/stop.sh" 2>/dev/null || true
 
-# ── 8. Done ──────────────────────────────────────────────────────────
+# ── 8. Done — start Ghost and open dashboard ─────────────────────────
 
 echo ""
 echo -e "  ${GRN}${B}════════════════════════════════════════════════════${RST}"
 echo -e "  ${GRN}${B}  Ghost installed successfully!${RST}"
 echo -e "  ${GRN}${B}════════════════════════════════════════════════════${RST}"
 echo ""
-echo -e "  ${B}Start Ghost:${RST}"
+echo -e "  ${B}Commands:${RST}"
 echo ""
-echo -e "    ${CYN}cd $GHOST_DIR && ./start.sh${RST}"
-echo ""
-echo -e "  ${B}Other commands:${RST}"
-echo ""
+echo -e "    ${CYN}cd $GHOST_DIR && ./start.sh${RST}    Start Ghost"
 echo -e "    ${CYN}./stop.sh${RST}                      Stop Ghost"
-echo -e "    ${CYN}source .venv/bin/activate${RST}"
-echo -e "    ${CYN}python ghost.py${RST}                 Start without supervisor"
 echo ""
 echo -e "  ${B}Dashboard:${RST}  ${CYN}http://localhost:3333${RST}"
-echo ""
-echo -e "  On first launch, Ghost creates default SOUL.md and USER.md."
-echo -e "  If no API key is set, the dashboard opens a ${B}setup wizard${RST}"
-echo -e "  to configure providers (OpenRouter, OpenAI, Anthropic, Gemini, etc.)."
 echo ""
 echo -e "  ${DIM}Docs: README.md | docs/ARCHITECTURE.md${RST}"
 echo ""
 
-# ── Offer to start now ───────────────────────────────────────────────
+step "Starting Ghost..."
 
-if [ "$NO_INTERACTIVE" = false ]; then
-  read -p "  Start Ghost now? [Y/n] " -n 1 -r
-  echo ""
-  if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-    echo ""
-    exec "$GHOST_DIR/start.sh"
+cd "$GHOST_DIR"
+nohup "$GHOST_DIR/start.sh" > /dev/null 2>&1 &
+GHOST_PID=$!
+
+ok "Ghost is starting in the background (PID $GHOST_PID)"
+echo ""
+
+# Wait for the dashboard to become available, then open it
+DASHBOARD_URL="http://localhost:3333"
+MAX_WAIT=60
+WAITED=0
+echo -e "    ${DIM}Waiting for dashboard...${RST}"
+
+while [ $WAITED -lt $MAX_WAIT ]; do
+  if curl -s -o /dev/null -w "%{http_code}" "$DASHBOARD_URL" 2>/dev/null | grep -q "200"; then
+    break
   fi
+  sleep 2
+  WAITED=$((WAITED + 2))
+done
+
+if [ $WAITED -lt $MAX_WAIT ]; then
+  ok "Dashboard is live at ${CYN}${DASHBOARD_URL}${RST}"
+  echo ""
+  # Open browser (works on macOS and most Linux desktops)
+  if command -v open &>/dev/null; then
+    open "$DASHBOARD_URL"
+  elif command -v xdg-open &>/dev/null; then
+    xdg-open "$DASHBOARD_URL"
+  fi
+  echo -e "  ${GRN}${B}Ghost is running! The dashboard should open in your browser.${RST}"
+else
+  warn "Dashboard not yet responding — Ghost may still be booting."
+  echo -e "    Open ${CYN}${DASHBOARD_URL}${RST} in your browser once it's ready."
 fi
+echo ""
