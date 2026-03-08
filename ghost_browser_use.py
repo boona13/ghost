@@ -45,6 +45,80 @@ except ImportError:
 
 log = logging.getLogger(__name__)
 
+
+# ── Ghost LLM integration ─────────────────────────────────────────────
+
+def _resolve_ghost_llm():
+    """Build a LangChain-compatible LLM from Ghost's configured provider.
+
+    Returns (llm_object, description_string) or (None, error_string).
+    Tries providers in order: primary, then any other configured OpenAI-compatible
+    or Anthropic provider.
+    """
+    try:
+        from ghost import load_config
+        from ghost_providers import PROVIDERS, get_provider
+        from ghost_auth_profiles import AuthProfileStore
+
+        cfg = load_config()
+        auth = AuthProfileStore()
+        primary_pid = cfg.get("primary_provider", "openrouter")
+        provider_models = cfg.get("provider_models", {})
+
+        candidates = [primary_pid] + [
+            pid for pid in PROVIDERS if pid != primary_pid
+        ]
+
+        last_err = "No compatible provider found"
+        for pid in candidates:
+            provider = get_provider(pid)
+            if not provider:
+                continue
+            if provider.api_format not in ("openai", "anthropic"):
+                continue
+
+            api_key = auth.get_api_key(pid)
+            if not api_key and provider.auth_type != "none":
+                continue
+
+            model = provider_models.get(pid, cfg.get("model", provider.default_model))
+
+            base_url = provider.base_url
+            if base_url.endswith("/chat/completions"):
+                base_url = base_url[: -len("/chat/completions")]
+
+            desc = f"{provider.name}: {model}"
+
+            if provider.api_format == "anthropic":
+                try:
+                    from langchain_anthropic import ChatAnthropic
+                    llm = ChatAnthropic(model=model, api_key=api_key)
+                    return llm, desc
+                except ImportError:
+                    last_err = "langchain-anthropic not installed"
+                    continue
+
+            try:
+                from langchain_openai import ChatOpenAI
+            except ImportError:
+                last_err = "langchain-openai not installed"
+                continue
+
+            kwargs = {"model": model, "base_url": base_url}
+            kwargs["api_key"] = api_key if api_key else "not-needed"
+            try:
+                llm = ChatOpenAI(**kwargs)
+                return llm, desc
+            except Exception as exc:
+                last_err = f"ChatOpenAI init failed for {pid}: {exc}"
+                continue
+
+        return None, last_err
+
+    except Exception as exc:
+        return None, f"Ghost LLM resolution failed: {exc}"
+
+
 # ── shared asyncio event loop (one per process) ────────────────────────
 _loop: Optional[asyncio.AbstractEventLoop] = None
 _loop_thread: Optional[threading.Thread] = None
@@ -251,18 +325,33 @@ async def _run_browser_task(
         browser = Browser(headless=headless)
         _set_runtime(session_id, "browser", browser)
 
-        try:
-            from langchain_openai import ChatOpenAI
-        except ImportError:
-            return {"success": False, "error": "langchain-openai not installed. Run: pip install langchain-openai"}
-
-        llm_kwargs: Dict[str, Any] = {"model": model or "gpt-4o"}
+        llm = None
         if api_key:
+            try:
+                from langchain_openai import ChatOpenAI
+            except ImportError:
+                return {"success": False, "error": "langchain-openai not installed. Run: pip install langchain-openai"}
+            llm_kwargs: Dict[str, Any] = {"model": model or "gpt-4o"}
             llm_kwargs["api_key"] = api_key
-        try:
-            llm = ChatOpenAI(**llm_kwargs)
-        except Exception as exc:
-            return {"success": False, "error": f"LLM init failed: {exc}"}
+            try:
+                llm = ChatOpenAI(**llm_kwargs)
+            except Exception as exc:
+                return {"success": False, "error": f"LLM init failed: {exc}"}
+        else:
+            ghost_llm, desc = _resolve_ghost_llm()
+            if ghost_llm:
+                llm = ghost_llm
+                log.info("Browser-use using Ghost LLM: %s", desc)
+            else:
+                try:
+                    from langchain_openai import ChatOpenAI
+                except ImportError:
+                    return {"success": False, "error": f"No Ghost LLM available ({desc}) and langchain-openai not installed"}
+                llm_kwargs_fb: Dict[str, Any] = {"model": model or "gpt-4o"}
+                try:
+                    llm = ChatOpenAI(**llm_kwargs_fb)
+                except Exception as exc:
+                    return {"success": False, "error": f"Ghost LLM unavailable ({desc}), OpenAI fallback also failed: {exc}"}
 
         agent = Agent(task=task, llm=llm, browser=browser)
         _set_runtime(session_id, "agent", agent)
@@ -500,7 +589,7 @@ def build_browser_use_tools(cfg=None):
         },
         {
             "name": "browser_use_run_task",
-            "description": "Run an AI-powered browser task using browser-use. The LLM will control the browser to complete the described task. Examples: 'Find the price of iPhone 15 on Amazon', 'Fill out the contact form and submit it', 'Extract all article titles from the news page'.",
+            "description": "Run an AI-powered browser task using browser-use. Uses Ghost's configured LLM by default. The LLM will control the browser to complete the described task. Examples: 'Find the price of iPhone 15 on Amazon', 'Fill out the contact form and submit it', 'Extract all article titles from the news page'.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -514,13 +603,13 @@ def build_browser_use_tools(cfg=None):
                     },
                     "api_key": {
                         "type": "string",
-                        "description": "Optional OpenAI API key (falls back to OPENAI_API_KEY env var)",
+                        "description": "Optional override API key (defaults to Ghost's configured provider)",
                         "default": None
                     },
                     "model": {
                         "type": "string",
-                        "description": "LLM model to use (default: gpt-4o)",
-                        "default": "gpt-4o"
+                        "description": "Optional override model (defaults to Ghost's configured model)",
+                        "default": None
                     },
                     "headless": {
                         "type": "boolean",

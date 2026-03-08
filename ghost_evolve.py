@@ -104,7 +104,13 @@ class EvolutionEngine:
         self._history = self._load_history()
         self._active_jobs_fn = None  # Set by GhostDaemon to check cron status
         self.tool_event_bus = None  # Set by GhostDaemon for hook emission
+        self._deploy_triggered = threading.Event()
         self._cleanup_orphaned_pending()
+
+    @property
+    def deploy_in_progress(self) -> bool:
+        """True once deploy() has written the deploy_pending marker."""
+        return self._deploy_triggered.is_set()
 
     def _cleanup_orphaned_pending(self):
         """Remove pending evolution files left over from a previous process.
@@ -277,6 +283,18 @@ class EvolutionEngine:
     def plan(self, description, files, cfg):
         """Create an evolution plan. Returns (evolution_id, info_dict)."""
         with self._lock:
+            for eid, evo in self._active_evolutions.items():
+                if evo.get("status") not in ("deployed", "rolled_back"):
+                    return None, {
+                        "error": (
+                            f"An evolution is already active: {eid} "
+                            f"(status={evo.get('status')}). "
+                            "Finish the current evolution before planning a new one. "
+                            "Use the existing evolution_id for evolve_apply/evolve_test/evolve_submit_pr."
+                        ),
+                        "active_evolution_id": eid,
+                    }
+
             limit = cfg.get("max_evolutions_per_hour", MAX_EVOLUTIONS_PER_HOUR)
             if not self._rate_check(limit=limit):
                 return None, {"error": f"Rate limit: max {limit} self-modifications per hour"}
@@ -1725,6 +1743,7 @@ class EvolutionEngine:
                 "timestamp": time.time(),
             }
             DEPLOY_MARKER.write_text(json.dumps(deploy_info, indent=2), encoding="utf-8")
+            self._deploy_triggered.set()
 
             if self.tool_event_bus:
                 try:
@@ -1739,7 +1758,9 @@ class EvolutionEngine:
         return True, (
             f"Evolution {evolution_id} deployed. "
             f"Ghost will restart momentarily. "
-            f"Backup at: {evo['backup_path']}"
+            f"Backup at: {evo['backup_path']}\n\n"
+            "DEPLOY COMPLETE — call task_complete NOW. "
+            "Do NOT call any more tools — the process is restarting."
         )
 
     def delete_file(self, evolution_id, file_path):
@@ -2470,8 +2491,8 @@ def build_evolve_tools(cfg):
         if ok:
             return (
                 f"{msg}\n\n"
-                "DEPLOY SUCCEEDED — you may NOW log this as a successful evolution "
-                "(memory_save, log_growth_activity). Do NOT log success before deploy confirms."
+                "DEPLOY SUCCEEDED — call task_complete NOW. "
+                "Do NOT call any more tools — the process is restarting."
             )
         return msg
 

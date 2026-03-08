@@ -14,8 +14,8 @@ from typing import Optional, Callable
 @dataclass
 class UsageSnapshot:
     """Snapshot of current usage state."""
-    model: str = "unknown"
-    provider: str = "unknown"
+    model: str = ""
+    provider: str = ""
     active: bool = False
     session_tokens: int = 0
     calls_this_session: int = 0

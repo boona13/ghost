@@ -73,6 +73,16 @@ def get_status():
             t = e.get("type", "unknown")
             types[t] = types.get(t, 0) + 1
 
+        session_tokens = 0
+        calls_this_session = 0
+        try:
+            from ghost_usage import get_usage_tracker
+            snap = get_usage_tracker().get_snapshot()
+            session_tokens = snap.session_tokens
+            calls_this_session = snap.calls_this_session
+        except Exception:
+            pass
+
         return jsonify({
             "running": running,
             "embedded": True,
@@ -84,6 +94,9 @@ def get_status():
             "today_actions": today_count,
             "type_breakdown": types,
             "model": model,
+            "primary_provider": cfg.get("primary_provider", ""),
+            "session_tokens": session_tokens,
+            "calls_this_session": calls_this_session,
             "features": {
                 "tool_loop": cfg.get("enable_tool_loop", True),
                 "memory": cfg.get("enable_memory_db", True),

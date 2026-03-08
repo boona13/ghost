@@ -274,6 +274,12 @@ class FutureFeaturesStore:
 
         for f in features:
             if f["id"] == feature_id:
+                current_status = f.get("status", "")
+                if current_status in (STATUS_IMPLEMENTED, STATUS_COMPLETED, STATUS_REJECTED) and not force:
+                    return False, (
+                        f"Feature is already {current_status} and cannot be re-started. "
+                        f"Use a new feature entry if re-implementation is needed."
+                    )
                 retry_after = f.get("retry_after")
                 if retry_after and not force:
                     try:

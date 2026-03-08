@@ -111,7 +111,7 @@ def run_task(session_id):
             session_id=session_id,
             task=task,
             api_key=data.get("api_key"),
-            model=data.get("model", "gpt-4o"),
+            model=data.get("model"),
             headless=data.get("headless", True),
         )
         return jsonify(result)
@@ -181,8 +181,23 @@ def take_screenshot(session_id):
 
 @bp.route("/api/browser-use/status", methods=["GET"])
 def get_status():
-    """Get browser-use availability status."""
+    """Get browser-use availability status and active LLM info."""
+    llm_info = {"provider": "", "model": "", "resolved": False}
+    if BROWSER_USE_AVAILABLE:
+        try:
+            from ghost_browser_use import _resolve_ghost_llm
+            llm, desc = _resolve_ghost_llm()
+            if llm:
+                llm_info["resolved"] = True
+                llm_info["description"] = desc
+                parts = desc.split(": ", 1)
+                if len(parts) == 2:
+                    llm_info["provider"] = parts[0]
+                    llm_info["model"] = parts[1]
+        except Exception:
+            pass
     return jsonify({
         "available": BROWSER_USE_AVAILABLE,
-        "message": "browser-use is installed" if BROWSER_USE_AVAILABLE else "browser-use not installed. Run: pip install browser-use"
+        "message": "browser-use is installed" if BROWSER_USE_AVAILABLE else "browser-use not installed. Run: pip install browser-use",
+        "llm": llm_info,
     })

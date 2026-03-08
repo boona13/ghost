@@ -175,30 +175,51 @@ window.addEventListener('hashchange', () => {
 });
 
 /* ── Usage Status Bar ─────────────────────────────────────────── */
+let _cachedStatusModel = null;
 async function updateUsageStatus() {
   const providerEl = document.getElementById('status-provider');
   const modelEl = document.getElementById('status-model');
   const activeDotEl = document.getElementById('status-active-dot');
   const tokensEl = document.getElementById('status-tokens');
-  
+
   if (!providerEl || !modelEl || !tokensEl) return;
-  
+
   try {
     const usage = await window.GhostAPI.get('/api/usage/live');
-    
-    providerEl.textContent = usage.provider || '—';
-    modelEl.textContent = usage.model || '—';
+
+    let provider = usage.provider || '';
+    let model = usage.model || '';
+
+    if (!provider || !model) {
+      if (!_cachedStatusModel) {
+        try {
+          const st = await window.GhostAPI.get('/api/status');
+          _cachedStatusModel = st.model || '';
+        } catch { _cachedStatusModel = ''; }
+      }
+      if (_cachedStatusModel && _cachedStatusModel.includes(':')) {
+        const parts = _cachedStatusModel.split(':');
+        provider = provider || parts[0];
+        model = model || parts.slice(1).join(':');
+      } else if (_cachedStatusModel) {
+        model = model || _cachedStatusModel;
+      }
+    } else {
+      _cachedStatusModel = null;
+    }
+
+    providerEl.textContent = provider || '\u2014';
+    modelEl.textContent = model || '\u2014';
     tokensEl.textContent = usage.session_tokens?.toLocaleString() || '0';
-    
+
     if (usage.active) {
       activeDotEl?.classList.remove('hidden');
     } else {
       activeDotEl?.classList.add('hidden');
     }
   } catch (err) {
-    // Silent fail - status bar is non-critical
-    providerEl.textContent = '—';
-    modelEl.textContent = '—';
+    providerEl.textContent = '\u2014';
+    modelEl.textContent = '\u2014';
     activeDotEl?.classList.add('hidden');
   }
 }

@@ -13,6 +13,11 @@ export async function render(container) {
     <div class="page-header">${t('browser_use.title')}</div>
     <div class="page-desc">${t('browser_use.subtitle')}</div>
     
+    <div id="bu-llm-info" class="flex items-center gap-2 mb-4 text-xs text-zinc-400">
+      <span>${t('browser_use.poweredBy')}:</span>
+      <span id="bu-llm-label" class="badge badge-zinc">${t('common.loading')}</span>
+    </div>
+    
     <div id="bu-status-banner" class="stat-card mb-4 hidden">
       <div class="text-zinc-300 text-sm">
         ${t('browser_use.notInstalled')}
@@ -379,6 +384,23 @@ export async function render(container) {
   });
   observer.observe(document.body, { childList: true, subtree: true });
 
+  // Fetch LLM status
+  async function loadLlmStatus() {
+    const llmLabel = container.querySelector('#bu-llm-label');
+    try {
+      const data = await api.get('/api/browser-use/status');
+      if (data.llm?.resolved) {
+        llmLabel.textContent = data.llm.description || `${data.llm.provider} / ${data.llm.model}`;
+        llmLabel.className = 'badge badge-green';
+      } else {
+        llmLabel.textContent = t('browser_use.noLlmConfigured');
+        llmLabel.className = 'badge badge-yellow';
+      }
+    } catch {
+      llmLabel.textContent = '\u2014';
+    }
+  }
+
   // Initial load
-  await loadSessions();
+  await Promise.all([loadSessions(), loadLlmStatus()]);
 }

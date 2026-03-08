@@ -2163,6 +2163,16 @@ class ToolLoopEngine:
                 exit_reason = "cancelled"
                 break
 
+            try:
+                from ghost_evolve import get_engine as _get_evo_engine
+                if _get_evo_engine().deploy_in_progress:
+                    if not final_text:
+                        final_text = "(Deploy triggered — Ghost is restarting.)"
+                    exit_reason = "deploy"
+                    break
+            except Exception:
+                pass
+
             if step % 10 == 0:
                 _ctx_logger.log_context_snapshot(
                     step=step, total_messages=len(messages),
@@ -2288,6 +2298,23 @@ class ToolLoopEngine:
             if msg.get("tool_calls") and tool_registry:
                 self._consecutive_text_only = 0
                 for tc in msg["tool_calls"]:
+                    # If a deploy was triggered by a prior tool in this batch,
+                    # skip remaining calls — Ghost is about to restart.
+                    try:
+                        from ghost_evolve import get_engine as _get_evo_engine
+                        if _get_evo_engine().deploy_in_progress:
+                            _debug_logger.step_error(step,
+                                "Skipping remaining tool calls — deploy in progress")
+                            tc_id = tc.get("id", f"tc_{step}_skipped")
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc_id,
+                                "content": "SKIPPED — deploy in progress, Ghost is restarting.",
+                            })
+                            continue
+                    except Exception:
+                        pass
+
                     fn_name = str(tc.get("function", {}).get("name", "")).strip()
                     raw_args = tc.get("function", {}).get("arguments", "{}")
                     try:

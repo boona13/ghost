@@ -53,7 +53,7 @@ def _skill_source(skill_path):
     return "other"
 
 
-def _build_skill_status(skill, disabled_skills):
+def _build_skill_status(skill, disabled_skills, cfg=None):
     """Build a full status report for a single skill."""
     requires = skill.requires or {}
 
@@ -76,6 +76,11 @@ def _build_skill_status(skill, disabled_skills):
 
     eligible = (not disabled) and os_ok and (not missing_bins) and (not missing_env)
 
+    overrides = (cfg or {}).get("skill_model_overrides", {})
+    config_model = overrides.get(skill.name)
+    frontmatter_model = skill.model or None
+    effective = config_model or frontmatter_model or None
+
     return {
         "name": skill.name,
         "description": skill.description or "",
@@ -88,7 +93,9 @@ def _build_skill_status(skill, disabled_skills):
         "disabled": disabled,
         "eligible": eligible,
         "os_ok": os_ok,
-        "model": skill.model,  # Per-skill model override
+        "model": frontmatter_model,
+        "model_override": config_model or None,
+        "effective_model": effective,
         "requirements": {
             "bins": req_bins,
             "env": req_env,
@@ -108,7 +115,7 @@ def list_skills():
 
     skills = []
     for s in loader.list_all():
-        skills.append(_build_skill_status(s, disabled_skills))
+        skills.append(_build_skill_status(s, disabled_skills, cfg))
     skills.sort(key=lambda x: x["name"])
 
     bundled = [s for s in skills if s["source"] == "bundled"]
@@ -150,7 +157,7 @@ def get_skill(name):
 
     cfg = load_config()
     disabled_skills = set(cfg.get("disabled_skills", []))
-    status = _build_skill_status(skill, disabled_skills)
+    status = _build_skill_status(skill, disabled_skills, cfg)
     status["content"] = content
 
     return jsonify(status)
@@ -182,7 +189,48 @@ def update_skill(name):
         cfg["disabled_skills"] = sorted(disabled)
         save_config(cfg)
 
+    if "model" in data:
+        cfg = load_config()
+        overrides = cfg.get("skill_model_overrides", {})
+        model_val = (data["model"] or "").strip()
+        if model_val:
+            from ghost_skills import validate_skill_model
+            is_valid, result = validate_skill_model(model_val)
+            if not is_valid:
+                return jsonify({"error": f"Invalid model: {result}"}), 400
+            overrides[name] = result
+        else:
+            overrides.pop(name, None)
+        cfg["skill_model_overrides"] = overrides
+        save_config(cfg)
+
     return jsonify({"ok": True})
+
+
+@bp.route("/api/skills/model-options")
+def skill_model_options():
+    """Return available model aliases, providers, and the current default model."""
+    from ghost_skills import _get_model_aliases
+    cfg = load_config()
+
+    aliases = _get_model_aliases()
+    default_model = cfg.get("model", "google/gemini-2.0-flash-001")
+
+    providers = []
+    try:
+        from ghost_providers import PROVIDERS
+        for pid, pinfo in PROVIDERS.items():
+            models = pinfo.models or []
+            if models:
+                providers.append({"id": pid, "models": models})
+    except Exception:
+        pass
+
+    return jsonify({
+        "aliases": aliases,
+        "default_model": default_model,
+        "providers": providers,
+    })
 
 
 # Registry (GhostHub) endpoints

@@ -339,7 +339,7 @@ function renderSkillCard(s, u) {
   if (s.disabled) statusChips += '<span class="badge badge-zinc">' + t('skills.disabled') + '</span>';
   if (hasMissing) statusChips += '<span class="badge badge-yellow">' + t('skills.missingReqs') + '</span>';
   if (!s.os_ok) statusChips += '<span class="badge badge-red">' + t('skills.wrongOs') + '</span>';
-  if (s.model) statusChips += `<span class="badge badge-purple" title="${u.escapeHtml(s.model)}">${t('skills.modelOverride')}</span>`;
+  if (s.effective_model) statusChips += `<span class="badge badge-purple" title="${u.escapeHtml(s.effective_model)}">${t('skills.modelOverride')}</span>`;
 
   let reqsHtml = '';
   if (s.requirements.bins.length || s.requirements.env.length) {
@@ -405,7 +405,10 @@ function closeSkillModal() {
 }
 
 async function openSkillDetail(name, api, u) {
-  const data = await api.get('/api/skills/' + name);
+  const [data, modelOpts] = await Promise.all([
+    api.get('/api/skills/' + name),
+    api.get('/api/skills/model-options'),
+  ]);
   if (data.error) { u.toast(data.error, 'error'); return; }
 
   expandedSkill = name;
@@ -418,14 +421,6 @@ async function openSkillDetail(name, api, u) {
   metaHtml += '<div><span class="text-zinc-500">' + t('common.status') + ':</span> <span class="' + (data.eligible ? 'text-emerald-400' : 'text-amber-400') + '">' + (data.eligible ? t('skills.eligible') : t('skills.notEligible')) + '</span></div>';
   metaHtml += '<div><span class="text-zinc-500">' + t('common.enabled') + ':</span> <span class="' + (data.disabled ? 'text-red-400' : 'text-emerald-400') + '">' + (data.disabled ? t('common.no') : t('common.yes')) + '</span></div>';
   metaHtml += '</div>';
-  
-  if (data.model) {
-    metaHtml += '<div class="mt-3 p-2 rounded bg-purple-500/5 border border-purple-500/20">';
-    metaHtml += '<span class="text-[10px] text-purple-400 font-semibold uppercase tracking-wider">' + t('skills.modelOverrideLabel') + '</span>';
-    metaHtml += '<div class="text-xs text-purple-300 mt-1 font-mono">' + u.escapeHtml(data.model) + '</div>';
-    metaHtml += '<div class="text-[10px] text-zinc-500 mt-1">' + t('skills.modelOverrideDesc') + '</div>';
-    metaHtml += '</div>';
-  }
 
   if (data.triggers.length) {
     metaHtml += '<div class="mt-3"><span class="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider">' + t('skills.triggersLabel') + '</span><div class="flex flex-wrap gap-1 mt-1">'
@@ -447,6 +442,43 @@ async function openSkillDetail(name, api, u) {
 
   metaHtml += '<div class="mt-2 text-[10px] text-zinc-600 font-mono">' + u.escapeHtml(data.path) + '</div>';
 
+  // Build model dropdown options
+  const aliases = modelOpts.aliases || {};
+  const defaultModel = modelOpts.default_model || '';
+  const providers = modelOpts.providers || [];
+  const currentValue = data.model_override || '';
+
+  let modelSelectHtml = `
+    <div class="skill-model-selector mt-4 mb-4">
+      <label class="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider block mb-1.5">${t('skills.modelSelectLabel')}</label>
+      <p class="text-[10px] text-zinc-600 mb-2">${t('skills.modelSelectDesc')}</p>
+      <select id="skill-model-select" class="skill-model-dropdown">
+        <option value="">${t('skills.modelDefault')} (${u.escapeHtml(defaultModel)})</option>
+        <optgroup label="${t('skills.modelAliasesGroup')}">`;
+
+  for (const [alias, resolved] of Object.entries(aliases)) {
+    const shortModel = resolved.split('/').slice(-1)[0];
+    const selected = currentValue === resolved ? ' selected' : '';
+    modelSelectHtml += `<option value="${u.escapeHtml(resolved)}"${selected}>${alias} (${u.escapeHtml(shortModel)})</option>`;
+  }
+  modelSelectHtml += '</optgroup>';
+
+  for (const p of providers) {
+    modelSelectHtml += `<optgroup label="${u.escapeHtml(p.id)}">`;
+    for (const m of p.models) {
+      const fullId = p.id + '/' + m;
+      const selected = currentValue === fullId ? ' selected' : '';
+      modelSelectHtml += `<option value="${u.escapeHtml(fullId)}"${selected}>${u.escapeHtml(m)}</option>`;
+    }
+    modelSelectHtml += '</optgroup>';
+  }
+  modelSelectHtml += '</select>';
+
+  if (data.model && !data.model_override) {
+    modelSelectHtml += `<div class="text-[10px] text-purple-400 mt-1.5">${t('skills.modelFromFrontmatter')} <span class="font-mono">${u.escapeHtml(data.model)}</span></div>`;
+  }
+  modelSelectHtml += '</div>';
+
   const existing = document.getElementById('skill-modal-overlay');
   if (existing) existing.remove();
 
@@ -462,6 +494,7 @@ async function openSkillDetail(name, api, u) {
         </button>
       </div>
       <div class="mb-4">${metaHtml}</div>
+      ${modelSelectHtml}
       <textarea id="detail-editor" class="editor-textarea" style="min-height:320px">${u.escapeHtml(data.content)}</textarea>
       <div class="flex gap-3 mt-4 justify-end">
         <button id="btn-cancel-skill-modal" class="btn btn-secondary btn-sm">${t('common.cancel')}</button>
@@ -482,7 +515,13 @@ async function openSkillDetail(name, api, u) {
   overlay.querySelector('#btn-save-skill').addEventListener('click', async () => {
     if (!expandedSkill) return;
     const content = overlay.querySelector('#detail-editor').value;
-    await api.put('/api/skills/' + expandedSkill, { content });
+    const selectedModel = overlay.querySelector('#skill-model-select').value;
+    const payload = { content, model: selectedModel };
+    const result = await api.put('/api/skills/' + expandedSkill, payload);
+    if (result.error) {
+      u.toast(result.error, 'error');
+      return;
+    }
     u.toast(t('skills.skillSaved'));
     closeSkillModal();
   });

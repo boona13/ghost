@@ -299,6 +299,11 @@ _EVOLVE_TOOL_NAMES = frozenset({
     "evolve_submit_pr",
 })
 
+_FEATURE_MUTATE_TOOL_NAMES = frozenset({
+    "start_future_feature", "complete_future_feature",
+    "fail_future_feature", "evolve_resume",
+})
+
 _FEATURE_IMPLEMENTER_JOB = "_ghost_growth_feature_implementer"
 _IMPLEMENTATION_AUDITOR_JOB = "_ghost_growth_implementation_auditor"
 
@@ -1574,6 +1579,22 @@ class GhostDaemon:
         "browser_use_navigate", "browser_use_get_html", "browser_use_screenshot",
     })
 
+    def _resolve_skill_model(self, matched_skills):
+        """Return the effective model override for matched skills.
+
+        Priority: config skill_model_overrides > SKILL.md frontmatter model > None
+        """
+        if not matched_skills:
+            return None
+        overrides = self.cfg.get("skill_model_overrides", {})
+        for skill in matched_skills:
+            config_override = overrides.get(skill.name)
+            if config_override:
+                return config_override
+            if skill.model:
+                return skill.model
+        return None
+
     def _cleanup_browser_after_task(self, tools_used: list):
         """Close browser windows opened during a tool loop session.
 
@@ -1899,9 +1920,10 @@ class GhostDaemon:
                     impl_names = [t for t in _IMPLEMENTER_TOOLS if t in available]
                     registry = self.tool_registry.subset(impl_names)
                 else:
+                    excluded = _EVOLVE_TOOL_NAMES | _FEATURE_MUTATE_TOOL_NAMES
                     safe_names = [
                         name for name in self.tool_registry.get_all()
-                        if name not in _EVOLVE_TOOL_NAMES
+                        if name not in excluded
                     ]
                     registry = self.tool_registry.subset(safe_names)
 
@@ -2289,13 +2311,7 @@ class GhostDaemon:
                 if name not in _EVOLVE_TOOL_NAMES
             ]
             inbound_registry = self.tool_registry.subset(inbound_names)
-            # Determine if any matched skill has a model override
-            skill_model = None
-            if matched_skills:
-                for skill in matched_skills:
-                    if skill.model:
-                        skill_model = skill.model
-                        break
+            skill_model = self._resolve_skill_model(matched_skills)
 
             loop_result = self.engine.run(
                 system_prompt=system_prompt,
@@ -2411,13 +2427,7 @@ class GhostDaemon:
                     if valid_names:
                         tool_reg = tool_reg.subset(valid_names)
 
-            # Determine if any matched skill has a model override
-            skill_model = None
-            if matched_skills:
-                for skill in matched_skills:
-                    if skill.model:
-                        skill_model = skill.model
-                        break
+            skill_model = self._resolve_skill_model(matched_skills)
 
             loop_result = self.engine.run(
                 system_prompt=system_prompt,
@@ -2529,12 +2539,7 @@ class GhostDaemon:
             tool_reg = self.tool_registry.subset(valid) if valid else None
 
             # Determine if any matched skill has a model override
-            skill_model = None
-            if matched_skills:
-                for skill in matched_skills:
-                    if skill.model:
-                        skill_model = skill.model
-                        break
+            skill_model = self._resolve_skill_model(matched_skills)
 
             loop_result = self.engine.run(
                 system_prompt=system_prompt,

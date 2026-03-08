@@ -223,7 +223,7 @@ class GhostSupervisor:
             # .kill() also maps to TerminateProcess — both are safe cross-platform.
             self.process.send_signal(signal.SIGTERM)
             try:
-                self.process.wait(timeout=10)
+                self.process.wait(timeout=30)
             except subprocess.TimeoutExpired:
                 log("Ghost did not stop in time, force-killing")
                 self.process.kill()
