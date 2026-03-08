@@ -49,7 +49,6 @@ from ghost_future_features import build_future_features_tools, FutureFeaturesSto
 from ghost_email import build_email_tools
 from ghost_hybrid_memory import build_hybrid_memory_tools
 from ghost_code_intel import build_code_intel_tools
-from ghost_code_index import build_code_index_tools, get_code_index
 from ghost_data_extract import build_data_extract_tools
 from ghost_sandbox import build_sandbox_tools, docker_available
 from ghost_x_tracker import build_x_tracker_tools
@@ -941,7 +940,6 @@ class GhostDaemon:
                 provider_chain=provider_chain,
                 usage_tracker=self.usage_tracker,
             )
-            self.chat_engine._is_chat_priority = True
 
         # New: Tool registry (security: strict mode prevents tool shadowing)
         strict_tools = cfg.get("strict_tool_registration", False)
@@ -965,14 +963,6 @@ class GhostDaemon:
         self.memory_db = None
         if not dry_run and cfg.get("enable_memory_db", True):
             self.memory_db = MemoryDB()
-            try:
-                expired = self.memory_db.expire_old_memories(
-                    max_age_days=cfg.get("memory_expiry_days", 28)
-                )
-                if expired:
-                    log.info("Expired %d old memories (>%d days)", expired, cfg.get("memory_expiry_days", 28))
-            except Exception:
-                pass
             self.tool_registry.register(make_memory_search(self.memory_db))
             self.tool_registry.register(make_memory_save(self.memory_db))
 
@@ -1227,11 +1217,6 @@ class GhostDaemon:
         if cfg.get("enable_code_intel", True):
             for tool_def in build_code_intel_tools():
                 self.tool_registry.register(tool_def)
-
-        # Code Index tools (AST-based repo map and symbol lookup)
-        self.code_index = get_code_index()
-        for tool_def in build_code_index_tools(cfg, self.code_index):
-            self.tool_registry.register(tool_def)
 
         # Data Extraction tools (structured data from text)
         if cfg.get("enable_data_extract", True):
@@ -1490,6 +1475,8 @@ class GhostDaemon:
                 self.tool_registry.register(tool_def)
         except Exception as e:
             print(f"  [pr] Failed to initialize: {e}")
+
+        self.mcp_manager = None  # MCP removed
 
         # Focused Delegation — fresh-context research and verification
         if cfg.get("enable_subagents", True):
@@ -1823,14 +1810,6 @@ class GhostDaemon:
             )
             if self.cfg.get("enable_tool_loop", True) and self.tool_registry.get_all():
                 is_evolution_runner = job.get("name") == _FEATURE_IMPLEMENTER_JOB
-                if is_evolution_runner and self.cfg.get("evolution_mode", "legacy") == "phased":
-                    try:
-                        from ghost_autonomy import run_phased_evolution
-                        run_phased_evolution(self)
-                        return
-                    except Exception as exc:
-                        log.error("Phased evolution failed, falling back to legacy: %s", exc)
-
                 if is_evolution_runner:
                     _IMPLEMENTER_TOOLS = [
                         # Evolve tools (the whole point of this routine)
@@ -1845,7 +1824,6 @@ class GhostDaemon:
                         # Code reading & searching
                         "file_read", "file_search", "file_write",
                         "grep", "glob", "find_code_patterns",
-                        "code_symbol_lookup", "code_symbol_list",
                         "shell_exec",
                         "shell_session", "shell_bg_start",
                         "shell_bg_status", "shell_bg_kill",
@@ -1883,6 +1861,7 @@ class GhostDaemon:
                         tool_registry=registry,
                         max_steps=self.cfg.get("tool_loop_max_steps", 200),
                         max_tokens=4096,
+                        force_tool=True,
                         on_step=terminal_step,
                         hook_runner=self.hooks,
                         tool_intent_security=self.tool_intent_security,

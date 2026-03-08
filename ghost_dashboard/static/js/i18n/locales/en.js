@@ -2,17 +2,17 @@
 export default {
   nav: {
     chat: "Chat", overview: "Overview", feed: "Activity Feed", console: "Console",
-    soul: "Personality", user: "User Profile", memory: "Memory", projects: "Projects",
-    models: "Models", skills: "Skills", autonomy: "Growth & Tasks", evolve: "Self-Improvement",
-    prs: "Pull Requests", future_features: "Roadmap", channels: "Channels",
+    soul: "Soul", user: "User Profile", memory: "Memory", projects: "Projects",
+    models: "Models", skills: "Skills", autonomy: "Autonomy", evolve: "Evolution",
+    prs: "Pull Requests", future_features: "Future Features", channels: "Channels",
     webhooks: "Webhooks", integrations: "Integrations",
     langfuse: "Observability", browser_use: "AI Browser", accounts: "Accounts",
-    config: "Settings", cron: "Scheduled Tasks", security: "Security", pairing: "Device Pairing",
-    nodes: "AI Nodes", gallery: "Media Gallery", audit: "Audit Log",
+    config: "Configuration", cron: "Cron Jobs", security: "Security", pairing: "Device Pairing",
+    nodes: "AI Nodes", gallery: "Media Gallery",
   },
   sections: {
-    monitor: "Monitor", intelligence: "Intelligence", capabilities: "Tools",
-    connections: "Connections", system: "System", advanced: "Advanced",
+    monitor: "Monitor", intelligence: "Intelligence", capabilities: "Capabilities",
+    connections: "Connections", system: "System",
   },
   sidebar: {
     subtitle: "Autonomous AI Agent", collapse: "Collapse sidebar", expand: "Expand sidebar",
@@ -45,7 +45,7 @@ export default {
   },
   status: {
     connected: "Connected", disconnected: "Disconnected", checking: "Checking...",
-    currentModel: "Model", sessionTokens: "tokens",
+    currentModel: "Current Model", sessionTokens: "Session Tokens",
     ready: "Ready", idle: "Idle", running: "Running",
     paused: "PAUSED", stopped: "STOPPED", runningStatus: "RUNNING",
     runningPid: "Running (PID {pid})", restarting: "Restarting...",
@@ -54,7 +54,7 @@ export default {
   overview: {
     title: "Overview", subtitle: "Ghost daemon status and quick controls",
     status: "Status", model: "Model:", today: "Today", allTime: "all time",
-    tools: "Tools", skills: "Skills", memory: "Memory", cronJobs: "Scheduled",
+    tools: "Tools", skills: "Skills", memory: "Memory", cronJobs: "Cron Jobs",
     uptime: "Uptime", features: "Features", typeBreakdown: "Type Breakdown",
     recentActivity: "Recent Activity", noActivity: "No activity yet",
     reload: "Reload", resume: "Resume", pause: "Pause", restart: "Restart",
@@ -80,9 +80,6 @@ export default {
     toggleCanvas: "Toggle Canvas", canvas: "Canvas",
     noProject: "No Project (global)",
     noMessages: "No messages yet", typeBelow: "Type below or use voice to talk to Ghost",
-    newSessionTitle: "New session",
-    hintCapabilities: "What can you do?", hintProject: "Help me with my project",
-    hintWeb: "Search the web", hintMemory: "Remember something about me",
     attachFile: "Attach file", messagePlaceholder: "Message Ghost...",
     pushToTalk: "Push to talk", toggleReasoning: "Toggle reasoning mode (/think)",
     sendEnter: "Send (Enter)", enterToSend: "Press Enter to send, Shift+Enter for new line",
@@ -107,8 +104,7 @@ export default {
     rejectedCancelled: "Rejected — evolution cancelled.",
     toolSteps: "tool steps",
     interruptedMessage: "(Ghost was interrupted before completing this request)",
-    stepProgress: "Step {n}: {tool}...", waitingApproval: "Waiting for approval...",
-    streaming: "Streaming...",
+    stepProgress: "Step {n}: {tool}...", streaming: "Streaming response...", waitingApproval: "Waiting for approval...",
     noResponse: "(No response)", metaInfo: "{tools} tools, {elapsed}s",
     stepN: "Step {n}", voicePrefix: "Voice: {error}",
     processingSteps: "Processing... {n} steps",
@@ -157,7 +153,7 @@ export default {
     removed: "removed",
   },
   config: {
-    title: "Settings", subtitle: "All Ghost settings in one place",
+    title: "Configuration", subtitle: "All Ghost settings — saved to ~/.ghost/config.json",
     general: "General", features: "Features", voice: "Voice",
     growth: "Growth", security: "Security", modelsTab: "Models",
     timingLimits: "Timing & Limits", pollInterval: "Poll Interval (s)",
@@ -332,7 +328,7 @@ export default {
     cpModels: "Models", cpResolutions: "Resolutions", cpDurations: "Durations",
   },
   soul: {
-    title: "Personality", subtitle: "Define Ghost's personality, tone, and boundaries",
+    title: "Soul", subtitle: "Ghost's personality, tone, and boundaries — injected into every prompt",
     saveSoul: "Save SOUL.md", resetDefault: "Reset to Default",
     resetConfirm: "Reset SOUL.md to default? Your current soul will be lost.",
     saved: "SOUL.md saved", resetDone: "SOUL.md reset",
@@ -374,7 +370,7 @@ export default {
     binaries: "Binaries: ", envVars: "Env vars: ",
   },
   cron: {
-    title: "Scheduled Tasks", subtitle: "Automated tasks that run on a schedule",
+    title: "Cron Jobs", subtitle: "Scheduled tasks that run automatically",
     totalJobs: "Total Jobs", enabledJobs: "Enabled", nextWake: "Next Wake",
     addNewJob: "Add New Job", jobName: "Name", jobNamePlaceholder: "e.g. news-check",
     scheduleType: "Schedule Type",
@@ -405,7 +401,7 @@ export default {
     allCount: "All ({n})", noActivity: "No activity",
   },
   evolve: {
-    title: "Self-Improvement", subtitle: "Ghost can modify its own codebase, test changes, and deploy them safely",
+    title: "Self-Evolution", subtitle: "Ghost can modify its own codebase, test changes, and deploy them safely",
     evolutions: "evolution(s)",
     deployed: "Deployed", rolledBack: "Rolled Back", backups: "Backups",
     history: "History", pendingApprovals: "Pending Approvals",
@@ -495,7 +491,7 @@ export default {
     toolSecurityAuditDesc: "Security scanning & auto-fix",
   },
   autonomy: {
-    title: "Growth & Tasks", subtitle: "Ghost's autonomous growth system — action items and activity log",
+    title: "Autonomy", subtitle: "Ghost's autonomous growth system — self-improvement, action items, and activity log",
     crashDetected: "Crash Detected",
     crashMsg: "Exit code {code} — Ghost is attempting self-repair (crash #{n})",
     actionItems: "Action Items", noActionItems: "No pending action items",
@@ -576,7 +572,7 @@ export default {
     failedLoadSchema: "Failed to load schema: {error}",
   },
   future_features: {
-    title: "Roadmap", addFeature: "Add Feature",
+    title: "Future Features", addFeature: "Add Feature",
     subtitle: "Autonomous feature backlog — Tech Scout and Competitive Intel add features here. Feature Implementer runs daily to implement them.",
     activeCount: "Active", pendingCount: "Pending",
     needApproval: "Need Approval", implemented: "Implemented",

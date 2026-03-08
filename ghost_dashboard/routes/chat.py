@@ -202,7 +202,7 @@ class ChatSession:
         self.pending_approval = None
         self.cancelled = False
         self.enable_reasoning = enable_reasoning
-        self.streaming_text = ""
+        self.token_chunks: list[str] = []
 
 
 def _build_chat_history(daemon, max_turns=10):
@@ -445,8 +445,11 @@ def _process_message(session, daemon):
             "- You have unlimited tool calls. Use as many as needed. There is no step limit.\n"
             "- If one approach fails (timeout, error, missing package), try another immediately.\n"
             "- NEVER hallucinate or make up information. Only state facts you have VERIFIED from a primary source.\n"
-            "- **CRITICAL**: When the task is DONE, you MUST call `task_complete(summary='...')` to end your turn. "
-            "Do NOT respond with a plain text message — always use `task_complete`.\n\n"
+            "- When the task is DONE, respond with your final answer. "
+            "You may either call `task_complete(summary='...')` or reply with a plain text message — both work. "
+            "Start directly with the answer — "
+            "NEVER begin with filler like 'You're right', 'Sure', 'Of course', 'Alright', etc. "
+            "Use second person (you/your).\n\n"
             "## AVAILABLE TOOLS\n" + ", ".join(tool_names) + "\n\n"
             "## TOOL GUIDE\n"
             "**Memory**: memory_search, memory_save\n"
@@ -491,7 +494,7 @@ def _process_message(session, daemon):
             "6. NEVER state facts you haven't verified from a primary source.\n"
             "7. For personal recall → memory_search first, memory_save for new info\n"
             "8. Be autonomous. Don't ask the user for help mid-task.\n"
-            "9. After completing ALL parts of the task, give a concise summary.\n"
+            "9. After completing ALL parts of the task, reply directly to the user with what you did and the result.\n"
             "10. For self-modification / code change tasks → use `add_future_feature(title, description, priority='P0', source='user_request')` "
             "to queue the work. The Evolution Runner will implement it. Check status with `list_future_features`.\n"
             "11. **COMPLETENESS**: Never do half the work. Every feature must be complete across ALL layers "
@@ -591,9 +594,8 @@ def _process_message(session, daemon):
 
         def on_step(step_num, tool_name, tool_result):
             import re
+            session.token_chunks.clear()
             result_str = str(tool_result)[:500]
-            if tool_name != "task_complete":
-                session.streaming_text = ""
             session.steps.append({
                 "step": step_num,
                 "tool": tool_name,
@@ -660,50 +662,8 @@ def _process_message(session, daemon):
                     if scoped_names:
                         chat_registry = chat_registry.subset(scoped_names)
 
-            _CORE_CHAT_TOOLS = {
-                "task_complete", "memory_search", "memory_save",
-                "web_search", "web_fetch", "shell_exec",
-                "file_read", "file_write", "file_search",
-                "grep", "glob", "notify", "uptime", "app_control",
-                "add_future_feature", "list_future_features",
-                "get_future_feature", "get_feature_stats",
-                "project_list", "project_get", "project_resolve",
-                "add_action_item", "log_growth_activity",
-            }
-            _MEDIA_KEYWORDS = {
-                "image", "photo", "picture", "video", "audio", "voice",
-                "music", "sound", "upscale", "enhance", "inpaint", "depth",
-                "ocr", "transcribe", "animate", "style transfer", "background",
-                "face", "kling", "runway", "minimax", "generate video",
-                "generate image", "text to image", "text to video",
-                "remove background", "clone voice", "tts", "speak",
-                "screenshot", "browse", "open", "navigate", "canvas",
-            }
-            msg_lower = session.user_message.lower()
-            needs_full_tools = any(kw in msg_lower for kw in _MEDIA_KEYWORDS)
-
-            if not needs_full_tools and not active_project:
-                core_names = [n for n in chat_registry.names() if n in _CORE_CHAT_TOOLS]
-                if core_names:
-                    chat_registry = chat_registry.subset(core_names)
-
-            _stream_raw = []
-
-            def on_token(delta):
-                _stream_raw.append(delta)
-                raw = "".join(_stream_raw)
-                import re as _re
-                m = _re.search(r'"summary"\s*:\s*"((?:[^"\\]|\\.)*)"?', raw)
-                if m:
-                    text = m.group(1)
-                    text = (text
-                            .replace("\\n", "\n")
-                            .replace("\\t", "\t")
-                            .replace('\\"', '"')
-                            .replace("\\\\", "\\"))
-                    session.streaming_text = text
-                elif not raw.lstrip().startswith("{"):
-                    session.streaming_text = raw
+            def on_token(chunk: str):
+                session.token_chunks.append(chunk)
 
             engine = getattr(daemon, "chat_engine", None) or daemon.engine
             loop_result = engine.run(
@@ -1044,11 +1004,11 @@ def message_status(message_id):
 
 @bp.route("/api/chat/stream/<message_id>")
 def stream_status(message_id):
-    """SSE endpoint for real-time step updates with token streaming."""
+    """SSE endpoint for real-time step and token-level updates."""
     def generate():
         last_step_count = 0
         last_progress_count = 0
-        last_stream_len = 0
+        last_token_count = 0
         approval_sent = False
         while True:
             with _chat_lock:
@@ -1068,14 +1028,13 @@ def stream_status(message_id):
                 for step in new_steps:
                     yield f"data: {json.dumps({'type': 'step', 'step': step})}\n\n"
                 last_step_count = len(session.steps)
+                last_token_count = len(session.token_chunks)
 
-            cur_stream = session.streaming_text
-            if len(cur_stream) < last_stream_len:
-                last_stream_len = 0
-            if cur_stream and len(cur_stream) > last_stream_len:
-                delta = cur_stream[last_stream_len:]
-                last_stream_len = len(cur_stream)
-                yield f"data: {json.dumps({'type': 'token', 'text': delta})}\n\n"
+            cur_token_count = len(session.token_chunks)
+            if cur_token_count > last_token_count:
+                batch = "".join(session.token_chunks[last_token_count:cur_token_count])
+                yield f"data: {json.dumps({'type': 'token', 'text': batch})}\n\n"
+                last_token_count = cur_token_count
 
             if session.pending_approval and not approval_sent:
                 yield f"data: {json.dumps({'type': 'approval_needed', 'approval': session.pending_approval})}\n\n"
@@ -1088,7 +1047,7 @@ def stream_status(message_id):
                 yield f"data: {json.dumps({'type': 'error', 'error': session.error})}\n\n"
                 return
 
-            time.sleep(0.3)
+            time.sleep(0.1)
 
     return Response(generate(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

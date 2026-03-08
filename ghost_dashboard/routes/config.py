@@ -13,12 +13,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from ghost import CONFIG_FILE, load_config, save_config, DEFAULT_CONFIG
 
+bp = Blueprint("config", __name__)
+
 
 def _get_daemon():
     from ghost_dashboard import get_daemon
     return get_daemon()
-
-bp = Blueprint("config", __name__)
 
 
 def _notify_daemon():

@@ -15,7 +15,6 @@ import shutil
 import subprocess
 import sys
 import tarfile
-import tempfile
 import threading
 import time
 import uuid
@@ -158,13 +157,6 @@ class EvolutionEngine:
         )
         max_per_hour = limit if limit is not None else MAX_EVOLUTIONS_PER_HOUR
         return recent < max_per_hour
-
-    @staticmethod
-    def _invalidate_test_state(evo):
-        """Any new change invalidates prior test results until evolve_test re-runs."""
-        evo["test_results"] = None
-        if evo.get("approved"):
-            evo["status"] = "approved"
 
     def _classify_level(self, files):
         """Determine modification level from file paths."""
@@ -395,26 +387,6 @@ class EvolutionEngine:
         self.reject(evolution_id)
         return False, "Timed out waiting for approval (5 minutes). Evolution cancelled."
 
-    def _atomic_write(self, file_path: Path, content: str):
-        """Atomically write content to file_path using temp file + rename.
-
-        If the write fails, the original file remains intact.
-        Uses os.replace() which is atomic on all platforms including Windows.
-        """
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        fd, temp_path = tempfile.mkstemp(dir=file_path.parent, suffix='.tmp')
-        try:
-            with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                f.write(content)
-            os.replace(temp_path, file_path)
-        except (OSError, IOError) as exc:
-            log.warning("Atomic write failed for %s: %s", file_path, exc)
-            try:
-                os.unlink(temp_path)
-            except FileNotFoundError:
-                pass
-            raise
-
     def apply_change(self, evolution_id, file_path, content=None, patches=None,
                      append=False):
         """Apply a code change to a file.
@@ -538,7 +510,7 @@ class EvolutionEngine:
             )
 
         abs_path.parent.mkdir(parents=True, exist_ok=True)
-        self._atomic_write(abs_path, new_content)
+        abs_path.write_text(new_content, encoding="utf-8")
 
         diff = list(difflib.unified_diff(
             old_content.splitlines(keepends=True),
@@ -553,7 +525,6 @@ class EvolutionEngine:
             "diff": diff_text[:5000],
             "timestamp": datetime.now().isoformat(),
         })
-        self._invalidate_test_state(evo)
 
         change_count = len(evo["changes"])
         msg = f"Applied change to {rel_path} ({len(new_content)} bytes). [{change_count} file(s) changed] "
@@ -608,7 +579,7 @@ class EvolutionEngine:
 
         old_values = {k: old_cfg.get(k, "(unset)") for k in updates}
         new_cfg = {**old_cfg, **updates}
-        self._atomic_write(config_file, json.dumps(new_cfg, indent=2))
+        config_file.write_text(json.dumps(new_cfg, indent=2), encoding="utf-8")
 
         diff_lines = []
         for k, new_val in updates.items():
@@ -622,7 +593,6 @@ class EvolutionEngine:
             "old_values": old_values,
             "timestamp": datetime.now().isoformat(),
         })
-        self._invalidate_test_state(evo)
 
         change_count = len(evo["changes"])
         msg = (
@@ -1264,8 +1234,6 @@ class EvolutionEngine:
         directories that were part of the evolution and removes them from
         both disk and git.
         """
-        import ghost_git
-
         evo = self._active_evolutions.get(evolution_id, {})
         tool_dirs_to_remove = set()
 
@@ -1750,12 +1718,6 @@ class EvolutionEngine:
             self._save_history()
             self._active_evolutions.pop(evolution_id, None)
 
-            try:
-                from ghost_code_index import get_code_index
-                get_code_index().rebuild()
-            except Exception:
-                pass
-
             deploy_info = {
                 "evolution_id": evolution_id,
                 "feature_id": feature_id,
@@ -1814,7 +1776,6 @@ class EvolutionEngine:
             "diff": f"(deleted file, was {len(old_content)} bytes)",
             "timestamp": datetime.now().isoformat(),
         })
-        self._invalidate_test_state(evo)
 
         self._log_intentional_deletion(evolution_id, rel_path)
 

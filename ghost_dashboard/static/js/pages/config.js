@@ -4,22 +4,7 @@ const t = (key, params) => window.GhostI18n?.t(key, params) ?? key;
 
 export async function render(container) {
   const { GhostAPI: api, GhostUtils: u } = window;
-  let data;
-  try {
-    data = await api.get('/api/config');
-  } catch (err) {
-    container.innerHTML = `
-      <h1 class="page-header">${t('config.title')}</h1>
-      <div class="stat-card mt-6">
-        <div class="flex items-center gap-3 text-amber-400 mb-3">
-          <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
-          <span class="text-lg font-semibold">Unable to load settings</span>
-        </div>
-        <p class="text-zinc-400 text-sm mb-4">Ghost may still be starting up, or there's a temporary issue with the configuration API.</p>
-        <button onclick="window.location.reload()" class="px-4 py-2 bg-ghost-600 hover:bg-ghost-500 text-white text-sm rounded-lg transition-colors">Retry</button>
-      </div>`;
-    return;
-  }
+  const data = await api.get('/api/config');
   const cfg = data.config;
   const defs = data.defaults;
 
@@ -29,7 +14,7 @@ export async function render(container) {
     return `<div class="flex items-center justify-between py-2">
       <div>
         <span class="text-sm text-zinc-300">${displayLabel}</span>
-        ${desc ? `<div class="text-[10px] text-zinc-500 mt-0.5 leading-snug">${desc}</div>` : ''}
+        ${desc ? `<div class="text-[10px] text-zinc-600 mt-0.5">${desc}</div>` : ''}
       </div>
       <div class="toggle ${on ? 'on' : ''}" data-toggle="${key}"><span class="toggle-dot"></span></div>
     </div>`;
@@ -110,27 +95,7 @@ export async function render(container) {
       <div class="stat-card">
         <h3 class="text-sm font-semibold text-white mb-3">${t('config.featureToggles')}</h3>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8">
-          ${toggle('enable_tool_loop', 'Tool Loop', 'Let Ghost chain multiple tool calls to complete complex tasks')}
-          ${toggle('enable_memory_db', 'Memory', 'Remember facts, preferences, and context across conversations')}
-          ${toggle('enable_plugins', 'Plugins', 'Load and run third-party plugin extensions')}
-          ${toggle('enable_skills', 'Skills', 'Use built-in skill modules for specialized tasks')}
-          ${toggle('enable_system_tools', 'System Tools', 'Access shell commands, file operations, and system utilities')}
-          ${toggle('enable_browser_tools', 'Browser Tools', 'Scrape web pages and extract content from URLs')}
-          ${toggle('enable_browser_use', 'AI Browser', 'Control a real browser to interact with websites')}
-          ${toggle('enable_channels', 'Channels', 'Connect to Telegram, Discord, Slack, and other messaging platforms')}
-          ${toggle('enable_cron', 'Scheduled Tasks', 'Run automated tasks on a timer (health checks, growth routines)')}
-          ${toggle('enable_evolve', 'Self-Improvement', 'Allow Ghost to modify its own code, test changes, and deploy updates')}
-          ${toggle('enable_future_features', 'Roadmap', 'Track and auto-implement planned features from the backlog')}
-          ${toggle('enable_integrations', 'Integrations', 'Connect to external services like GitHub, Google, and APIs')}
-          ${toggle('enable_web_search', 'Web Search', 'Search the internet for real-time information')}
-          ${toggle('enable_web_fetch', 'Web Fetch', 'Download and read content from specific web pages')}
-          ${toggle('enable_image_gen', 'Image Generation', 'Create images from text descriptions using AI models')}
-          ${toggle('enable_vision', 'Vision', 'Analyze and understand images, screenshots, and visual content')}
-          ${toggle('enable_tts', 'Text-to-Speech', 'Convert text responses to spoken audio')}
-          ${toggle('enable_canvas', 'Canvas', 'Generate interactive HTML visualizations and demos')}
-          ${toggle('enable_security_audit', 'Security Audit', 'Periodically scan for vulnerabilities and misconfigurations')}
-          ${toggle('enable_session_memory', 'Session Memory', 'Maintain context within the current conversation session')}
-          ${toggle('enable_langfuse', 'Observability', 'Track token usage, latency, and performance with Langfuse')}
+          ${['enable_tool_loop','enable_memory_db','enable_plugins','enable_skills','enable_system_tools','enable_browser_tools','enable_browser_use','enable_channels','enable_cron','enable_evolve','enable_future_features','enable_integrations','enable_web_search','enable_web_fetch','enable_image_gen','enable_vision','enable_tts','enable_canvas','enable_security_audit','enable_session_memory','enable_langfuse'].map(k => toggle(k)).join('')}
         </div>
       </div>
 

@@ -992,14 +992,6 @@ class ReviewEngine:
             reviewer_registry.register(tool_def)
 
         try:
-            from ghost_code_index import build_code_index_tools, get_code_index
-            for tool_def in build_code_index_tools({}, get_code_index()):
-                if tool_def["name"] == "code_symbol_lookup":
-                    reviewer_registry.register(tool_def)
-        except Exception:
-            pass
-
-        try:
             result = engine.run(
                 system_prompt=system_prompt,
                 user_message=context_message,
@@ -1035,16 +1027,12 @@ class ReviewEngine:
         if not verdict:
             log.warning("Reviewer did not call submit_review — deriving verdict from comments")
             verdict = self._derive_verdict_from_pr(updated_pr)
-            summary = self._build_auto_summary(updated_pr, verdict)
-            round_num = updated_pr.get("review_rounds", 1) or 1
-            if summary:
-                self.store.add_discussion(pr_id, "reviewer", summary, round_num)
             if verdict == "approved":
                 self.store.set_verdict(pr_id, "approved")
             elif verdict == "blocked":
-                self.store.set_verdict(pr_id, "blocked", summary or "Auto-derived: critical issues found")
+                self.store.set_verdict(pr_id, "blocked", "Auto-derived: critical issues found")
             else:
-                self.store.set_verdict(pr_id, "rejected", summary or "Auto-derived from reviewer comments")
+                self.store.set_verdict(pr_id, "rejected", "Auto-derived from reviewer comments")
 
         log.info("PR %s verdict: %s", pr_id, verdict)
 
@@ -1079,53 +1067,6 @@ class ReviewEngine:
             return "rejected"
 
         return "approved"
-
-    @staticmethod
-    def _build_auto_summary(pr: dict, verdict: str) -> str:
-        """Build a human-readable summary from inline comments and suggestions
-        when the reviewer LLM failed to call submit_review."""
-        comments = pr.get("inline_comments", [])
-        suggestions = pr.get("suggested_changes", [])
-
-        if not comments and not suggestions:
-            return ""
-
-        parts = [f"[Auto-derived verdict: {verdict.upper()}]", ""]
-
-        if comments:
-            by_severity: dict[str, list] = {}
-            for c in comments:
-                sev = c.get("severity", "info").lower()
-                by_severity.setdefault(sev, []).append(c)
-
-            for sev in ("critical", "high", "warning", "low", "info"):
-                group = by_severity.get(sev, [])
-                if not group:
-                    continue
-                parts.append(f"### {sev.upper()} ({len(group)})")
-                for c in group[:5]:
-                    file = c.get("file", "?")
-                    line = c.get("line", "?")
-                    msg = c.get("message", "").strip()
-                    if len(msg) > 200:
-                        msg = msg[:200] + "..."
-                    parts.append(f"- **{file}:{line}** — {msg}")
-                if len(group) > 5:
-                    parts.append(f"- _...and {len(group) - 5} more_")
-                parts.append("")
-
-        if suggestions:
-            parts.append(f"### Suggested Changes ({len(suggestions)})")
-            for s in suggestions[:5]:
-                file = s.get("file", "?")
-                expl = s.get("explanation", "").strip()
-                if len(expl) > 200:
-                    expl = expl[:200] + "..."
-                parts.append(f"- **{file}** — {expl}")
-            if len(suggestions) > 5:
-                parts.append(f"- _...and {len(suggestions) - 5} more_")
-
-        return "\n".join(parts)
 
 
 # ── Singleton ────────────────────────────────────────────────────────

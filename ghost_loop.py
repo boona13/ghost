@@ -14,7 +14,6 @@ import random
 import re as _re
 import time
 import hashlib
-import threading as _threading
 import uuid
 import requests
 import traceback
@@ -24,46 +23,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+try:
+    from ghost_providers import get_provider, adapt_response, parse_codex_sse_response, build_headers, adapt_request
+except ImportError:
+    get_provider = adapt_response = parse_codex_sse_response = build_headers = adapt_request = None
+
 log = logging.getLogger("ghost.loop")
-
-# ═════════════════════════════════════════════════════════════════════
-#  CHAT PRIORITY — interactive chat gets exclusive LLM API access
-# ═════════════════════════════════════════════════════════════════════
-# Chat and background tasks (cron, evolve) share the same API key and
-# provider rate limits.  When chat is active, background engines PAUSE
-# their LLM calls entirely (up to CHAT_PRIORITY_WAIT_S) so chat gets
-# full API bandwidth.  This prevents cron traffic from starving chat.
-#
-# _chat_idle is SET when no chat is running (background may proceed)
-# and CLEARED when chat is active (background must wait).
-
-_chat_priority_lock = _threading.Lock()
-_chat_active_count = 0
-_chat_idle = _threading.Event()
-_chat_idle.set()
-CHAT_PRIORITY_WAIT_S = 60
-
-
-def _acquire_chat_priority():
-    """Signal that an interactive chat LLM session is active."""
-    global _chat_active_count
-    with _chat_priority_lock:
-        _chat_active_count += 1
-        _chat_idle.clear()
-
-
-def _release_chat_priority():
-    """Signal that an interactive chat LLM session has ended."""
-    global _chat_active_count
-    with _chat_priority_lock:
-        _chat_active_count = max(0, _chat_active_count - 1)
-        if _chat_active_count == 0:
-            _chat_idle.set()
-
-
-def is_chat_active() -> bool:
-    """Check if an interactive chat session is currently active."""
-    return not _chat_idle.is_set()
 
 
 def _build_date_context() -> str:
@@ -84,20 +49,31 @@ def _build_date_context() -> str:
     )
 
 MAX_RETRIES = 2
+RATE_LIMIT_MAX_RETRIES = 6   # rate limits deserve more patience than server errors
 RETRY_DELAY = 1.5
+RATE_LIMIT_BASE_DELAY = 5.0  # longer base delay for 429s
 DEFAULT_MAX_TOKENS = 4096
 DEFAULT_TOOL_RESULT_LIMIT = 6000
-CONNECT_TIMEOUT = 10
-STREAM_READ_TIMEOUT = 30      # max silence between SSE chunks (seconds)
-DEFAULT_TIMEOUT = 30           # legacy non-streaming fallback
-MAX_LLM_WALL_CLOCK = 120      # wall clock safety net (streaming makes this rarely hit)
+DEFAULT_TIMEOUT = 30
+MAX_LLM_WALL_CLOCK = 180     # generous deadline — streaming keeps connection alive
 DEFAULT_MAX_STEPS = 200
-FALLBACK_COOLDOWN_SEC = 60    # 1 min before probing failed model again
-FALLBACK_PROBE_INTERVAL = 15  # probe every 15s so primary recovers quickly
+FALLBACK_COOLDOWN_SEC = 60    # base cooldown — escalates with consecutive failures
+FALLBACK_PROBE_INTERVAL = 30  # probe every 30s (OpenClaw MIN_PROBE_INTERVAL_MS)
 NETWORK_COOLDOWN_SEC = 10     # short cooldown for DNS/connection errors (transient)
 JITTER_FACTOR = 0.3           # ±30% randomness on retry delays
 
 GHOST_HOME = Path.home() / ".ghost"
+
+_DEFERRAL_RE = _re.compile(
+    r"(?:if you (?:want|like|prefer|need),? I can|would you like me to|let me know"
+    r"|I couldn'?t (?:reliably|find|access|extract|get|fetch|retrieve|determine)"
+    r"|I wasn'?t able to|I don'?t have (?:access|enough)"
+    r"|unable to (?:find|access|extract|fetch|retrieve|get)"
+    r"|I can (?:try|do) (?:a |that |this )?(?:next|instead|as a follow)"
+    r"|I can do a (?:browser|deeper|second|follow))",
+    _re.IGNORECASE,
+)
+_MIN_TOOLS_BEFORE_ACCEPT_DEFERRAL = 4
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -105,12 +81,15 @@ GHOST_HOME = Path.home() / ".ghost"
 # ═════════════════════════════════════════════════════════════════════
 
 class ModelFallbackChain:
-    """Provider-aware model fallback with cooldown-aware probing.
+    """Provider-aware model fallback with escalating cooldowns and probing.
 
-    Each entry in the chain is a (provider_id, model) tuple.
-    When a model fails, falls through to the next in the chain.
-    Periodically probes failed models to detect recovery.
+    Mirrors OpenClaw's model-fallback.ts:
+    - Escalating cooldowns: 60s → 300s → 1500s → 3600s (based on error count)
+    - Probe during cooldown every 30s to detect recovery
+    - Error counts reset on success (circuit breaker half-open → closed)
     """
+
+    _COOLDOWN_ESCALATION = (60, 300, 1500, 3600)  # 1m → 5m → 25m → 1h max
 
     def __init__(self, primary: str, fallbacks: list[str] | None = None,
                  cooldown_sec: float = FALLBACK_COOLDOWN_SEC,
@@ -122,7 +101,8 @@ class ModelFallbackChain:
             self._chain = [("openrouter", m) for m in [primary] + (fallbacks or [])]
         self._cooldown_sec = cooldown_sec
         self._probe_interval = probe_interval
-        self._failures: dict[str, float] = {}
+        self._failures: dict[str, float] = {}       # key → timestamp of last failure
+        self._error_counts: dict[str, int] = {}      # key → consecutive error count
         self._last_probe: dict[str, float] = {}
         self._active: tuple[str, str] = self._chain[0] if self._chain else ("openrouter", primary)
         self._stats: dict[str, dict] = {self._key(e): {"ok": 0, "fail": 0} for e in self._chain}
@@ -180,14 +160,22 @@ class ModelFallbackChain:
             "active": f"{self._active[0]}:{self._active[1]}",
             "chain": [f"{e[0]}:{e[1]}" for e in self._chain],
             "failures": {k: round(time.time() - t) for k, t in self._failures.items()},
+            "cooldowns": {k: int(self._effective_cooldown(k)) for k in self._failures},
+            "error_counts": dict(self._error_counts),
             "stats": dict(self._stats),
         }
+
+    def _effective_cooldown(self, key: str) -> float:
+        """Escalating cooldown based on consecutive error count (OpenClaw pattern)."""
+        count = self._error_counts.get(key, 0)
+        idx = min(count - 1, len(self._COOLDOWN_ESCALATION) - 1) if count > 0 else 0
+        return self._COOLDOWN_ESCALATION[idx]
 
     def _is_in_cooldown(self, key: str) -> bool:
         fail_time = self._failures.get(key)
         if fail_time is None:
             return False
-        return (time.time() - fail_time) < self._cooldown_sec
+        return (time.time() - fail_time) < self._effective_cooldown(key)
 
     def _should_probe(self, key: str) -> bool:
         if not self._is_in_cooldown(key):
@@ -224,6 +212,7 @@ class ModelFallbackChain:
         self._stats.setdefault(k, {"ok": 0, "fail": 0})
         self._stats[k]["ok"] += 1
         self._failures.pop(k, None)
+        self._error_counts.pop(k, None)  # full reset on success (circuit breaker close)
         self._active = (provider, model)
 
     @staticmethod
@@ -234,31 +223,33 @@ class ModelFallbackChain:
             "ConnectionRefusedError", "ConnectionResetError", "ConnectionError",
             "Max retries exceeded", "NewConnectionError", "gaierror",
             "Response ended prematurely", "stream error", "Timeout on",
-            "HTTP 429", "HTTP 502", "HTTP 503", "HTTP 529",
+            "HTTP 502", "HTTP 503", "HTTP 529",
         )
         return any(m in error for m in transient_markers)
 
     @staticmethod
-    def _is_timeout_error(error: str) -> bool:
-        """Detect timeout failures (OpenClaw pattern: skip cooldown for timeouts)."""
-        timeout_markers = ("Timeout", "no data for", "timed out", "deadline exceeded")
-        return any(m in error for m in timeout_markers)
+    def _is_rate_limit(error: str) -> bool:
+        return "HTTP 429" in error or "rate limit" in error.lower()
 
     def record_failure(self, provider: str, model: str, error: str = ""):
         k = f"{provider}:{model}"
         self._stats.setdefault(k, {"ok": 0, "fail": 0})
         self._stats[k]["fail"] += 1
-        if self._is_timeout_error(error):
-            log.warning("%s:%s timeout (%s), no cooldown (try next candidate immediately)",
-                        provider, model, error[:80])
-        elif self._is_transient_error(error):
-            self._failures[k] = time.time() - (self._cooldown_sec - NETWORK_COOLDOWN_SEC)
+        self._error_counts[k] = self._error_counts.get(k, 0) + 1
+        if self._is_transient_error(error):
+            self._failures[k] = time.time() - (self._effective_cooldown(k) - NETWORK_COOLDOWN_SEC)
             log.warning("%s:%s transient error (%s), short cooldown %ds",
                         provider, model, error[:80], NETWORK_COOLDOWN_SEC)
+        elif self._is_rate_limit(error):
+            self._failures[k] = time.time()
+            cd = self._effective_cooldown(k)
+            log.warning("%s:%s rate limited (%s), cooldown %ds (error #%d)",
+                        provider, model, error[:80], int(cd), self._error_counts[k])
         else:
             self._failures[k] = time.time()
-            log.warning("%s:%s failed (%s), entering cooldown %ds",
-                        provider, model, error[:80], int(self._cooldown_sec))
+            cd = self._effective_cooldown(k)
+            log.warning("%s:%s failed (%s), entering cooldown %ds (error #%d)",
+                        provider, model, error[:80], int(cd), self._error_counts[k])
         self._last_probe[k] = time.time()
 
     def remove_from_chain(self, provider: str, model: str):
@@ -274,124 +265,50 @@ class ModelFallbackChain:
 
 
 def _jittered_delay(base: float, attempt: int) -> float:
-    """Exponential backoff with jitter: base * (attempt+1) * (1 ± JITTER_FACTOR)."""
-    delay = base * (attempt + 1)
+    """Exponential backoff with jitter: base * 2^attempt * (1 ± JITTER_FACTOR)."""
+    delay = base * (2 ** attempt)
     jitter = delay * JITTER_FACTOR * (2 * random.random() - 1)
-    return max(0.5, delay + jitter)
+    return max(0.5, min(delay + jitter, 120.0))
 
 
-# ═════════════════════════════════════════════════════════════════════
-#  SSE STREAMING — accumulate deltas into a complete response
-# ═════════════════════════════════════════════════════════════════════
-# OpenClaw always streams LLM calls so the per-chunk read timeout
-# catches dead connections quickly (seconds) instead of waiting for
-# a full-response timeout (90s).  We adopt the same pattern.
-
-def _accumulate_sse_stream(response, on_token=None) -> dict:
-    """Read an SSE stream and return a Chat Completions-style response dict.
-
-    The SSE format from OpenRouter/OpenAI streaming:
-      data: {"choices":[{"delta":{"content":"tok"}}]}
-      data: {"choices":[{"delta":{"tool_calls":[...]}}]}
-      data: [DONE]
-
-    Deltas are accumulated into a single message with complete content
-    and tool_calls, matching the non-streaming response format so the
-    rest of the engine doesn't need to change.
-
-    If *on_token* is provided, it is called with each text-content delta
-    so callers can forward partial text to the UI in real time.
-    For tool calls, *on_token* receives the ``summary`` argument of
-    ``task_complete`` as it streams in.
-    """
-    role = "assistant"
-    content_parts: list[str] = []
-    tool_calls_by_idx: dict[int, dict] = {}
-    finish_reason = None
-    usage = {}
-    model = ""
-    resp_id = ""
-
-    _tc_name_complete = {}
-
-    for raw_line in response.iter_lines():
-        if not raw_line:
-            continue
-        line = raw_line.decode("utf-8", errors="replace") if isinstance(raw_line, bytes) else raw_line
-        if not line.startswith("data: "):
-            continue
-        data_str = line[6:]
-        if data_str.strip() == "[DONE]":
-            break
+def _parse_retry_after(resp) -> float | None:
+    """Extract wait time from Retry-After or x-ratelimit-reset-* headers."""
+    if resp is None:
+        return None
+    headers = getattr(resp, "headers", {})
+    ra = headers.get("Retry-After") or headers.get("retry-after")
+    if ra:
         try:
-            chunk = json.loads(data_str)
-        except (json.JSONDecodeError, ValueError):
-            continue
-
-        if not resp_id and chunk.get("id"):
-            resp_id = chunk["id"]
-        if not model and chunk.get("model"):
-            model = chunk["model"]
-        if chunk.get("usage"):
-            usage = chunk["usage"]
-
-        choices = chunk.get("choices", [])
-        if not choices:
-            continue
-        choice = choices[0]
-        delta = choice.get("delta", {})
-
-        if delta.get("role"):
-            role = delta["role"]
-        if delta.get("content"):
-            content_parts.append(delta["content"])
-            if on_token:
-                try:
-                    on_token(delta["content"])
-                except Exception:
-                    pass
-        if choice.get("finish_reason"):
-            finish_reason = choice["finish_reason"]
-
-        for tc_delta in delta.get("tool_calls", []):
-            idx = tc_delta.get("index", 0)
-            if idx not in tool_calls_by_idx:
-                tool_calls_by_idx[idx] = {
-                    "id": tc_delta.get("id", ""),
-                    "type": tc_delta.get("type", "function"),
-                    "function": {"name": "", "arguments": ""},
-                }
-            tc = tool_calls_by_idx[idx]
-            if tc_delta.get("id"):
-                tc["id"] = tc_delta["id"]
-            fn_delta = tc_delta.get("function", {})
-            if fn_delta.get("name"):
-                tc["function"]["name"] += fn_delta["name"]
-                if tc["function"]["name"] == "task_complete":
-                    _tc_name_complete[idx] = True
-            if fn_delta.get("arguments"):
-                tc["function"]["arguments"] += fn_delta["arguments"]
-                if on_token and _tc_name_complete.get(idx):
-                    try:
-                        on_token(fn_delta["arguments"])
-                    except Exception:
-                        pass
-
-    message: dict = {"role": role, "content": "".join(content_parts) or None}
-    if tool_calls_by_idx:
-        message["tool_calls"] = [tool_calls_by_idx[i] for i in sorted(tool_calls_by_idx)]
-    if not message.get("content") and not message.get("tool_calls"):
-        message["content"] = ""
-
-    return {
-        "id": resp_id,
-        "model": model,
-        "choices": [{"message": message, "finish_reason": finish_reason or "stop"}],
-        "usage": usage,
-    }
+            return float(ra)
+        except (ValueError, TypeError):
+            pass
+    for hdr in ("x-ratelimit-reset-requests", "x-ratelimit-reset-tokens"):
+        val = headers.get(hdr)
+        if val:
+            try:
+                secs = _parse_duration_to_secs(val)
+                if secs and secs > 0:
+                    return secs
+            except (ValueError, TypeError):
+                pass
+    return None
 
 
-_STREAMING_BLACKLIST_PROVIDERS = {"openai-codex"}
+def _parse_duration_to_secs(s: str) -> float | None:
+    """Parse duration strings like '6m30s', '45s', '2m' into seconds."""
+    import re
+    total = 0.0
+    for amount, unit in re.findall(r'(\d+(?:\.\d+)?)\s*(h|m|s|ms)', s):
+        v = float(amount)
+        if unit == "h":
+            total += v * 3600
+        elif unit == "m":
+            total += v * 60
+        elif unit == "s":
+            total += v
+        elif unit == "ms":
+            total += v / 1000
+    return total if total > 0 else None
 DEBUG_LOG_DIR = GHOST_HOME / "logs"
 DEBUG_LOG_FILE = DEBUG_LOG_DIR / "tool_loop_debug.jsonl"
 MAX_DEBUG_LOG_SIZE = 10 * 1024 * 1024  # 10MB before rotation
@@ -677,41 +594,6 @@ class EvolveContextLogger:
         })
         self._write(rec)
 
-    # ── Phase tracking (multi-phase evolution) ────────────────────
-
-    def log_phase_start(self, phase_name: str, feature_id: str):
-        """Log the start of an evolution phase."""
-        rec = self._base()
-        rec.update({
-            "event": "phase_start",
-            "phase": phase_name,
-            "phase_feature_id": feature_id,
-        })
-        self._write(rec)
-
-    def log_phase_end(self, phase_name: str, steps_used: int,
-                      tokens_used: int = 0, success: bool = True):
-        """Log the completion of an evolution phase."""
-        rec = self._base()
-        rec.update({
-            "event": "phase_end",
-            "phase": phase_name,
-            "steps_used": steps_used,
-            "tokens_used": tokens_used,
-            "success": success,
-        })
-        self._write(rec)
-
-    def log_scratch_file_write(self, feature_id: str, sections: list[str]):
-        """Log what was written to a scratch file between phases."""
-        rec = self._base()
-        rec.update({
-            "event": "scratch_file_write",
-            "phase_feature_id": feature_id,
-            "sections": sections[:10],
-        })
-        self._write(rec)
-
     # ── Skill compliance ─────────────────────────────────────────
 
     def log_skill_compliance(self, role: str, tool_calls: list,
@@ -879,44 +761,22 @@ KNOWN_POLL_TOOLS = {"shell_exec", "browser"}
 KNOWN_POLL_ACTIONS = {"snapshot", "content", "screenshot", "poll", "log", "status"}
 WARNING_BUCKET_SIZE = 10
 
-def _check_incomplete_workflows(tool_calls_log: list, available_tools: set[str] | None = None) -> str | None:
+def _check_incomplete_workflows(tool_calls_log: list) -> str | None:
     """Check if any tool workflows are incomplete. Returns a message if so, None if OK."""
     tools_used = {tc["tool"] for tc in tool_calls_log}
-    available_tools = set(available_tools or [])
-    can_task_complete = not available_tools or "task_complete" in available_tools
 
     started_feature = "start_future_feature" in tools_used
+    inspected_feature = "get_future_feature" in tools_used
+    listed_features = "list_future_features" in tools_used
     used_evolve_plan = "evolve_plan" in tools_used
     used_evolve_resume = "evolve_resume" in tools_used
     used_evolve_start = used_evolve_plan or used_evolve_resume
     used_evolve_apply = "evolve_apply" in tools_used
     used_evolve_deploy = "evolve_deploy" in tools_used or "evolve_submit_pr" in tools_used
     used_fail = "fail_future_feature" in tools_used
-    can_plan_in_this_phase = not available_tools or "evolve_plan" in available_tools or "evolve_resume" in available_tools
-    can_submit_in_this_phase = not available_tools or "evolve_submit_pr" in available_tools or "evolve_deploy" in available_tools
+    used_reject = "reject_future_feature" in tools_used
 
-    if can_task_complete:
-        rejected_pr_idx = -1
-        for idx, tc in enumerate(tool_calls_log):
-            if tc["tool"] != "evolve_submit_pr":
-                continue
-            result_text = str(tc.get("result", ""))
-            if "REJECTED" in result_text:
-                rejected_pr_idx = idx
-
-        if rejected_pr_idx >= 0:
-            completed_after_rejection = any(
-                tc["tool"] == "task_complete"
-                for tc in tool_calls_log[rejected_pr_idx + 1:]
-            )
-            if not completed_after_rejection:
-                return (
-                    "Your PR was rejected by evolve_submit_pr. "
-                    "Call task_complete NOW so the orchestrator can requeue the feature with reviewer feedback. "
-                    "Do not inspect logs, grep, or read more files first."
-                )
-
-    if used_evolve_start and not used_evolve_deploy and not used_fail and can_submit_in_this_phase:
+    if used_evolve_start and not used_evolve_deploy and not used_fail:
         if not used_evolve_apply:
             verb = "evolve_resume" if used_evolve_resume else "evolve_plan"
             return (
@@ -930,13 +790,36 @@ def _check_incomplete_workflows(tool_calls_log: list, available_tools: set[str] 
             "Do NOT call task_complete until evolve_submit_pr succeeds."
         )
 
-    if started_feature and not used_evolve_start and not used_fail and can_plan_in_this_phase:
+    if started_feature and not used_evolve_start and not used_fail:
         return (
             "You called start_future_feature but never called evolve_plan. "
             "You MUST implement the feature NOW. Call evolve_plan, then "
             "evolve_apply, evolve_test, evolve_submit_pr. Do NOT defer to "
             "'the next run'. There is no next run — do it now."
         )
+
+    if inspected_feature and not started_feature and not used_fail and not used_reject:
+        return (
+            "You inspected a feature with get_future_feature but never called "
+            "start_future_feature. You MUST start implementing it NOW. "
+            "Call start_future_feature(id), then explore the code with file_read/grep, "
+            "then evolve_plan → evolve_apply → evolve_test → evolve_submit_pr. "
+            "Do NOT describe what you plan to do — actually DO it."
+        )
+
+    if listed_features and not inspected_feature and not used_fail:
+        has_evolve_tools = any(
+            tc["tool"] in ("evolve_plan", "evolve_apply", "evolve_test",
+                           "evolve_submit_pr", "start_future_feature")
+            for tc in tool_calls_log
+        )
+        if not has_evolve_tools:
+            return (
+                "You listed features but didn't proceed. If there are pending features, "
+                "call get_future_feature(id) on the highest priority one, then "
+                "start_future_feature → explore → evolve_plan → evolve_apply → "
+                "evolve_test → evolve_submit_pr. Do it NOW."
+            )
 
     return None
 
@@ -1332,8 +1215,8 @@ _CONTEXT_OVERFLOW_RE = _re.compile(
 _MAX_OVERFLOW_RECOVERY_ATTEMPTS = 3
 
 
-_HEAD_CHARS = 300
-_TAIL_CHARS = 300
+_HEAD_CHARS = 600
+_TAIL_CHARS = 500
 
 _CHARS_PER_TOKEN_ESTIMATE = 4
 _COMPACT_TOKEN_THRESHOLD = 80_000
@@ -1345,16 +1228,17 @@ def _adaptive_tool_result_limit(messages: list) -> int:
     Early in the session (small context): allow larger results so the LLM
     gets richer context during the explore phase.
     Later (large context): shrink results to preserve budget and delay
-    compaction.  Mirrors OpenClaw's per-result context share pattern.
+    compaction.  Floor is 4000 — below that the model loses too much file
+    content for evolve_apply to work accurately.
     """
     tokens = _estimate_context_tokens(messages)
     if tokens < 20_000:
-        return 10_000
+        return 12_000
     if tokens < 50_000:
-        return 6_000
+        return 8_000
     if tokens < 70_000:
-        return 4_000
-    return 2_000
+        return 6_000
+    return 4_000
 
 
 def _estimate_context_tokens(messages: list) -> int:
@@ -1377,38 +1261,56 @@ _COMPACTION_SYSTEM_PROMPT = (
     "You are a context compactor for an AI coding agent in a long tool-loop session. "
     "The older messages are about to be replaced by YOUR summary to free context space. "
     "Produce a structured summary that preserves EXACTLY:\n"
-    "1. API signatures discovered (e.g. 'ToolLoopEngine has: run(), single_shot()')\n"
-    "2. File paths read and their key structures\n"
-    "3. Decisions made and current plan\n"
-    "4. Rules or constraints mentioned\n"
-    "5. Current task state and what still needs to be done\n\n"
-    "Be concise. Use bullet points. Preserve EXACT method/function names — "
-    "these are the #1 thing that gets lost during context compaction and causes bugs."
+    "1. IMPORT statements from every file that was read (critical for writing patches)\n"
+    "2. API signatures discovered — class names, method names, function signatures\n"
+    "3. File paths read and their key structures (what classes/functions they contain)\n"
+    "4. Decisions made and current plan (feature being implemented, evolution ID)\n"
+    "5. Rules or constraints mentioned\n"
+    "6. Current task state and what still needs to be done\n"
+    "7. Any error messages, test failures, or PR reviewer feedback\n\n"
+    "Be concise. Use bullet points. Preserve EXACT method/function names and import lines — "
+    "these are the #1 thing that gets lost during context compaction and causes bugs.\n"
+    "For each file read, include: path, imports, and key signatures (def/class lines)."
 )
 
-_MAX_SUMMARY_INPUT_CHARS = 12000
-_MAX_SUMMARY_TOKENS = 1024
+_MAX_SUMMARY_INPUT_CHARS = 20000
+_MAX_SUMMARY_TOKENS = 2048
+
+
+_IMPORT_RE = _re.compile(
+    r'^(?:from\s+\S+\s+import\s+.+|import\s+\S+)',
+    _re.MULTILINE,
+)
 
 
 def _smart_compact_tool_result(content: str, limit: int = 600) -> str:
     """Compact a tool result preserving the most useful information.
 
-    Strategy (mirrors OpenClaw/OpenCode patterns):
-      1. Code content (file_read): extract class/function signatures.
+    Strategy:
+      1. Code content (file_read): extract imports + class/function signatures.
+         Imports are critical for evolve_apply — the model needs to know what's
+         available when writing patches.
       2. Non-code content: head+tail trim — keep the beginning AND end,
          since conclusions, return values, and final output are often at
-         the tail (OpenClaw's pruner keeps first 1500 + last 1500 chars).
+         the tail.
     """
     if not content or len(content) <= limit:
         return content
 
     signatures = _SIG_RE.findall(content)
     if signatures:
-        head = content[:150].rstrip()
+        imports = _IMPORT_RE.findall(content)
+        import_block = "\n".join(imp.rstrip() for imp in imports[:20])
         sig_block = "\n".join(s.rstrip() for s in signatures)
-        compact = f"{head}\n...(compacted — key signatures preserved)\n{sig_block}"
-        if len(compact) > limit * 2:
-            compact = compact[: limit * 2] + "\n...(signatures truncated)"
+        parts = []
+        if import_block:
+            parts.append(import_block)
+        parts.append("...(compacted — imports + signatures preserved)")
+        parts.append(sig_block)
+        compact = "\n".join(parts)
+        cap = max(limit * 3, 2400)
+        if len(compact) > cap:
+            compact = compact[:cap] + "\n...(truncated)"
         return compact
 
     head = content[:_HEAD_CHARS].rstrip()
@@ -1446,25 +1348,29 @@ def _build_deterministic_summary(old_messages: list) -> str:
                             raw_args = {}
                     key_parts = []
                     for k, v in (raw_args if isinstance(raw_args, dict) else {}).items():
-                        key_parts.append(f"{k}={str(v)[:60]}")
+                        key_parts.append(f"{k}={str(v)[:80]}")
                     parts.append(f"• {name}({', '.join(key_parts)})")
 
         elif role == "tool":
-            compacted = _smart_compact_tool_result(content, 400)
+            compacted = _smart_compact_tool_result(content, 1200)
             if compacted:
-                parts.append(f"  → {compacted[:400]}")
+                parts.append(f"  → {compacted[:1500]}")
 
         elif role == "user":
             if "[Context Summary" in content:
-                parts.append(content[:2000])
+                parts.append(content[:3000])
             else:
-                parts.append(f"• User: {content[:150]}")
+                parts.append(f"• User: {content[:200]}")
 
-    return "\n".join(parts)[:6000]
+    return "\n".join(parts)[:10000]
 
 
 def _condense_for_llm_summary(old_messages: list) -> str:
-    """Condense old messages into a text block for the LLM summarizer."""
+    """Condense old messages into a text block for the LLM summarizer.
+
+    Gives generous budget to tool results (especially file_read) so the LLM
+    can produce a summary that preserves imports, signatures, and key structures.
+    """
     parts: list[str] = []
     for m in old_messages:
         role = m.get("role", "")
@@ -1473,19 +1379,126 @@ def _condense_for_llm_summary(old_messages: list) -> str:
         if role == "assistant":
             tcs = m.get("tool_calls") or []
             if tcs:
-                names = [tc.get("function", {}).get("name", "?") for tc in tcs]
-                parts.append(f"Assistant called: {', '.join(names)}")
+                call_parts = []
+                for tc in tcs:
+                    fn = tc.get("function", {})
+                    name = fn.get("name", "?")
+                    raw_args = fn.get("arguments", "")
+                    if isinstance(raw_args, str):
+                        try:
+                            raw_args = json.loads(raw_args)
+                        except Exception:
+                            raw_args = {}
+                    arg_summary = ", ".join(
+                        f"{k}={str(v)[:60]}"
+                        for k, v in (raw_args if isinstance(raw_args, dict) else {}).items()
+                    )
+                    call_parts.append(f"{name}({arg_summary})")
+                parts.append(f"Assistant called: {'; '.join(call_parts)}")
             elif content:
-                parts.append(f"Assistant: {content[:200]}")
+                parts.append(f"Assistant: {content[:400]}")
 
         elif role == "tool":
-            compacted = _smart_compact_tool_result(content, 500)
-            parts.append(f"Tool result: {compacted[:500]}")
+            compacted = _smart_compact_tool_result(content, 1200)
+            parts.append(f"Tool result: {compacted[:1500]}")
 
         elif role == "user":
-            parts.append(f"User: {content[:300]}")
+            if "[Context Summary" in content:
+                parts.append(content[:3000])
+            else:
+                parts.append(f"User: {content[:400]}")
 
     return "\n".join(parts)[:_MAX_SUMMARY_INPUT_CHARS]
+
+
+def _parse_openai_stream(response, on_token=None) -> dict:
+    """Parse an OpenAI-compatible SSE stream into a Chat Completions response dict.
+
+    Accumulates delta chunks (content, tool_calls) and returns the same
+    structure as a non-streaming response so callers don't need to change.
+    Mirrored from OpenClaw's always-streaming architecture.
+
+    If *on_token* is provided it is called with each content-delta string
+    as it arrives, enabling real-time token streaming to the frontend.
+    """
+    content_parts: list[str] = []
+    tool_calls: dict[int, dict] = {}
+    finish_reason = None
+    model = ""
+    resp_id = ""
+    usage = {}
+
+    for line in response.iter_lines(decode_unicode=True):
+        if not line:
+            continue
+        if isinstance(line, bytes):
+            line = line.decode("utf-8", errors="replace")
+        if not line.startswith("data: "):
+            continue
+        data_str = line[6:]
+        if data_str.strip() == "[DONE]":
+            break
+        try:
+            chunk = json.loads(data_str)
+        except (json.JSONDecodeError, ValueError):
+            continue
+
+        if not resp_id:
+            resp_id = chunk.get("id", "")
+        if not model:
+            model = chunk.get("model", "")
+        if chunk.get("usage"):
+            usage = chunk["usage"]
+
+        for choice in chunk.get("choices", []):
+            delta = choice.get("delta", {})
+            if delta.get("content"):
+                content_parts.append(delta["content"])
+                if on_token:
+                    try:
+                        on_token(delta["content"])
+                    except Exception:
+                        pass
+
+            for tc_delta in delta.get("tool_calls", []):
+                idx = tc_delta.get("index", 0)
+                if idx not in tool_calls:
+                    tool_calls[idx] = {
+                        "id": tc_delta.get("id", ""),
+                        "type": "function",
+                        "function": {"name": "", "arguments": ""},
+                    }
+                tc = tool_calls[idx]
+                if tc_delta.get("id"):
+                    tc["id"] = tc_delta["id"]
+                fn_delta = tc_delta.get("function", {})
+                if fn_delta.get("name"):
+                    tc["function"]["name"] = fn_delta["name"]
+                if fn_delta.get("arguments"):
+                    tc["function"]["arguments"] += fn_delta["arguments"]
+
+            if choice.get("finish_reason"):
+                finish_reason = choice["finish_reason"]
+
+    message: dict = {
+        "role": "assistant",
+        "content": "".join(content_parts) if content_parts else None,
+    }
+    if tool_calls:
+        message["tool_calls"] = [tool_calls[i] for i in sorted(tool_calls)]
+
+    result = {
+        "id": resp_id,
+        "model": model,
+        "choices": [{
+            "message": message,
+            "finish_reason": finish_reason or "stop",
+            "index": 0,
+        }],
+    }
+    if usage:
+        result["usage"] = usage
+    return result
 
 
 class ToolLoopEngine:
@@ -1498,7 +1511,7 @@ class ToolLoopEngine:
         self.base_url = base_url
         self._auth_store = auth_store
         self._usage_tracker = usage_tracker
-        self._is_chat_priority = False
+        self._session = requests.Session()
         self._fallback_chain = ModelFallbackChain(
             model, fallback_models or [],
             provider_chain=provider_chain,
@@ -1777,21 +1790,21 @@ class ToolLoopEngine:
     def _call_llm(self, payload, timeout=DEFAULT_TIMEOUT, on_token=None):
         """Make an LLM API call with provider-aware fallback chain and jittered retry.
 
-        Uses SSE streaming by default (mirrors OpenClaw pattern) so the
-        per-chunk read timeout catches dead connections in seconds instead
-        of waiting for a full-response timeout.
+        All providers use streaming (SSE) to avoid blocking on slow responses.
+        Each engine instance has its own requests.Session for connection pool
+        isolation — chat traffic never competes with cron/evolve for sockets.
+
+        If *on_token* is provided it is forwarded to the stream parser so
+        each content-delta chunk is emitted in real time.
 
         Flow:  for each (provider, model) in fallback chain →
                  resolve base_url, headers, adapted payload →
                  for each retry attempt →
-                   call API (streaming), handle errors
+                   call API with stream=True, parse SSE
                on success → adapt response, record_success, return
                on retriable failure → jittered backoff, next attempt
                on exhausted retries → record_failure, try next candidate
         """
-        if not self._is_chat_priority and not _chat_idle.is_set():
-            _chat_idle.wait(timeout=CHAT_PRIORITY_WAIT_S)
-
         candidates = self._fallback_chain.get_candidates()
         all_errors = []
 
@@ -1801,43 +1814,49 @@ class ToolLoopEngine:
             )
 
             is_codex = provider_id == "openai-codex"
-            use_sse = not is_codex and provider_id not in _STREAMING_BLACKLIST_PROVIDERS
-            if use_sse:
+            is_anthropic_native = provider_id == "anthropic"
+            use_openai_stream = not is_codex and not is_anthropic_native
+
+            if use_openai_stream:
                 adapted_payload["stream"] = True
+                adapted_payload["stream_options"] = {"include_usage": True}
 
             last_err = None
             if self._usage_tracker:
                 self._usage_tracker.call_started(provider_id, model)
 
-            for attempt in range(MAX_RETRIES + 1):
-                resp = None
+            max_attempts = MAX_RETRIES + 1
+            rate_limit_hits = 0
+
+            for attempt in range(RATE_LIMIT_MAX_RETRIES + 1):
                 try:
                     if is_codex and attempt == 0:
                         log.debug("Codex request to %s | keys: %s", url, list(adapted_payload.keys()))
 
-                    req_timeout = (
-                        (CONNECT_TIMEOUT, STREAM_READ_TIMEOUT) if (use_sse or is_codex)
-                        else timeout
-                    )
-                    resp = requests.post(
+                    resp = self._session.post(
                         url, json=adapted_payload,
-                        headers=headers, timeout=req_timeout,
-                        stream=(use_sse or is_codex),
+                        headers=headers, timeout=(10, timeout),
+                        stream=(is_codex or use_openai_stream),
                     )
                     if resp.status_code == 429:
-                        wait = _jittered_delay(RETRY_DELAY, attempt)
-                        log.info("Rate-limited on %s:%s, waiting %.1fs (attempt %d)",
-                                 provider_id, model, wait, attempt + 1)
+                        rate_limit_hits += 1
+                        retry_after = _parse_retry_after(resp)
+                        if retry_after:
+                            wait = min(retry_after + random.uniform(0.5, 2.0), 120.0)
+                        else:
+                            wait = _jittered_delay(RATE_LIMIT_BASE_DELAY, rate_limit_hits - 1)
+                        log.info("Rate-limited on %s:%s, waiting %.1fs (attempt %d/%d, Retry-After: %s)",
+                                 provider_id, model, wait, attempt + 1,
+                                 RATE_LIMIT_MAX_RETRIES + 1,
+                                 f"{retry_after}s" if retry_after else "not set")
                         time.sleep(wait)
                         last_err = f"HTTP 429 on {provider_id}:{model}"
                         continue
 
-                    if (use_sse or is_codex) and resp.status_code != 200:
+                    if (is_codex or use_openai_stream) and resp.status_code != 200:
                         body = resp.text[:500]
-                        if is_codex:
-                            log.error("Codex %s:%s returned HTTP %d: %s | Payload keys: %s",
-                                      provider_id, model, resp.status_code, body,
-                                      list(adapted_payload.keys()))
+                        log.error("%s:%s returned HTTP %d: %s",
+                                  provider_id, model, resp.status_code, body[:200])
                         err_body = body[:200] if resp.status_code == 400 else body[:100]
                         last_err = f"HTTP {resp.status_code} on {provider_id}:{model}: {err_body}"
                         break
@@ -1846,26 +1865,24 @@ class ToolLoopEngine:
 
                     if is_codex:
                         try:
-                            from ghost_providers import parse_codex_sse_response, adapt_response, get_provider
-                            raw = parse_codex_sse_response(resp)
+                            raw = parse_codex_sse_response(resp, on_token=on_token)
                             provider = get_provider(provider_id)
                             data = adapt_response(provider, raw) if provider else raw
                         except RuntimeError as stream_err:
                             last_err = f"Codex stream error on {provider_id}:{model}: {stream_err}"
                             break
-                    elif use_sse:
-                        data = _accumulate_sse_stream(resp, on_token=on_token)
+                    elif use_openai_stream:
                         try:
-                            from ghost_providers import get_provider, adapt_response
+                            data = _parse_openai_stream(resp, on_token=on_token)
                             provider = get_provider(provider_id)
                             if provider:
                                 data = adapt_response(provider, data)
-                        except ImportError:
-                            pass
+                        except Exception as stream_err:
+                            last_err = f"Stream parse error on {provider_id}:{model}: {stream_err}"
+                            break
                     else:
                         data = resp.json()
                         try:
-                            from ghost_providers import get_provider, adapt_response
                             provider = get_provider(provider_id)
                             if provider:
                                 data = adapt_response(provider, data)
@@ -1892,7 +1909,19 @@ class ToolLoopEngine:
                         self._fallback_chain.remove_from_chain(provider_id, model)
                         last_err = f"HTTP 404 on {provider_id}:{model}: invalid model ID"
                         break
-                    if status in (429, 500, 502, 503) and attempt < MAX_RETRIES:
+                    if status == 429:
+                        rate_limit_hits += 1
+                        retry_after = _parse_retry_after(e.response)
+                        if retry_after:
+                            wait = min(retry_after + random.uniform(0.5, 2.0), 120.0)
+                        else:
+                            wait = _jittered_delay(RATE_LIMIT_BASE_DELAY, rate_limit_hits - 1)
+                        log.info("Rate-limited (HTTPError) on %s:%s, waiting %.1fs (attempt %d)",
+                                 provider_id, model, wait, attempt + 1)
+                        time.sleep(wait)
+                        last_err = f"HTTP 429 on {provider_id}:{model}: {body[:100]}"
+                        continue
+                    if status in (500, 502, 503) and attempt < MAX_RETRIES:
                         wait = _jittered_delay(RETRY_DELAY, attempt)
                         time.sleep(wait)
                         last_err = f"HTTP {status} on {provider_id}:{model}: {body[:100]}"
@@ -1901,35 +1930,28 @@ class ToolLoopEngine:
                     last_err = f"HTTP {status} on {provider_id}:{model}: {err_body}"
                     break
                 except requests.exceptions.Timeout:
-                    last_err = f"Timeout on {provider_id}:{model} (no data for {STREAM_READ_TIMEOUT}s)"
                     if attempt < MAX_RETRIES:
                         time.sleep(_jittered_delay(RETRY_DELAY, attempt))
+                        last_err = f"Timeout on {provider_id}:{model}"
                         continue
+                    last_err = f"Timeout on {provider_id}:{model} after retries"
                     break
                 except requests.exceptions.ConnectionError as e:
-                    last_err = f"Connection error on {provider_id}:{model}: {str(e)[:80]}"
                     if attempt < MAX_RETRIES:
                         time.sleep(_jittered_delay(RETRY_DELAY, attempt))
+                        last_err = f"Connection error on {provider_id}:{model}: {str(e)[:80]}"
                         continue
+                    last_err = f"Connection error on {provider_id}:{model} after retries: {str(e)[:80]}"
                     break
                 except Exception as e:
                     last_err = f"Error on {provider_id}:{model}: {e}"
                     break
-                finally:
-                    if resp is not None and (use_sse or is_codex):
-                        try:
-                            resp.close()
-                        except Exception:
-                            pass
 
+            # Report call failure to usage tracker
             if self._usage_tracker:
                 self._usage_tracker.call_completed(0, success=False)
 
-            is_timeout = last_err and ("Timeout" in last_err or "no data for" in last_err)
-            if is_timeout:
-                self._fallback_chain.record_failure(provider_id, model, last_err or "timeout")
-            else:
-                self._fallback_chain.record_failure(provider_id, model, last_err or "unknown")
+            self._fallback_chain.record_failure(provider_id, model, last_err or "unknown")
             all_errors.append(last_err or f"{provider_id}:{model} failed")
 
         error_summary = " → ".join(all_errors)
@@ -1939,8 +1961,7 @@ class ToolLoopEngine:
             max_steps=DEFAULT_MAX_STEPS, temperature=0.3, max_tokens=DEFAULT_MAX_TOKENS,
             image_b64=None, images=None, on_step=None, force_tool=False, history=None,
             cancel_check=None, hook_runner=None, tool_intent_security=None, model_override=None,
-            enable_reasoning=False, tool_event_bus=None, skip_evolve_cleanup=False,
-            on_token=None):
+            enable_reasoning=False, tool_event_bus=None, on_token=None):
         """
         Run the autonomous tool loop.
 
@@ -1964,37 +1985,8 @@ class ToolLoopEngine:
         Returns:
             ToolLoopResult with final text, tool calls made, and token usage.
         """
-        if self._is_chat_priority:
-            _acquire_chat_priority()
-
-        try:
-            return self._run_inner(
-                system_prompt=system_prompt, user_message=user_message,
-                tool_registry=tool_registry, max_steps=max_steps,
-                temperature=temperature, max_tokens=max_tokens,
-                image_b64=image_b64, images=images, on_step=on_step,
-                force_tool=force_tool, history=history,
-                cancel_check=cancel_check, hook_runner=hook_runner,
-                tool_intent_security=tool_intent_security,
-                model_override=model_override,
-                enable_reasoning=enable_reasoning,
-                tool_event_bus=tool_event_bus,
-                skip_evolve_cleanup=skip_evolve_cleanup,
-                on_token=on_token,
-            )
-        finally:
-            if self._is_chat_priority:
-                _release_chat_priority()
-
-    def _run_inner(self, system_prompt, user_message, tool_registry=None,
-            max_steps=DEFAULT_MAX_STEPS, temperature=0.3, max_tokens=DEFAULT_MAX_TOKENS,
-            image_b64=None, images=None, on_step=None, force_tool=False, history=None,
-            cancel_check=None, hook_runner=None, tool_intent_security=None, model_override=None,
-            enable_reasoning=False, tool_event_bus=None, skip_evolve_cleanup=False,
-            on_token=None):
-        """Inner implementation of run(), wrapped by chat priority in run()."""
         date_context = _build_date_context()
-
+        
         # Apply reasoning mode instruction if enabled
         if enable_reasoning:
             try:
@@ -2050,18 +2042,21 @@ class ToolLoopEngine:
             "function": {
                 "name": "task_complete",
                 "description": (
-                    "Call this when the task is FULLY complete and you want to send "
-                    "your final response to the user. You MUST call this to end your turn — "
-                    "do NOT respond with a plain text message. Put your full final response "
-                    "in the 'summary' parameter. If you used evolve tools, you must have "
-                    "called evolve_submit_pr (or evolve_deploy for self-repair) before calling this."
+                    "End your turn and send the summary to the user. "
+                    "The summary parameter is shown to the user verbatim. "
+                    "If you used evolve tools, you must have called evolve_submit_pr "
+                    "(or evolve_deploy for self-repair) before calling this."
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "summary": {
                             "type": "string",
-                            "description": "Your final response to the user summarizing what you did",
+                            "description": (
+                                "Your message to the user. Start directly with the answer — "
+                                "NO preamble like 'You're right', 'Sure', 'Of course', 'Alright'. "
+                                "Just answer naturally. Use second person (you/your)."
+                            ),
                         },
                     },
                     "required": ["summary"],
@@ -2112,6 +2107,7 @@ class ToolLoopEngine:
         anthropic_cfg = _load_config() if self._fallback_chain.active_provider == "anthropic" else {}
 
         overflow_recovery_attempts = 0
+        _llm_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
         for step in range(max_steps):
             if cancel_check and cancel_check():
@@ -2163,26 +2159,12 @@ class ToolLoopEngine:
                 else:
                     payload["tool_choice"] = "auto"
 
-            pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-            future = pool.submit(self._call_llm, payload, DEFAULT_TIMEOUT, on_token)
-            _wall_start = time.time()
-            data, error = None, None
+            future = _llm_pool.submit(self._call_llm, payload, DEFAULT_TIMEOUT, on_token)
             try:
-                while True:
-                    try:
-                        data, error = future.result(timeout=1.0)
-                        break
-                    except concurrent.futures.TimeoutError:
-                        if cancel_check and cancel_check():
-                            future.cancel()
-                            data, error = None, "Cancelled by user"
-                            break
-                        if time.time() - _wall_start > MAX_LLM_WALL_CLOCK:
-                            data, error = None, f"Wall-clock timeout ({MAX_LLM_WALL_CLOCK}s) — model too slow"
-                            log.warning("LLM call exceeded %ds wall clock at step %d", MAX_LLM_WALL_CLOCK, step)
-                            break
-            finally:
-                pool.shutdown(wait=False, cancel_futures=True)
+                data, error = future.result(timeout=MAX_LLM_WALL_CLOCK)
+            except concurrent.futures.TimeoutError:
+                data, error = None, f"Wall-clock timeout ({MAX_LLM_WALL_CLOCK}s) — model too slow"
+                log.warning("LLM call exceeded %ds wall clock at step %d", MAX_LLM_WALL_CLOCK, step)
 
             if cancel_check and cancel_check():
                 final_text = "(Stopped by user)"
@@ -2190,11 +2172,6 @@ class ToolLoopEngine:
                 break
 
             if error:
-                if error == "Cancelled by user":
-                    final_text = "(Stopped by user)"
-                    exit_reason = "cancelled"
-                    break
-
                 consecutive_errors += 1
                 _debug_logger.step_error(step, f"LLM error ({consecutive_errors}/3): {error}")
 
@@ -2274,10 +2251,7 @@ class ToolLoopEngine:
 
                     if fn_name == "task_complete":
                         summary = fn_args.get("summary", "")
-                        workflow_issue = _check_incomplete_workflows(
-                            tool_calls_log,
-                            set(tool_registry.names()) if tool_registry else None,
-                        )
+                        workflow_issue = _check_incomplete_workflows(tool_calls_log)
                         if workflow_issue:
                             tool_result = (
                                 f"REJECTED — you cannot complete yet. {workflow_issue} "
@@ -2290,12 +2264,6 @@ class ToolLoopEngine:
                                 "tool_call_id": tc_id,
                                 "content": tool_result,
                             })
-                            tool_calls_log.append({
-                                "step": step,
-                                "tool": "task_complete",
-                                "args": fn_args,
-                                "result": tool_result[:3000],
-                            })
                             continue
                         final_text = summary
                         exit_reason = "task_complete"
@@ -2305,12 +2273,6 @@ class ToolLoopEngine:
                             "role": "tool",
                             "tool_call_id": tc_id,
                             "content": "OK, task complete.",
-                        })
-                        tool_calls_log.append({
-                            "step": step,
-                            "tool": "task_complete",
-                            "args": fn_args,
-                            "result": "OK, task complete.",
                         })
                         if on_step:
                             try:
@@ -2488,12 +2450,13 @@ class ToolLoopEngine:
                         "content": tool_result[:result_limit],
                     })
 
-                    if "__parse_error" in fn_args and fn_name in {"evolve_apply", "file_write"}:
+                    if "__parse_error" in fn_args and fn_name == "evolve_apply":
                         _malformed_json_count = getattr(
                             self, "_malformed_json_count", 0) + 1
                         self._malformed_json_count = _malformed_json_count
-                        if fn_name == "evolve_apply":
-                            retry_message = (
+                        messages.append({
+                            "role": "user",
+                            "content": (
                                 f"⛔ MALFORMED JSON (attempt {_malformed_json_count}/3). "
                                 "Your output was truncated because the file content exceeded "
                                 "your output token limit. You MUST use CHUNKED WRITES:\n"
@@ -2501,34 +2464,16 @@ class ToolLoopEngine:
                                 "  2. evolve_apply(evo_id, file_path, content='<next ~80 lines>', append=True)\n"
                                 "  3. Repeat with append=True for remaining chunks.\n"
                                 "Keep each chunk under 80 lines. Do NOT retry with full content."
-                            )
-                            terminal_message = (
-                                "⛔ 3 MALFORMED JSON FAILURES. You keep exceeding the output limit. "
-                                "Call fail_future_feature(feature_id, 'Output token limit exceeded — "
-                                "file too large for single tool call') then task_complete."
-                            )
-                        else:
-                            retry_message = (
-                                f"⛔ MALFORMED JSON (attempt {_malformed_json_count}/3). "
-                                "Your file_write arguments were truncated. Retry with a SHORTER payload.\n"
-                                "If you are writing a scratch/report file, write only the required summary "
-                                "sections instead of the whole plan. If you are writing a large user file, "
-                                "split it into chunks and use append=True.\n"
-                                "Do NOT switch to writing Ghost source files directly just because file_write failed."
-                            )
-                            terminal_message = (
-                                "⛔ 3 MALFORMED JSON FAILURES on file_write. "
-                                "Write a shorter scratch/report update, then call task_complete. "
-                                "Do NOT fall back to writing source files directly."
-                            )
-                        messages.append({
-                            "role": "user",
-                            "content": retry_message,
+                            ),
                         })
                         if _malformed_json_count >= 3:
                             messages.append({
                                 "role": "user",
-                                "content": terminal_message,
+                                "content": (
+                                    "⛔ 3 MALFORMED JSON FAILURES. You keep exceeding the output limit. "
+                                    "Call fail_future_feature(feature_id, 'Output token limit exceeded — "
+                                    "file too large for single tool call') then task_complete."
+                                ),
                             })
 
                 if exit_reason in ("task_complete", "cancelled",
@@ -2593,10 +2538,37 @@ class ToolLoopEngine:
                     if consecutive_text == 3 and len(messages) > 22:
                         messages = self._compact_messages(messages, step=step)
 
-                    workflow_issue = _check_incomplete_workflows(
-                        tool_calls_log,
-                        set(tool_registry.names()) if tool_registry else None,
-                    )
+                    workflow_issue = _check_incomplete_workflows(tool_calls_log)
+
+                    # Accept the text response directly when:
+                    # 1. The model already called tools (tool_calls_log non-empty)
+                    # 2. No incomplete evolve workflow that must be finished
+                    # 3. The text is substantive (not a short filler sentence)
+                    # Pushing back forces models to re-wrap their answer in
+                    # task_complete, which frequently produces garbage or
+                    # meta-explanations instead of the actual content.
+                    if not workflow_issue and text_content and len(text_content) > 20:
+                        is_deferring = (
+                            bool(_DEFERRAL_RE.search(text_content))
+                            and len(text_content) < 400
+                        )
+                        few_tools = len(tool_calls_log) < _MIN_TOOLS_BEFORE_ACCEPT_DEFERRAL
+                        if is_deferring and few_tools and consecutive_text <= 1:
+                            pushback = (
+                                "You're giving up too early — you have more tools available. "
+                                "Try a different approach NOW:\n"
+                                "- Use web_fetch on a specific URL to get actual page content\n"
+                                "- Use the browser tool if web_fetch didn't return enough\n"
+                                "- Use shell_exec or grep to search locally\n"
+                                "Do NOT ask the user what they want — just try it yourself."
+                            )
+                            _debug_logger.step_text_response(step, text_content, "pushback_deferral")
+                            messages.append({"role": "user", "content": pushback})
+                            continue
+                        final_text = text_content
+                        exit_reason = "text_after_tools"
+                        _debug_logger.step_text_response(step, text_content, "accepted_after_tools")
+                        break
 
                     if consecutive_text >= 5:
                         pushback = (
@@ -2611,11 +2583,9 @@ class ToolLoopEngine:
                         ).format(n=consecutive_text)
                     else:
                         pushback = (
-                            "You responded with a plain text message, but you should call "
-                            "task_complete(summary='...') when done. A text response without "
-                            "task_complete means you're still working. "
-                            "If the task IS done, call task_complete now with your summary. "
-                            "If the task is NOT done, call the next tool to make progress."
+                            "Call task_complete(summary='...') to send your reply. "
+                            "Put your full answer in the summary parameter — "
+                            "start directly with the content, no preamble."
                         )
                     if workflow_issue:
                         pushback += f"\n\nBLOCKER: {workflow_issue}"
@@ -2644,7 +2614,7 @@ class ToolLoopEngine:
         used_evolve = any(
             tc["tool"].startswith("evolve_") for tc in tool_calls_log
         )
-        if used_evolve and not skip_evolve_cleanup:
+        if used_evolve:
             try:
                 from ghost_evolve import get_engine
                 run_evo_ids = set()
@@ -2748,6 +2718,8 @@ class ToolLoopEngine:
                 )
             except Exception:
                 pass
+
+        _llm_pool.shutdown(wait=False)
 
         return ToolLoopResult(
             text=final_text,
@@ -2860,15 +2832,6 @@ class ToolRegistry:
         try:
             if "__parse_error" in args:
                 raw_len = args.get("__raw_len", 0)
-                if name == "file_write":
-                    return (
-                        f"Tool error ({name}): MALFORMED JSON — your output was TRUNCATED "
-                        f"(raw length: {raw_len} chars). Keep file_write payloads small.\n"
-                        "If you are updating a scratch/report file, write only the required summary "
-                        "sections. If you are writing a large user file, split it into smaller chunks "
-                        "and retry with append=True.\n"
-                        "Do NOT switch to writing Ghost source files directly just because this call failed."
-                    )
                 return (
                     f"Tool error ({name}): MALFORMED JSON — your output was TRUNCATED "
                     f"(raw length: {raw_len} chars). Your output token limit is ~8K tokens "

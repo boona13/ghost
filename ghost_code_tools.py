@@ -15,15 +15,13 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 PROJECT_DIR = Path(__file__).resolve().parent
-GHOST_HOME = Path.home() / ".ghost"
-GHOST_TOOLS_MIRROR_DIR = (GHOST_HOME / "ghost_tools").resolve()
 MAX_LINE_LENGTH = 2000
 MAX_MATCHES = 100
 MAX_GLOB_RESULTS = 100
 
 _SKIP_DIRS = {
     ".git", ".hg", ".svn", "__pycache__", "node_modules", "venv", "env",
-    ".venv", ".env", ".ghost", "dist", "build", ".next", ".cache", ".tox",
+    ".venv", ".env", "dist", "build", ".next", ".cache", ".tox",
     "eggs", "*.egg-info", ".mypy_cache", ".pytest_cache",
 }
 
@@ -38,34 +36,8 @@ def _resolve_search_path(path: Optional[str]) -> Path:
     if not path:
         return PROJECT_DIR
     p = Path(path).expanduser()
-    try:
-        rel_to_home = p.relative_to(GHOST_HOME)
-    except Exception:
-        rel_to_home = None
-    if rel_to_home is not None:
-        parts = rel_to_home.parts
-        if parts:
-            if parts[0] == "ghost_tools":
-                rel_tool_path = Path(*parts[1:]) if len(parts) > 1 else Path()
-                return PROJECT_DIR / "ghost_tools" / rel_tool_path
-            candidate = PROJECT_DIR / rel_to_home
-            if candidate.exists() or (len(parts) == 1 and parts[0].startswith("ghost_")):
-                return candidate
-    try:
-        resolved = p.resolve()
-    except Exception:
-        resolved = p
-    try:
-        rel_to_mirror = resolved.relative_to(GHOST_TOOLS_MIRROR_DIR)
-        return (PROJECT_DIR / "ghost_tools" / rel_to_mirror).resolve()
-    except ValueError:
-        pass
     if not p.is_absolute():
         p = (PROJECT_DIR / p).resolve()
-    elif not p.exists():
-        project_markers = {PROJECT_DIR.name.lower(), "ghost", "ghost-0.5"}
-        if any(part.lower() in project_markers for part in p.parts):
-            return PROJECT_DIR
     return p
 
 
@@ -96,9 +68,6 @@ def _grep_ripgrep(pattern: str, search_path: Path, include: str = "") -> str:
             glob = glob.strip()
             if glob:
                 args.extend(["--glob", glob])
-    for skipped in sorted(_SKIP_DIRS):
-        if "*" not in skipped:
-            args.extend(["--glob", f"!**/{skipped}/**"])
 
     args.extend(["--regexp", pattern, str(search_path)])
 
@@ -246,27 +215,11 @@ def _glob_ripgrep(pattern: str, search_path: Path) -> List[str]:
     if not rg:
         return []
 
-    args = [rg, "--files", "--hidden", "--no-messages"]
-    for skipped in sorted(_SKIP_DIRS):
-        if "*" not in skipped:
-            args.extend(["--glob", f"!**/{skipped}/**"])
-    args.extend(["--glob", pattern, str(search_path)])
+    args = [rg, "--files", "--hidden", "--no-messages", "--glob", pattern, str(search_path)]
     try:
         result = subprocess.run(args, capture_output=True, text=True, timeout=15)
         if result.returncode in (0, 1):
-            filtered = []
-            for raw_path in result.stdout.strip().split("\n"):
-                if not raw_path:
-                    continue
-                candidate = Path(raw_path)
-                try:
-                    rel = candidate.relative_to(search_path)
-                except ValueError:
-                    rel = candidate
-                if not candidate.is_file() or _should_skip(rel):
-                    continue
-                filtered.append(str(candidate))
-            return filtered
+            return [p for p in result.stdout.strip().split("\n") if p]
         return []
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         return []
@@ -309,48 +262,14 @@ def build_code_search_tools(cfg: dict = None) -> List[Dict[str, Any]]:
     """Build grep and glob tools for the Ghost tool registry."""
     cfg = cfg or {}
 
-    def _coerce_search_root(search_path: Path, raw_path: str) -> tuple[Path, str]:
-        include_name = ""
-        candidate = search_path
-        raw = Path(raw_path).expanduser() if raw_path else None
-
-        file_like = False
-        if raw_path:
-            include_name = Path(raw_path).name
-            if Path(raw_path).suffix:
-                file_like = True
-        if candidate.is_file():
-            file_like = True
-
-        if file_like:
-            include_name = include_name or candidate.name
-            parent = candidate.parent
-            while parent != parent.parent and not parent.exists():
-                parent = parent.parent
-            if parent.is_dir():
-                return parent, include_name
-            if "ghost_tools" in candidate.parts:
-                return PROJECT_DIR / "ghost_tools", include_name
-            return PROJECT_DIR, include_name
-
-        return candidate, include_name
-
-    def _grep_execute(
-        pattern: str = "",
-        path: str = "",
-        include: str = "",
-        path_to_search: str = "",
-        directory: str = "",
-        **kwargs,
-    ):
+    def _grep_execute(pattern: str, path: str = "", include: str = ""):
         if not pattern:
             return "Error: pattern is required"
-        if not path:
-            path = path_to_search or directory
         search_path = _resolve_search_path(path)
-        search_path, include_name = _coerce_search_root(search_path, path)
-        if include_name and not include:
-            include = include_name
+
+        if search_path.is_file():
+            search_path = search_path.parent
+            include = Path(path).name
 
         if not search_path.is_dir():
             return f"Error: not a directory: {search_path}"
@@ -362,19 +281,12 @@ def build_code_search_tools(cfg: dict = None) -> List[Dict[str, Any]]:
             matches = _grep_python(pattern, search_path, include)
             return _format_python_results(matches)
 
-    def _glob_execute(
-        pattern: str = "",
-        path: str = "",
-        path_to_search: str = "",
-        directory: str = "",
-        **kwargs,
-    ):
+    def _glob_execute(pattern: str, path: str = ""):
         if not pattern:
             return "Error: pattern is required"
-        if not path:
-            path = path_to_search or directory
         search_path = _resolve_search_path(path)
-        search_path, _ = _coerce_search_root(search_path, path)
+        if search_path.is_file():
+            search_path = search_path.parent
         if not search_path.is_dir():
             return f"Error: not a directory: {search_path}"
 

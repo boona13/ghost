@@ -60,13 +60,7 @@ During autonomous feature implementation, self-evolution, and chat interactions,
 
 ## Category 3: Python Import & Language Mistakes
 
-### M-06: Import-by-Value Bug
-
-- **Severity:** HIGH
-- **Context:** Using `from module import variable` copies the value at import time. If the module later updates that variable, the importing file's copy stays stale forever.
-- **Lesson:** Always use `import module; module.variable` for mutable module-level state (processes, flags, lists, dicts).
-
-### M-07: Literal `\n` in String Join (Projects Feature)
+### M-06: Literal `\n` in String Join (Projects Feature)
 
 - **Severity:** MEDIUM
 - **Context:** In `ghost_projects.py`, the `format_project_for_prompt()` function used:
@@ -109,13 +103,6 @@ During autonomous feature implementation, self-evolution, and chat interactions,
 - **Impact:** Terrible UX — users don't memorize internal skill IDs.
 - **Lesson:** LLMs default to the simplest possible input (text field) rather than the most usable one (picker/selector). UX best practices need to be in the system prompt or skills.
 
-### M-12: Emojis Instead of Icons
-
-- **Severity:** LOW
-- **Context:** Ghost used emoji characters (rocket, globe, etc.) in the dashboard page for status indicators and section headers. Every other page in the dashboard uses SVG icons and colored dots.
-- **Impact:** Visual inconsistency with the rest of the dashboard.
-- **Lesson:** LLMs don't maintain visual consistency across files unless the design system is explicitly referenced. Ghost should analyze existing page patterns before generating new UI.
-
 ---
 
 ## Category 5: Backend Logic Bugs
@@ -155,18 +142,10 @@ During autonomous feature implementation, self-evolution, and chat interactions,
 
 ## Category 6: Redundant / Unnecessary Features
 
-### M-17: Duplicated Existing Tool
+### M-17: Missing Dependency — No Playwright Binaries Installed
 
 - **Severity:** MEDIUM
-- **Context:** Ghost autonomously implemented a new tool that provided functionality (e.g., browser automation) that already existed in the codebase. The existing tool was more mature and had more capabilities.
-- **Impact:** Two tools with overlapping functionality, user confusion, and extra complexity.
-- **Root Cause:** Ghost didn't check whether existing tools already covered the use case before implementing a new one.
-- **Lesson:** Before implementing a new capability, Ghost should always audit existing tools for overlap. A "capability audit" step should precede feature implementation.
-
-### M-18: Missing Dependency — No Playwright Binaries Installed
-
-- **Severity:** MEDIUM
-- **Context:** After Ghost deployed a browser feature, the actual Playwright browser binaries (`chromium`) were not installed. Ghost assumed they were available.
+- **Context:** After Ghost deployed a feature, the actual Playwright browser binaries (`chromium`) were not installed. Ghost assumed they were available.
 - **Impact:** The feature deployed successfully but failed at runtime with "browser binaries not found."
 - **Root Cause:** Ghost tested code syntax and imports but not runtime dependencies. `evolve_test` checks Python syntax, not system-level prerequisites.
 - **Lesson:** `evolve_test` should include runtime dependency validation, not just syntax checks.
@@ -193,13 +172,13 @@ During autonomous feature implementation, self-evolution, and chat interactions,
 
 - **Severity:** HIGH
 - **Context:** Ghost deploys features and restarts, but never performs a post-deploy verification (e.g., hitting the new API endpoint, loading the new page, checking for 200 responses).
-- **Impact:** Features deployed in broken states (status always showing "stopped", Projects modal always open, etc.) and Ghost considered them "done."
+- **Impact:** Features deployed in broken states (Projects modal always open, status endpoints returning stale data, etc.) and Ghost considered them "done."
 - **Lesson:** Post-deploy smoke tests should be mandatory. After `evolve_deploy`, Ghost should automatically verify the feature works by calling its own APIs or loading its own pages.
 
 ### M-22: Feature Auditor Passed Non-Functional Features
 
 - **Severity:** MEDIUM
-- **Context:** Ghost's `_ghost_growth_implementation_auditor` cron job audited features after deployment. It checked that routes returned 200 and that frontend files existed, but didn't verify actual functionality (e.g., status endpoints returning data that was always stale).
+- **Context:** Ghost's `_ghost_growth_implementation_auditor` cron job audited features after deployment. It checked that routes returned 200 and that frontend files existed, but didn't verify actual functionality (e.g., status endpoints returned data that was always stale).
 - **Impact:** Ghost marked features as "PASSED" that were actually broken. False confidence.
 - **Lesson:** Feature audits need functional assertions, not just existence checks. "API returns 200" is necessary but not sufficient — the response body must also be correct.
 

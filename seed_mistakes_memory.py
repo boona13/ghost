@@ -67,13 +67,10 @@ MISTAKES = [
             "M-06 PYTHON IMPORT BUG: Never use 'from module import mutable_variable'. "
             "In Python, 'from module import var' copies the value at import time. "
             "If the module later updates that variable, the importing file's copy stays stale forever. "
-            "WRONG: from ghost_foo import _process (stays None forever). "
-            "RIGHT: import ghost_foo; then use ghost_foo._process (live reference). "
+            "WRONG: from some_module import _shared_state (stays None forever). "
+            "RIGHT: import some_module; then use some_module._shared_state (live reference). "
             "This applies to ALL mutable module-level state: processes, flags, lists, dicts."
         ),
-        "citations": [
-            {"file": "ghost_autonomy.py", "line": 326, "snippet": "from ghost_foo import _some_var"}
-        ],
     },
     {
         "id": "M-07",
@@ -224,7 +221,7 @@ MISTAKES = [
             "M-21 EVOLUTION: Always verify after deploy — post-deploy smoke tests are mandatory. "
             "After evolve_deploy, the feature must actually work. Hit new API endpoints with web_fetch. "
             "Check that status endpoints return live data, not stale defaults. "
-            "Features deployed in broken states (Projects modal always open, status pages showing stale data) "
+            "Features deployed in broken states (Projects modal always open, status endpoints returning stale data) "
             "because Ghost considered them 'done' without verification."
         ),
     },
@@ -252,7 +249,6 @@ MISTAKES = [
 
 
 def seed():
-    import json as _json
     db = MemoryDB()
     seeded = 0
     skipped = 0
@@ -260,16 +256,12 @@ def seed():
         if db.has_source(m["id"]):
             skipped += 1
             continue
-        citations = ""
-        if m.get("citations"):
-            citations = _json.dumps(m["citations"])
         db.save(
             content=m["content"],
             type="mistake",
             tags=m["category"],
             source_preview=m["id"],
             source_hash=m["id"],
-            citations=citations,
         )
         seeded += 1
     db.close()

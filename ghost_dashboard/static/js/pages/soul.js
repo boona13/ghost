@@ -12,7 +12,7 @@ export async function render(container) {
 
     <div class="stat-card mb-4">
       <div class="flex items-center justify-between text-xs text-zinc-500">
-        <span class="font-mono text-zinc-400">SOUL.md</span>
+        <span>${t('common.file')} <span class="font-mono text-zinc-400">${data.path}</span></span>
         <span id="char-count">${data.content.length} ${t('common.chars')}</span>
       </div>
     </div>

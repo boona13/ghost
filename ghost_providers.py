@@ -438,18 +438,43 @@ def _adapt_to_codex_responses(payload: dict) -> dict:
 
 
 def _fix_array_schemas(schema: dict):
-    """Recursively ensure all array types have an 'items' field.
-    The Codex Responses API enforces strict JSON Schema validation."""
+    """Recursively sanitize tool schemas for Codex Responses API.
+
+    The Codex API enforces strict JSON Schema:
+    - "type" must be a single string, not an array like ["object", "string"]
+    - "type": "array" must have an "items" field
+    """
     if not isinstance(schema, dict):
         return
+
+    stype = schema.get("type")
+    if isinstance(stype, list):
+        non_null = [t for t in stype if t != "null"]
+        pick = "string"
+        if len(non_null) == 1:
+            pick = non_null[0]
+        elif "string" in non_null:
+            pick = "string"
+        elif "object" in non_null:
+            pick = "object"
+        elif "array" in non_null:
+            pick = "array"
+        elif non_null:
+            pick = non_null[0]
+        schema["type"] = pick
+
     if schema.get("type") == "array" and "items" not in schema:
         schema["items"] = {}
+
     for key in ("items", "additionalProperties"):
         if isinstance(schema.get(key), dict):
             _fix_array_schemas(schema[key])
     for prop in schema.get("properties", {}).values():
         if isinstance(prop, dict):
             _fix_array_schemas(prop)
+    for variant in schema.get("anyOf", []) + schema.get("oneOf", []):
+        if isinstance(variant, dict):
+            _fix_array_schemas(variant)
 
 
 def _adapt_from_codex_responses(data: dict) -> dict:
@@ -655,9 +680,13 @@ def _adapt_from_anthropic(data: dict) -> dict:
 #  CODEX SSE STREAM PARSER
 # ═════════════════════════════════════════════════════════════════════
 
-def parse_codex_sse_response(response) -> dict:
+def parse_codex_sse_response(response, on_token=None) -> dict:
     """Parse a streaming SSE response from the Codex Responses API.
-    Collects events and returns the final completed response dict."""
+    Collects events and returns the final completed response dict.
+
+    If *on_token* is provided it is called with each content-delta string
+    as it arrives (from ``response.output_text.delta`` events).
+    """
     final_response = None
     for line in response.iter_lines():
         if not line:
@@ -674,6 +703,13 @@ def parse_codex_sse_response(response) -> dict:
         except (json.JSONDecodeError, ValueError):
             continue
         event_type = event.get("type", "")
+        if event_type == "response.output_text.delta" and on_token:
+            delta = event.get("delta", "")
+            if delta:
+                try:
+                    on_token(delta)
+                except Exception:
+                    pass
         if event_type == "response.completed":
             final_response = event.get("response", event)
             break

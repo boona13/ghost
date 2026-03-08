@@ -21,18 +21,6 @@ from datetime import datetime
 PLAT = platform.system()
 GHOST_HOME = Path.home() / ".ghost"
 PROJECT_DIR = Path(__file__).resolve().parent
-GHOST_TOOLS_MIRROR_DIR = (GHOST_HOME / "ghost_tools").resolve()
-_GHOST_STATE_DIRS = {
-    "backups",
-    "channels",
-    "cron",
-    "evolve",
-    "logs",
-    "memory",
-    "prs",
-    "sessions",
-    "tmp",
-}
 
 
 def get_user_projects_dir(cfg=None):
@@ -179,43 +167,6 @@ def _is_ghost_codebase_path(path_str):
         return resolved == codebase or codebase in resolved.parents
     except Exception:
         return False
-
-
-def _normalize_ghost_repo_path(path_str):
-    """Map ~/.ghost mirrored tool paths back into the real repo."""
-    expanded = Path(path_str).expanduser()
-    project_markers = {PROJECT_DIR.name.lower(), "ghost", "ghost-0.5"}
-
-    if expanded.is_absolute() and not expanded.exists():
-        lowered_parts = [part.lower() for part in expanded.parts]
-        for idx, part in enumerate(lowered_parts):
-            if part not in project_markers:
-                continue
-            rel = Path(*expanded.parts[idx + 1:]) if idx + 1 < len(expanded.parts) else Path()
-            return (PROJECT_DIR / rel) if rel.parts else PROJECT_DIR
-
-    try:
-        rel_to_home = expanded.relative_to(GHOST_HOME)
-    except Exception:
-        rel_to_home = None
-
-    if rel_to_home is not None:
-        parts = rel_to_home.parts
-        if parts:
-            if parts[0] == "ghost_tools":
-                rel_tool_path = Path(*parts[1:]) if len(parts) > 1 else Path()
-                return PROJECT_DIR / "ghost_tools" / rel_tool_path
-            if parts[0] not in _GHOST_STATE_DIRS:
-                candidate = PROJECT_DIR / rel_to_home
-                if candidate.exists() or (len(parts) == 1 and parts[0].startswith("ghost_")):
-                    return candidate
-
-    try:
-        resolved = expanded.resolve()
-        rel_to_mirror = resolved.relative_to(GHOST_TOOLS_MIRROR_DIR)
-        return (PROJECT_DIR / "ghost_tools" / rel_to_mirror).resolve()
-    except Exception:
-        return expanded
 
 
 def _check_command_allowed(command, allowed_commands, blocked_commands):
@@ -587,7 +538,7 @@ def make_file_read(cfg):
             )
         if not _check_path_allowed(path, allowed_roots):
             return f"DENIED: Path '{path}' is outside allowed roots"
-        p = _normalize_ghost_repo_path(path)
+        p = Path(path).expanduser()
         if not p.exists():
             proj_p = PROJECT_DIR / Path(path).expanduser().name if len(Path(path).parts) <= 1 else PROJECT_DIR / path
             if proj_p.exists() and _check_path_allowed(str(proj_p), allowed_roots):
@@ -636,16 +587,9 @@ def make_file_write(cfg):
     allowed_roots = cfg.get("allowed_roots", DEFAULT_ALLOWED_ROOTS)
 
     def execute(path, content, append=False):
-        stripped = (path or "").strip()
-        if stripped in {"", ".", ",", ";", ":"}:
-            return (
-                f"ERROR: Invalid path '{path}'. Provide a full absolute path "
-                "to the target file."
-            )
         if not _check_path_allowed(path, allowed_roots):
             return f"DENIED: Path '{path}' is outside allowed roots"
-        normalized_path = _normalize_ghost_repo_path(path)
-        if _is_ghost_codebase_path(str(normalized_path)):
+        if _is_ghost_codebase_path(path):
             return (
                 f"BLOCKED: Cannot write to '{path}' — it is inside Ghost's own codebase "
                 f"({PROJECT_DIR}). Self-modification must go through the evolution pipeline: "
@@ -653,7 +597,7 @@ def make_file_write(cfg):
                 f"evolve_deploy to apply them safely with backup and rollback. "
                 f"For user project files, use workspace_write instead."
             )
-        p = normalized_path
+        p = Path(path).expanduser()
         try:
             p.parent.mkdir(parents=True, exist_ok=True)
             if append:

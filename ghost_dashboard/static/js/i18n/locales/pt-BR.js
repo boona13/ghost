@@ -2,17 +2,17 @@
 export default {
   nav: {
     chat: "Chat", overview: "Visão Geral", feed: "Feed de Atividades", console: "Console",
-    soul: "Personalidade", user: "Perfil do Usuário", memory: "Memória", projects: "Projetos",
-    models: "Modelos", skills: "Habilidades", autonomy: "Crescimento e Tarefas", evolve: "Autoaperfeiçoamento",
-    prs: "Pull Requests", future_features: "Roteiro", channels: "Canais",
+    soul: "Alma", user: "Perfil do Usuário", memory: "Memória", projects: "Projetos",
+    models: "Modelos", skills: "Habilidades", autonomy: "Autonomia", evolve: "Evolução",
+    prs: "Pull Requests", future_features: "Funcionalidades Futuras", channels: "Canais",
     webhooks: "Webhooks", integrations: "Integrações",
     langfuse: "Observabilidade", browser_use: "Navegador IA", accounts: "Contas",
-    config: "Configurações", cron: "Tarefas Agendadas", security: "Segurança", pairing: "Pareamento de Dispositivo",
-    nodes: "Nós de IA", gallery: "Galeria de Mídia", audit: "Log de Auditoria",
+    config: "Configuração", cron: "Tarefas Agendadas", security: "Segurança", pairing: "Pareamento de Dispositivo",
+    nodes: "Nós de IA", gallery: "Galeria de Mídia",
   },
   sections: {
-    monitor: "Monitor", intelligence: "Inteligência", capabilities: "Ferramentas",
-    connections: "Conexões", system: "Sistema", advanced: "Avançado",
+    monitor: "Monitor", intelligence: "Inteligência", capabilities: "Capacidades",
+    connections: "Conexões", system: "Sistema",
   },
   sidebar: {
     subtitle: "Agente de IA Autônomo", collapse: "Recolher barra lateral", expand: "Expandir barra lateral",
@@ -45,7 +45,7 @@ export default {
   },
   status: {
     connected: "Conectado", disconnected: "Desconectado", checking: "Verificando...",
-    currentModel: "Modelo", sessionTokens: "tokens",
+    currentModel: "Modelo Atual", sessionTokens: "Tokens da Sessão",
     ready: "Pronto", idle: "Ocioso", running: "Em execução",
     paused: "PAUSADO", stopped: "PARADO", runningStatus: "EM EXECUÇÃO",
     runningPid: "Em execução (PID {pid})", restarting: "Reiniciando...",
@@ -80,8 +80,6 @@ export default {
     toggleCanvas: "Alternar Canvas", canvas: "Canvas",
     noProject: "Sem Projeto (global)",
     noMessages: "Nenhuma mensagem ainda", typeBelow: "Digite abaixo ou use a voz para falar com o Ghost",
-    newSessionTitle: "Nova sessão", hintCapabilities: "O que você pode fazer?", hintProject: "Me ajude com meu projeto",
-    hintWeb: "Pesquise na web", hintMemory: "Lembre algo sobre mim",
     attachFile: "Anexar arquivo", messagePlaceholder: "Mensagem para o Ghost...",
     pushToTalk: "Pressione para falar", toggleReasoning: "Alternar modo raciocínio (/think)",
     sendEnter: "Enviar (Enter)", enterToSend: "Pressione Enter para enviar, Shift+Enter para nova linha",
@@ -155,7 +153,7 @@ export default {
     removed: "removido",
   },
   config: {
-    title: "Configurações", subtitle: "Todas as configurações do Ghost em um só lugar",
+    title: "Configuração", subtitle: "Todas as configurações do Ghost — salvas em ~/.ghost/config.json",
     general: "Geral", features: "Funcionalidades", voice: "Voz",
     growth: "Crescimento", security: "Segurança", modelsTab: "Modelos",
     timingLimits: "Temporização e Limites", pollInterval: "Intervalo de Polling (s)",
@@ -330,7 +328,7 @@ export default {
     cpModels: "Modelos", cpResolutions: "Resoluções", cpDurations: "Durações",
   },
   soul: {
-    title: "Personalidade", subtitle: "Defina a personalidade, tom e limites do Ghost",
+    title: "Alma", subtitle: "Personalidade, tom e limites do Ghost — injetados em cada prompt",
     saveSoul: "Salvar SOUL.md", resetDefault: "Restaurar Padrão",
     resetConfirm: "Restaurar SOUL.md para o padrão? Sua alma atual será perdida.",
     saved: "SOUL.md salvo", resetDone: "SOUL.md restaurado",
@@ -372,7 +370,7 @@ export default {
     binaries: "Binários: ", envVars: "Variáveis de ambiente: ",
   },
   cron: {
-    title: "Tarefas Agendadas", subtitle: "Tarefas automatizadas que são executadas de forma programada",
+    title: "Tarefas Agendadas", subtitle: "Tarefas programadas que executam automaticamente",
     totalJobs: "Total de Tarefas", enabledJobs: "Ativadas", nextWake: "Próxima Execução",
     addNewJob: "Adicionar Nova Tarefa", jobName: "Nome", jobNamePlaceholder: "ex: verificar-noticias",
     scheduleType: "Tipo de Agendamento",
@@ -403,7 +401,7 @@ export default {
     allCount: "Todos ({n})", noActivity: "Sem atividade",
   },
   evolve: {
-    title: "Autoaperfeiçoamento", subtitle: "O Ghost pode modificar seu próprio código, testar alterações e implantá-las com segurança",
+    title: "Autoevolução", subtitle: "O Ghost pode modificar seu próprio código, testar alterações e implantá-las com segurança",
     evolutions: "evolução(ões)",
     deployed: "Implantado", rolledBack: "Revertido", backups: "Backups",
     history: "Histórico", pendingApprovals: "Aprovações Pendentes",
@@ -493,7 +491,7 @@ export default {
     toolSecurityAuditDesc: "Varredura de segurança e correção automática",
   },
   autonomy: {
-    title: "Crescimento e Tarefas", subtitle: "Sistema de crescimento autônomo do Ghost — itens de ação e registro de atividades",
+    title: "Autonomia", subtitle: "Sistema de crescimento autônomo do Ghost — automelhoria, itens de ação e registro de atividades",
     crashDetected: "Falha Detectada",
     crashMsg: "Código de saída {code} — o Ghost está tentando se autorreparar (falha #{n})",
     actionItems: "Itens de Ação", noActionItems: "Nenhum item de ação pendente",
@@ -574,7 +572,7 @@ export default {
     failedLoadSchema: "Falha ao carregar esquema: {error}",
   },
   future_features: {
-    title: "Roteiro", addFeature: "Adicionar Funcionalidade",
+    title: "Funcionalidades Futuras", addFeature: "Adicionar Funcionalidade",
     subtitle: "Backlog autônomo de funcionalidades — Tech Scout e Inteligência Competitiva adicionam funcionalidades aqui. O Implementador de Funcionalidades executa diariamente para implementá-las.",
     activeCount: "Ativas", pendingCount: "Pendentes",
     needApproval: "Precisam de Aprovação", implemented: "Implementadas",

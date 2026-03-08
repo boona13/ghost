@@ -221,39 +221,6 @@ CONFIG_SCHEMA = {
             "voice_stt": {"type": "array", "items": {"type": "string"}, "description": "Voice speech-to-text provider fallback order"},
         },
     },
-    "evolution_mode": {
-        "type": "string",
-        "enum": ["legacy", "phased"],
-        "description": "Evolution strategy: 'legacy' (single monolithic tool loop) or 'phased' (multi-phase with fresh context per phase — Scout/Implement/Verify). Default: legacy.",
-    },
-    "scout_max_steps": {
-        "type": "integer",
-        "description": "Max steps for the Scout phase in phased evolution (default: 30)",
-    },
-    "implement_max_steps": {
-        "type": "integer",
-        "description": "Max steps for the Implement phase in phased evolution (default: 20)",
-    },
-    "verify_max_steps": {
-        "type": "integer",
-        "description": "Max steps for the Verify+Submit phase in phased evolution (default: 30)",
-    },
-    "fix_max_steps": {
-        "type": "integer",
-        "description": "Max steps for the Fix phase (PR rejection handling) in phased evolution (default: 25)",
-    },
-    "repo_map_token_budget": {
-        "type": "integer",
-        "description": "Token budget for the auto-generated repo map in system prompts (default: 3000)",
-    },
-    "memory_expiry_days": {
-        "type": "integer",
-        "description": "Auto-expire memories older than this many days on startup (default: 28, matching Copilot's expiration policy)",
-    },
-    "max_feature_attempts": {
-        "type": "integer",
-        "description": "Max retry attempts per feature before archiving the scratch file and moving on (default: 5, Ralph pattern)",
-    },
 }
 
 
