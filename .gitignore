@@ -77,9 +77,8 @@ output/
 # User-specific Ghost data
 .ghost/
 
-# IDE configuration (keep .cursor/rules/ for shared project rules)
-.cursor/*
-!.cursor/rules/
+# IDE configuration
+.cursor/
 
 # Test images (binary bloat)
 testing/*.jpg
