@@ -1288,10 +1288,24 @@ class GhostDaemon:
         self.node_registry = None
         self.cloud_providers = None
 
-        # Self-repair safety valve: allow disabling heavy GhostNodes initialization
-        # via environment variable to survive memory-kill startup loops (SIGKILL/-9).
+        # Self-repair safety valves for heavy GhostNodes initialization.
+        # 1) Manual override via env var.
+        # 2) Automatic one-boot skip when recovering from a SIGKILL/-9 crash report,
+        #    which strongly suggests OS memory pressure killed the process.
         _disable_nodes_env = os.getenv("GHOST_DISABLE_NODES", "").strip().lower() in {"1", "true", "yes", "on"}
-        if cfg.get("enable_nodes", True) and not _disable_nodes_env:
+        _disable_nodes_crash = False
+        try:
+            _crash_path = GHOST_HOME / "crash_report.json"
+            if _crash_path.exists():
+                _crash_data = json.loads(_crash_path.read_text(encoding="utf-8"))
+                if int(_crash_data.get("exit_code", 0)) == -9:
+                    _disable_nodes_crash = True
+        except Exception:
+            # Never fail startup because crash-report parsing failed.
+            _disable_nodes_crash = False
+
+        _disable_nodes = _disable_nodes_env or _disable_nodes_crash
+        if cfg.get("enable_nodes", True) and not _disable_nodes:
             try:
                 self.resource_manager = ResourceManager(cfg)
                 self.media_store = MediaStore(cfg)
@@ -1354,6 +1368,8 @@ class GhostDaemon:
                          node_count, len(node_tools), device_str)
         elif _disable_nodes_env:
             log.warning("GhostNodes initialization skipped (GHOST_DISABLE_NODES is set)")
+        elif _disable_nodes_crash:
+            log.warning("GhostNodes initialization skipped after previous SIGKILL (-9) crash for safe recovery")
 
         # ── Community Hub: Node Marketplace ──────────────
         self.community_hub = None
