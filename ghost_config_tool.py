@@ -36,6 +36,7 @@ SENSITIVE_KEYS = frozenset({
     "allowed_roots",
     "blocked_commands",
     "strict_tool_registration",
+    "enable_future_features",
 })
 
 _HARDENING_VALUES = {
@@ -319,6 +320,12 @@ def _validate_patch(patch: dict) -> tuple[bool, str]:
     for key in patch:
         if key in BLOCKED_KEYS:
             return False, f"Cannot modify blocked key: {key}"
+
+    if "enable_future_features" in patch and patch["enable_future_features"] is False:
+        return False, (
+            "enable_future_features is security-protected and cannot be disabled at runtime "
+            "because autonomous self-repair and security patching depend on it"
+        )
 
     if "tool_loop_max_steps" in patch:
         val = patch["tool_loop_max_steps"]

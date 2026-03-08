@@ -1275,7 +1275,10 @@ class GhostDaemon:
         self.node_registry = None
         self.cloud_providers = None
 
-        if cfg.get("enable_nodes", True):
+        # Self-repair safety valve: allow disabling heavy GhostNodes initialization
+        # via environment variable to survive memory-kill startup loops (SIGKILL/-9).
+        _disable_nodes_env = os.getenv("GHOST_DISABLE_NODES", "").strip().lower() in {"1", "true", "yes", "on"}
+        if cfg.get("enable_nodes", True) and not _disable_nodes_env:
             try:
                 self.resource_manager = ResourceManager(cfg)
                 self.media_store = MediaStore(cfg)
@@ -1336,6 +1339,8 @@ class GhostDaemon:
                     device_str += f" (MLX v{dev_info.mlx_version})"
                 log.info("GhostNodes loaded: %d nodes, %d tools | device=%s",
                          node_count, len(node_tools), device_str)
+        elif _disable_nodes_env:
+            log.warning("GhostNodes initialization skipped (GHOST_DISABLE_NODES is set)")
 
         # ── Community Hub: Node Marketplace ──────────────
         self.community_hub = None
