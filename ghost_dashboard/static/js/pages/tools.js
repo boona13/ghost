@@ -7,12 +7,30 @@ const CATEGORY_ICONS = {
   integration: '🔗', automation: '⚙️', security: '🔒',
 };
 
+const SUBAGENT_ICONS = {
+  researcher: `<svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>`,
+  coder: `<svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>`,
+  bash: `<svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>`,
+  reviewer: `<svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>`,
+};
+
+const SUBAGENT_COLORS = {
+  researcher: 'blue',
+  coder: 'emerald',
+  bash: 'amber',
+  reviewer: 'purple',
+};
+
 export async function render(container) {
   const { GhostAPI: api, GhostUtils: u } = window;
 
   let data;
+  let subagentData = { types: [] };
   try {
-    data = await api.get('/api/tools');
+    [data, subagentData] = await Promise.all([
+      api.get('/api/tools'),
+      api.get('/api/subagents/types').catch(() => ({ types: [] })),
+    ]);
   } catch (e) {
     container.innerHTML = `<div class="text-red-400 p-4">${t('tools.loadError')}: ${u.escapeHtml(e.message)}</div>`;
     return;
@@ -20,6 +38,7 @@ export async function render(container) {
 
   const tools = data.tools || [];
   const loadedCount = tools.filter(t => t.loaded).length;
+  const subagentTypes = subagentData.types || [];
 
   container.innerHTML = `
     <div class="flex items-center justify-between mb-1">
@@ -30,6 +49,16 @@ export async function render(container) {
       </div>
     </div>
     <p class="page-desc">${t('tools.subtitle')}</p>
+
+    ${subagentTypes.length > 0 ? `
+    <!-- Subagent Types -->
+    <div class="mt-6 mb-8">
+      <h2 class="text-sm font-semibold text-zinc-400 mb-3">Subagent Types</h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+        ${subagentTypes.map(sa => renderSubagentCard(sa, u)).join('')}
+      </div>
+    </div>
+    ` : ''}
 
     <div id="tools-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
       ${tools.length === 0 ? `
@@ -43,6 +72,60 @@ export async function render(container) {
   `;
 
   bindCardEvents(container, api, u);
+  bindSubagentCards(container);
+}
+
+function renderSubagentCard(sa, u) {
+  const color = SUBAGENT_COLORS[sa.name] || 'zinc';
+  const icon = SUBAGENT_ICONS[sa.name] || SUBAGENT_ICONS.researcher;
+  const desc = (sa.description || '').split('\n')[0].replace(/^[A-Za-z ]+\.\s*Use for:/, '').trim();
+  const toolCount = sa.tools ? sa.tools.length : 'all';
+  const disallowed = (sa.disallowed_tools || []).length;
+
+  return `
+    <div class="subagent-card stat-card hover:border-${color}-500/30 transition-colors cursor-pointer" data-subagent="${u.escapeHtml(sa.name)}">
+      <div class="flex items-center gap-2.5 mb-2">
+        <div class="flex-shrink-0 w-8 h-8 rounded-lg bg-${color}-500/10 flex items-center justify-center text-${color}-400">
+          ${icon}
+        </div>
+        <div>
+          <div class="text-sm font-semibold text-white capitalize">${u.escapeHtml(sa.name)}</div>
+          <div class="text-[10px] text-zinc-600">${u.escapeHtml(sa.model === 'inherit' ? 'inherits model' : sa.model)}</div>
+        </div>
+      </div>
+      <p class="text-xs text-zinc-400 mb-3 line-clamp-2">${u.escapeHtml(desc)}</p>
+      <div class="flex items-center gap-3 text-[10px] text-zinc-500">
+        <span>Tools: ${toolCount}</span>
+        ${disallowed ? `<span>Blocked: ${disallowed}</span>` : ''}
+        <span>Max ${sa.max_steps} steps</span>
+        <span>${Math.round(sa.timeout_seconds / 60)}m timeout</span>
+      </div>
+      <div class="subagent-detail hidden mt-3 pt-3 border-t border-surface-700/50">
+        <div class="text-[10px] uppercase tracking-wider text-zinc-600 mb-1">System Prompt</div>
+        <pre class="text-[11px] text-zinc-400 bg-surface-900/50 rounded p-2 whitespace-pre-wrap max-h-32 overflow-y-auto mb-2">${u.escapeHtml(sa.system_prompt || '')}</pre>
+        ${sa.tools ? `
+          <div class="text-[10px] uppercase tracking-wider text-zinc-600 mb-1">Allowed Tools</div>
+          <div class="flex flex-wrap gap-1 mb-2">
+            ${sa.tools.map(t => `<span class="text-[10px] px-1.5 py-0.5 bg-${color}-500/10 text-${color}-400 rounded">${u.escapeHtml(t)}</span>`).join('')}
+          </div>
+        ` : '<div class="text-[10px] text-zinc-500 mb-2">All parent tools inherited</div>'}
+        ${sa.disallowed_tools?.length ? `
+          <div class="text-[10px] uppercase tracking-wider text-zinc-600 mb-1">Blocked Tools</div>
+          <div class="flex flex-wrap gap-1">
+            ${sa.disallowed_tools.map(t => `<span class="text-[10px] px-1.5 py-0.5 bg-red-500/10 text-red-400 rounded">${u.escapeHtml(t)}</span>`).join('')}
+          </div>
+        ` : ''}
+      </div>
+    </div>`;
+}
+
+function bindSubagentCards(container) {
+  container.querySelectorAll('.subagent-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const detail = card.querySelector('.subagent-detail');
+      if (detail) detail.classList.toggle('hidden');
+    });
+  });
 }
 
 function renderToolCard(tool, u) {

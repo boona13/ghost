@@ -871,6 +871,17 @@ def _process_message(session, daemon):
             )
 
         daemon.actions_today += 1
+
+        try:
+            from ghost_structured_memory import get_memory_queue
+            conversation_msgs = [
+                {"role": "user", "content": session.user_message[:2000]},
+                {"role": "assistant", "content": (session.result or "")[:2000]},
+            ]
+            get_memory_queue().add(session.id, conversation_msgs)
+        except Exception:
+            pass
+
     except Exception:
         log.warning("Failed to log chat action", exc_info=True)
 

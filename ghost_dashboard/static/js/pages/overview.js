@@ -115,7 +115,7 @@ export async function render(container) {
       <div class="text-xs text-amber-400">${t('overview.standaloneMode')}</div>
     </div>`}
 
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+    <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-6 mb-6">
       <!-- Quick actions -->
       <div>
         <h2 class="text-sm font-semibold text-zinc-400 mb-3">${t('overview.quickActions')}</h2>
@@ -195,6 +195,44 @@ export async function render(container) {
           }).join('')}
         </div>
         ` : ''}
+      </div>
+      ` : ''}
+
+      <!-- System Safety -->
+      ${s.safety ? `
+      <div>
+        <h2 class="text-sm font-semibold text-zinc-400 mb-3">System Safety</h2>
+        <div class="stat-card">
+          <div class="space-y-3">
+            <div class="text-[10px] uppercase tracking-wider text-zinc-600 mb-1">Output Guard</div>
+            <div class="health-item">
+              <span class="health-dot health-dot-ok"></span>
+              <span class="text-xs text-zinc-300">Calls Processed</span>
+              <span class="text-[10px] text-zinc-500 ml-auto font-mono">${s.safety.guard?.total_processed ?? 0}</span>
+            </div>
+            <div class="health-item">
+              <span class="health-dot ${(s.safety.guard?.duplicates_removed ?? 0) > 0 ? 'health-dot-warn' : 'health-dot-ok'}"></span>
+              <span class="text-xs text-zinc-300">Duplicates Caught</span>
+              <span class="text-[10px] text-zinc-500 ml-auto font-mono">${s.safety.guard?.duplicates_removed ?? 0}</span>
+            </div>
+            <div class="health-item">
+              <span class="health-dot ${(s.safety.guard?.calls_clamped ?? 0) > 0 ? 'health-dot-warn' : 'health-dot-ok'}"></span>
+              <span class="text-xs text-zinc-300">Calls Clamped</span>
+              <span class="text-[10px] text-zinc-500 ml-auto font-mono">${s.safety.guard?.calls_clamped ?? 0}</span>
+            </div>
+            <div class="text-[10px] uppercase tracking-wider text-zinc-600 mt-3 mb-1">Message Repair</div>
+            <div class="health-item">
+              <span class="health-dot health-dot-ok"></span>
+              <span class="text-xs text-zinc-300">Messages Scanned</span>
+              <span class="text-[10px] text-zinc-500 ml-auto font-mono">${s.safety.repair?.total_scanned ?? 0}</span>
+            </div>
+            <div class="health-item">
+              <span class="health-dot ${(s.safety.repair?.dangling_found ?? 0) > 0 ? 'health-dot-warn' : 'health-dot-ok'}"></span>
+              <span class="text-xs text-zinc-300">Dangling Repaired</span>
+              <span class="text-[10px] text-zinc-500 ml-auto font-mono">${s.safety.repair?.dangling_found ?? 0}</span>
+            </div>
+          </div>
+        </div>
       </div>
       ` : ''}
 

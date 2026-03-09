@@ -19,6 +19,8 @@ import traceback
 from ghost_tool_intent_security import ToolIntentSecurity
 from ghost_config_tool import _load_config
 from ghost_tools import get_shell_caller_context, set_shell_caller_context
+from ghost_message_repair import repair_dangling_tool_calls
+from ghost_output_guard import guard_model_output
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -2071,6 +2073,7 @@ class ToolLoopEngine:
 
         if history:
             messages.extend(history)
+            messages = repair_dangling_tool_calls(messages)
 
         all_images = list(images or [])
         if image_b64 and not all_images:
@@ -2330,6 +2333,10 @@ class ToolLoopEngine:
 
             messages.append(msg)
 
+            if msg.get("tool_calls") and tool_registry:
+                msg["tool_calls"] = guard_model_output(msg["tool_calls"])
+                if not msg["tool_calls"]:
+                    del msg["tool_calls"]
             if msg.get("tool_calls") and tool_registry:
                 self._consecutive_text_only = 0
                 for tc in msg["tool_calls"]:

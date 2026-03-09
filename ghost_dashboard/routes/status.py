@@ -83,6 +83,20 @@ def get_status():
         except Exception:
             pass
 
+        guard_stats = {}
+        try:
+            from ghost_output_guard import get_guard_stats
+            guard_stats = get_guard_stats()
+        except Exception:
+            pass
+
+        repair_stats = {}
+        try:
+            from ghost_message_repair import get_repair_stats
+            repair_stats = get_repair_stats()
+        except Exception:
+            pass
+
         return jsonify({
             "running": running,
             "embedded": True,
@@ -120,6 +134,10 @@ def get_status():
             },
             "soul_exists": SOUL_FILE.exists(),
             "user_exists": USER_FILE.exists(),
+            "safety": {
+                "guard": guard_stats,
+                "repair": repair_stats,
+            },
         })
 
     # Standalone mode — read from files

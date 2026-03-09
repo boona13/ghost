@@ -29,7 +29,8 @@ import { render as gallery } from './pages/gallery.js';
 import { render as audit } from './pages/audit.js';
 import { render as evolve_theater } from './pages/evolve_theater.js';
 import { render as tools } from './pages/tools.js';
-const pages = { overview, chat, models, config, soul, user, skills, cron, memory, feed, evolve, integrations, autonomy, setup, security, console: console_page, channels, future_features, webhooks, projects, prs, langfuse, nodes, gallery, audit, evolve_theater, tools };
+import { render as structured_memory } from './pages/structured_memory.js';
+const pages = { overview, chat, models, config, soul, user, skills, cron, memory, feed, evolve, integrations, autonomy, setup, security, console: console_page, channels, future_features, webhooks, projects, prs, langfuse, nodes, gallery, audit, evolve_theater, tools, structured_memory };
 const container = document.getElementById('page-content');
 let currentPage = null;
 let pollTimer = null;
@@ -141,6 +142,7 @@ const CMD_PAGES = [
   { page: 'soul', label: 'Soul', section: 'Intelligence' },
   { page: 'user', label: 'User Profile', section: 'Intelligence' },
   { page: 'memory', label: 'Memory', section: 'Intelligence' },
+  { page: 'structured_memory', label: 'Structured Memory', section: 'Intelligence' },
   { page: 'projects', label: 'Projects', section: 'Intelligence' },
   { page: 'models', label: 'Models', section: 'Intelligence' },
   { page: 'skills', label: 'Skills', section: 'Capabilities' },

@@ -85,6 +85,13 @@ from ghost_config_payloads import build_config_payload_tools
 from ghost_dependency_doctor import build_dependency_doctor_tools
 from ghost_pr import build_pr_tools
 from ghost_subagents import build_subagent_tools
+from ghost_subagent_config import build_typed_subagent_tools
+from ghost_structured_memory import (
+    get_memory_queue, format_memory_for_injection,
+    get_memory_data, build_structured_memory_tools,
+    get_structured_memory_config, StructuredMemoryConfig,
+    set_structured_memory_config,
+)
 from ghost_langfuse import get_langfuse_manager, build_langfuse_tools
 # from ghost_browser_use import build_browser_use_tools  # disabled — burns rate limits
 from ghost_resource_manager import ResourceManager, build_resource_manager_tools
@@ -1594,6 +1601,31 @@ class GhostDaemon:
             except Exception as e:
                 print(f"  [delegate] Failed to initialize: {e}")
 
+        # Typed Subagent System (mirrored from DeerFlow)
+        try:
+            for tool_def in build_typed_subagent_tools(
+                cfg=cfg,
+                tool_registry=self.tool_registry,
+                auth_store=self.auth_store,
+                provider_chain=self.provider_chain,
+            ):
+                self.tool_registry.register(tool_def)
+            print("  [task] Initialized typed subagent tools (researcher, coder, bash, reviewer)")
+        except Exception as e:
+            print(f"  [task] Failed to initialize typed subagents: {e}")
+
+        # Structured Memory (mirrored from DeerFlow)
+        try:
+            mem_cfg = cfg.get("structured_memory", {})
+            if mem_cfg:
+                set_structured_memory_config(StructuredMemoryConfig.from_dict(mem_cfg))
+            for tool_def in build_structured_memory_tools(engine=self.engine):
+                self.tool_registry.register(tool_def)
+            get_memory_queue(engine=self.engine)
+            print("  [structured_memory] Initialized structured memory system")
+        except Exception as e:
+            print(f"  [structured_memory] Failed to initialize: {e}")
+
         # Langfuse Observability — LLM Tracing and Monitoring
         if cfg.get("enable_langfuse", False):
             try:
@@ -1655,6 +1687,19 @@ class GhostDaemon:
                 "something new about the user.\n\n"
                 + user
             )
+
+        try:
+            memory_context = format_memory_for_injection()
+            if memory_context.strip():
+                parts.append(
+                    "## Persistent Memory\n\n"
+                    "Context remembered from prior conversations. "
+                    "Use this to personalize responses and avoid re-asking.\n\n"
+                    + memory_context
+                )
+        except Exception:
+            pass
+
         return "\n\n".join(parts) + "\n\n---\n\n"
 
     _BROWSER_TOOL_NAMES = frozenset({
@@ -2197,6 +2242,13 @@ class GhostDaemon:
             stop_voice_engine()
         except Exception as e:
             log.warning("Error stopping voice engine: %s", e)
+        try:
+            queue = get_memory_queue()
+            if queue.pending_count > 0:
+                log.info("Flushing %d pending structured memory updates...", queue.pending_count)
+                queue.flush()
+        except Exception as e:
+            log.warning("Error flushing structured memory queue: %s", e)
         print(f"\n  {DIM}👻 Ghost fading away... {self.actions_today} actions this session.{RST}\n")
 
     @staticmethod
@@ -3086,6 +3138,16 @@ class GhostDaemon:
                 entry["tools_used"] = tools_used
             append_feed(entry, self.cfg.get("max_feed_items", 50))
             self.context_memory.add(entry)
+
+            try:
+                session_id = getattr(self, '_current_session_id', None) or 'interactive'
+                conversation_msgs = [
+                    {"role": "user", "content": source[:2000]},
+                    {"role": "assistant", "content": result[:2000] if result else ""},
+                ]
+                get_memory_queue().add(session_id, conversation_msgs)
+            except Exception:
+                pass
 
         elif action_id in ("improve", "bugs", "explain") and source:
             prompt_type = action_id

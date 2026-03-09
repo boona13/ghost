@@ -37,6 +37,8 @@ def register_routes(app: Flask):
     from .media import bp as media_bp
     from .audit import bp as audit_bp
     from .tools import bp as tools_bp
+    from .structured_memory import bp as structured_memory_bp
+    from .subagents import bp as subagents_bp
 
     for bp in [status_bp, config_bp, models_bp, identity_bp,
                skills_bp, cron_bp, memory_bp, feed_bp, daemon_bp, evolve_bp,
@@ -44,7 +46,8 @@ def register_routes(app: Flask):
                security_bp, console_bp, channels_bp, future_features_bp,
                voice_bp, canvas_bp, usage_bp, webhooks_bp, projects_bp,
                prs_bp, doctor_bp, langfuse_bp,
-               nodes_bp, media_bp, audit_bp, tools_bp]:
+               nodes_bp, media_bp, audit_bp, tools_bp,
+               structured_memory_bp, subagents_bp]:
         app.register_blueprint(bp)
 
     @app.route("/")
