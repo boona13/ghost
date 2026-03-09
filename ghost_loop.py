@@ -18,6 +18,7 @@ import requests
 import traceback
 from ghost_tool_intent_security import ToolIntentSecurity
 from ghost_config_tool import _load_config
+from ghost_tools import get_shell_caller_context, set_shell_caller_context
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -2486,8 +2487,11 @@ class ToolLoopEngine:
                             if not ok_intent:
                                 tool_result = f"BLOCKED by tool-intent security: {reason_intent}"
                             else:
-                                tool_future = _llm_pool.submit(
-                                    tool_registry.execute, fn_name, exec_args)
+                                _caller_ctx = get_shell_caller_context()
+                                def _exec_tool_with_ctx(_ctx=_caller_ctx, _name=fn_name, _args=exec_args):
+                                    set_shell_caller_context(_ctx)
+                                    return tool_registry.execute(_name, _args)
+                                tool_future = _llm_pool.submit(_exec_tool_with_ctx)
                                 while True:
                                     if cancel_check and cancel_check():
                                         tool_future.cancel()
