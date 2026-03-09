@@ -100,6 +100,79 @@ from ghost_tool_builder import ToolManager, ToolEventBus, build_tool_manager_too
 # ── Logging ──────────────────────────────────────────────────────────
 log = logging.getLogger("ghost")
 
+# ── Self-correction: detect LLM give-up and auto-escalate ───────────
+
+_ESCALATION_COACHING = (
+    "That approach did not work. Do NOT repeat it. "
+    "Do NOT say you can't — you have more tools available. "
+    "Follow the escalation ladder:\n"
+    "1. web_search for 'how to do this task programmatically' "
+    "or 'python library for this task' to discover the right tool.\n"
+    "2. Install what you find in ~/.ghost/sandbox/ "
+    "(mkdir -p, python3 -m venv .venv, pip install).\n"
+    "3. Write and run a script there.\n"
+    "4. If that fails, try the browser tool.\n"
+    "Now try again with a DIFFERENT approach."
+)
+
+_GIVE_UP_CLASSIFIER_PROMPT = (
+    "You are a binary classifier. The user asked an AI agent to perform a task. "
+    "The agent replied with the text below. Did the agent GIVE UP or FAIL to "
+    "complete the task? Signs of giving up include: saying it can't do something, "
+    "asking the user to do it themselves, suggesting manual steps, apologizing "
+    "for limitations, or providing partial results while admitting it couldn't "
+    "finish.\n\n"
+    "Reply with ONLY one word: YES or NO.\n"
+    "YES = the agent gave up or failed to deliver the result.\n"
+    "NO = the agent delivered a complete, concrete result."
+)
+
+_give_up_engine = None
+
+
+def _get_give_up_engine():
+    """Lazy-init a lightweight engine for give-up classification."""
+    global _give_up_engine
+    if _give_up_engine is not None:
+        return _give_up_engine
+    try:
+        from ghost_config import load_config
+        cfg = load_config()
+        _give_up_engine = ToolLoopEngine(
+            api_key=cfg.get("api_key", os.environ.get("OPENROUTER_API_KEY", "")),
+            model=cfg.get("model", "openrouter:moonshotai/kimi-k2.5"),
+            base_url=cfg.get("base_url", "https://openrouter.ai/api/v1/chat/completions"),
+            fallback_models=cfg.get("fallback_models", []),
+            provider_chain=None,
+        )
+    except Exception:
+        _give_up_engine = False
+    return _give_up_engine
+
+
+def _detected_give_up(text: str, engine=None) -> bool:
+    """Use a fast LLM call to classify whether a response is a give-up."""
+    if not text or len(text.strip()) < 20:
+        return False
+    classifier = engine or _get_give_up_engine()
+    if not classifier:
+        return False
+    try:
+        result = classifier.single_shot(
+            system_prompt=_GIVE_UP_CLASSIFIER_PROMPT,
+            user_message=text[:2000],
+            temperature=0.0,
+            max_tokens=5,
+        )
+        verdict = (result.text or "").strip().upper()
+        is_give_up = verdict.startswith("YES")
+        if is_give_up:
+            log.info("Give-up classifier: YES — will escalate")
+        return is_give_up
+    except Exception as exc:
+        log.warning("Give-up classifier failed: %s", exc)
+        return False
+
 
 # ── Paths ────────────────────────────────────────────────────────────
 GHOST_HOME   = Path.home() / ".ghost"
@@ -2289,34 +2362,38 @@ class GhostDaemon:
             f"## GHOST CODEBASE\n"
             f"Ghost source: **{PROJECT_DIR}** — for Ghost files use file_read/file_write with full path.\n"
             f"`shell_exec` runs from HOME (~/) by default, or from workspace if workspace param is set.\n\n"
-            "## AGENT BEHAVIOR — NEVER GIVE UP\n"
+            "## AGENT BEHAVIOR — NEVER GIVE UP\n\n"
+            "**COMPLETION RULE (READ THIS FIRST):**\n"
+            "Parse EVERY verb in the user's message. Each verb is a REQUIRED action. "
+            "You may NOT reply until ALL actions are done with actual results.\n"
+            "If you installed a library but didn't run the code that uses it — you are NOT done. Keep going.\n"
+            "NEVER say 'if you want', 'let me know', 'I can also', 'would you like me to'. "
+            "Either DO it silently or omit it. End reply right after the deliverable.\n\n"
             "- Run until FULLY COMPLETE. When DONE, call `task_complete(summary='...')`.\n"
             "- NEVER hallucinate. Only state VERIFIED facts.\n"
-            "- Replying with 'here is how YOU can do it' or 'paste it here' is a FAILURE — not helping.\n"
-            "  You must deliver the actual result, not instructions for the user.\n\n"
-            "### WHAT COUNTS AS FAILURE (triggers immediate escalation):\n"
-            "- web_fetch returns only a title, boilerplate, or <500 chars of useful content\n"
-            "- A tool returns DENIED or an error\n"
-            "- You are about to tell the user to do something manually\n"
-            "- You answered some parts of the request but not all — you are NOT done yet\n"
-            "- You are about to say 'if you want I can also...' — just DO it\n"
-            "When ANY of these happen, DO NOT reply. Keep using tools until EVERY part is answered.\n\n"
-            "### ESCALATION LADDER:\n"
-            "**Level 1 — Built-in tools**: web_fetch, browser, web_search, shell_exec.\n"
-            "**Level 2 — Python sandbox** (`~/.ghost/sandbox/` with its own venv):\n"
-            "  1. `shell_exec(command='mkdir -p ~/.ghost/sandbox && cd ~/.ghost/sandbox && "
+            "- Saying 'I can't', 'I'm unable', 'not possible in this environment' = FORBIDDEN.\n"
+            "  You have unlimited tools, a Python sandbox, and a browser. There is ALWAYS a way.\n\n"
+            "### MANDATORY ESCALATION LOOP:\n"
+            "When a tool fails (DENIED, error, empty result, boilerplate) you MUST move to the "
+            "next level. Do NOT reply until you have tried ALL levels or succeeded.\n\n"
+            "**Level 1 — Direct tools**: Try web_fetch, web_search, or shell_exec.\n"
+            "**Level 2 — Research** (if Level 1 failed): `web_search('how to <task> programmatically')` "
+            "or `web_search('python library for <task>')` to discover the right library or API.\n"
+            "**Level 3 — Python sandbox** (use what Level 2 found): Run code in `~/.ghost/sandbox/`:\n"
+            "  1. `shell_exec('mkdir -p ~/.ghost/sandbox && cd ~/.ghost/sandbox && "
             "python3 -m venv .venv && source .venv/bin/activate && pip install <pkg>')`\n"
-            "  2. Write script to `~/.ghost/sandbox/run.py` via file_write\n"
-            "  3. `shell_exec(command='cd ~/.ghost/sandbox && source .venv/bin/activate && python3 run.py')`\n"
+            "  2. Write script via file_write to `~/.ghost/sandbox/run.py`\n"
+            "  3. `shell_exec('cd ~/.ghost/sandbox && source .venv/bin/activate && python3 run.py')`\n"
             "  NEVER modify Ghost source code or Ghost's `.venv`.\n"
-            "**Level 3 — Browser automation**: Navigate, click, extract.\n"
-            "**Level 4 — Combine**: Chain approaches.\n\n"
-            "### KNOWN SOLUTIONS (skip to what works):\n"
-            "- **YouTube transcript**: `pip install youtube-transcript-api` in sandbox.\n"
-            "- **GitHub repo stats**: `web_fetch('https://api.github.com/repos/OWNER/REPO')` — returns JSON.\n"
-            "- **JS-heavy sites**: browser tool, not web_fetch.\n"
-            "- **PDF content**: Download + Python (`pymupdf`/`pdfplumber`).\n\n"
-            "### PRE-REPLY CHECK: Count the user's questions. Verify you answered ALL of them with data. If not, keep going.\n\n"
+            "**Level 4 — Browser automation**: Navigate, click, extract.\n"
+            "**Level 5 — Combine**: Chain approaches.\n\n"
+            "If your response would contain 'I couldn't', 'not available', or 'unable to' — "
+            "STOP. You haven't tried all levels.\n\n"
+            "### PRE-REPLY CHECK:\n"
+            "1. Count the user's questions. Verify you answered ALL of them with data. If not, keep going.\n"
+            "2. Delete any sentence containing 'if you want', 'let me know if', 'I can also', "
+            "'I can follow up', or 'would you like me to'. Either DO it or don't mention it. "
+            "End your reply after the deliverable — no upsells.\n\n"
             "### AFTER SUCCESS — submit as permanent tool:\n"
             "  `add_future_feature(title='Add <name> tool', description='<working code + deps>', "
             "priority='P1', source='user_request')`\n\n"
@@ -2444,10 +2521,11 @@ class GhostDaemon:
             skill_model = self._resolve_skill_model(matched_skills)
 
             set_shell_caller_context("interactive")
+            _user_msg = msg.text[:self.cfg.get("max_input_chars", 16000)]
             try:
                 loop_result = self.engine.run(
                     system_prompt=system_prompt,
-                    user_message=msg.text[:self.cfg.get("max_input_chars", 16000)],
+                    user_message=_user_msg,
                     tool_registry=inbound_registry,
                     max_steps=self.cfg.get("tool_loop_max_steps", 200),
                     temperature=0.3,
@@ -2461,6 +2539,28 @@ class GhostDaemon:
                     tool_event_bus=self.tool_event_bus,
                     image_b64=image_b64,
                 )
+                for _esc in range(2):
+                    if not _detected_give_up(loop_result.text, engine=self.engine):
+                        break
+                    log.info("Self-correction: give-up detected (attempt %d/2), escalating", _esc + 1)
+                    _esc_history = list(channel_history or [])
+                    _esc_history.append({"role": "user", "content": _user_msg})
+                    _esc_history.append({"role": "assistant", "content": loop_result.text})
+                    loop_result = self.engine.run(
+                        system_prompt=system_prompt,
+                        user_message=_ESCALATION_COACHING,
+                        tool_registry=inbound_registry,
+                        max_steps=self.cfg.get("tool_loop_max_steps", 200),
+                        temperature=0.3,
+                        max_tokens=8192,
+                        on_step=terminal_step,
+                        hook_runner=self.hooks,
+                        history=_esc_history,
+                        force_tool=True,
+                        tool_intent_security=self.tool_intent_security,
+                        model_override=skill_model,
+                        tool_event_bus=self.tool_event_bus,
+                    )
             finally:
                 set_shell_caller_context("autonomous")
             reply = loop_result.text
@@ -2789,7 +2889,13 @@ class GhostDaemon:
                 f"- `shell_exec` runs from HOME (~/) by default.\n"
                 f"- `file_read`/`file_write` accept absolute paths — use `{PROJECT_DIR}/filename` for project files.\n"
                 f"- Do NOT search for the project directory. You already know it.\n\n"
-                "## AGENT BEHAVIOR — NEVER GIVE UP\n"
+                "## AGENT BEHAVIOR — NEVER GIVE UP\n\n"
+                "**COMPLETION RULE (READ THIS FIRST):**\n"
+                "Parse EVERY verb in the user's message. Each verb is a REQUIRED action. "
+                "You may NOT reply until ALL actions are done with actual results.\n"
+                "If you installed a library but didn't run the code that uses it — you are NOT done. Keep going.\n"
+                "NEVER say 'if you want', 'let me know', 'I can also', 'would you like me to'. "
+                "Either DO it silently or omit it. End reply right after the deliverable.\n\n"
                 "You are a persistent, autonomous agent. Keep going until the task is FULLY COMPLETE.\n"
                 "- Do the work without asking permission. Treat tasks as sufficient direction.\n"
                 "- When you say 'I will do X', you MUST actually do X — not just announce it.\n"
@@ -2798,31 +2904,29 @@ class GhostDaemon:
                 "- Before editing code, READ the file first to understand the full context.\n"
                 "- For code changes to Ghost, queue via add_future_feature (the Evolution Runner implements them).\n"
                 "- When DONE, call `task_complete(summary='...')` to end your turn.\n"
-                "- Replying with 'here is how YOU can do it' or 'paste it here' is a FAILURE.\n"
-                "  You must deliver the actual result, not instructions for the user.\n\n"
-                "### WHAT COUNTS AS FAILURE (triggers immediate escalation):\n"
-                "- web_fetch returns only a title, boilerplate, or <500 chars of useful content\n"
-                "- A tool returns DENIED or an error\n"
-                "- You are about to tell the user to do something manually\n"
-                "- You answered some parts of the request but not all — you are NOT done yet\n"
-                "- You are about to say 'if you want I can also...' — just DO it\n"
-                "When ANY of these happen, DO NOT reply. Keep using tools until EVERY part is answered.\n\n"
-                "### ESCALATION LADDER:\n"
-                "**Level 1 — Built-in tools**: web_fetch, browser, web_search, shell_exec, grep.\n"
-                "**Level 2 — Python sandbox** (`~/.ghost/sandbox/` with its own venv):\n"
-                "  1. `shell_exec(command='mkdir -p ~/.ghost/sandbox && cd ~/.ghost/sandbox && "
+                "- Saying 'I can't', 'I'm unable', 'not possible in this environment' = FORBIDDEN.\n"
+                "  You have unlimited tools, a Python sandbox, and a browser. There is ALWAYS a way.\n\n"
+                "### MANDATORY ESCALATION LOOP:\n"
+                "When a tool fails (DENIED, error, empty result, boilerplate) you MUST move to the "
+                "next level. Do NOT reply until you have tried ALL levels or succeeded.\n\n"
+                "**Level 1 — Direct tools**: Try web_fetch, web_search, shell_exec, grep.\n"
+                "**Level 2 — Research** (if Level 1 failed): `web_search('how to <task> programmatically')` "
+                "or `web_search('python library for <task>')` to discover the right library or API.\n"
+                "**Level 3 — Python sandbox** (use what Level 2 found): Run code in `~/.ghost/sandbox/`:\n"
+                "  1. `shell_exec('mkdir -p ~/.ghost/sandbox && cd ~/.ghost/sandbox && "
                 "python3 -m venv .venv && source .venv/bin/activate && pip install <pkg>')`\n"
-                "  2. Write script to `~/.ghost/sandbox/run.py` via file_write\n"
-                "  3. `shell_exec(command='cd ~/.ghost/sandbox && source .venv/bin/activate && python3 run.py')`\n"
+                "  2. Write script via file_write to `~/.ghost/sandbox/run.py`\n"
+                "  3. `shell_exec('cd ~/.ghost/sandbox && source .venv/bin/activate && python3 run.py')`\n"
                 "  NEVER modify Ghost source code or Ghost's `.venv`.\n"
-                "**Level 3 — Browser automation**: Navigate, click, extract.\n"
-                "**Level 4 — Combine**: Chain approaches.\n\n"
-                "### KNOWN SOLUTIONS (skip to what works):\n"
-                "- **YouTube transcript**: `pip install youtube-transcript-api` in sandbox.\n"
-                "- **GitHub repo stats**: `web_fetch('https://api.github.com/repos/OWNER/REPO')` — returns JSON.\n"
-                "- **JS-heavy sites**: browser tool, not web_fetch.\n"
-                "- **PDF content**: Download + Python (`pymupdf`/`pdfplumber`).\n\n"
-                "### PRE-REPLY CHECK: Count the user's questions. Verify you answered ALL of them with data. If not, keep going.\n\n"
+                "**Level 4 — Browser automation**: Navigate, click, extract.\n"
+                "**Level 5 — Combine**: Chain approaches.\n\n"
+                "If your response would contain 'I couldn't', 'not available', or 'unable to' — "
+                "STOP. You haven't tried all levels.\n\n"
+                "### PRE-REPLY CHECK:\n"
+                "1. Count the user's questions. Verify you answered ALL of them with data. If not, keep going.\n"
+                "2. Delete any sentence containing 'if you want', 'let me know if', 'I can also', "
+                "'I can follow up', or 'would you like me to'. Either DO it or don't mention it. "
+                "End your reply after the deliverable — no upsells.\n\n"
                 "### AFTER SUCCESS — submit as permanent tool:\n"
                 "  `add_future_feature(title='Add <name> tool', description='<working code + deps>', "
                 "priority='P1', source='user_request')`\n\n"
@@ -2931,6 +3035,27 @@ class GhostDaemon:
                         tool_intent_security=self.tool_intent_security,
                         tool_event_bus=self.tool_event_bus,
                     )
+                    for _esc in range(2):
+                        if not _detected_give_up(loop_result.text, engine=self.engine):
+                            break
+                        log.info("Self-correction: give-up detected in ask (attempt %d/2), escalating", _esc + 1)
+                        _esc_history = [
+                            {"role": "user", "content": source},
+                            {"role": "assistant", "content": loop_result.text},
+                        ]
+                        loop_result = self.engine.run(
+                            system_prompt=system_prompt,
+                            user_message=_ESCALATION_COACHING,
+                            tool_registry=ask_registry,
+                            max_steps=self.cfg.get("tool_loop_max_steps", 200),
+                            max_tokens=8192,
+                            force_tool=True,
+                            on_step=terminal_step,
+                            hook_runner=self.hooks,
+                            tool_intent_security=self.tool_intent_security,
+                            tool_event_bus=self.tool_event_bus,
+                            history=_esc_history,
+                        )
                 finally:
                     set_shell_caller_context("autonomous")
                 result = loop_result.text

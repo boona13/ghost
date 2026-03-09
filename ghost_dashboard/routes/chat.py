@@ -26,6 +26,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from ghost_projects import ProjectRegistry, format_project_for_prompt
 from ghost_tools import set_shell_caller_context
+from ghost import _detected_give_up, _ESCALATION_COACHING
 
 # File upload configuration
 AUDIO_EXTENSIONS = {'.wav', '.mp3', '.m4a', '.flac', '.ogg', '.aac'}
@@ -462,7 +463,13 @@ def _process_message(session, daemon):
             f"- `shell_exec` runs from {PROJECT_DIR} by default.\n"
             f"- `file_read`/`file_write` accept absolute paths — use `{PROJECT_DIR}/filename` for project files.\n"
             f"- Do NOT search for the project directory. You already know it.\n\n"
-            "## AGENT BEHAVIOR — NEVER GIVE UP\n"
+            "## AGENT BEHAVIOR — NEVER GIVE UP\n\n"
+            "**COMPLETION RULE (READ THIS FIRST):**\n"
+            "Parse EVERY verb in the user's message. Each verb is a REQUIRED action. "
+            "You may NOT reply until ALL actions are done with actual results.\n"
+            "If you installed a library but didn't run the code that uses it — you are NOT done. Keep going.\n"
+            "NEVER say 'if you want', 'let me know', 'I can also', 'would you like me to'. "
+            "Either DO it silently or omit it. End your reply right after the deliverable.\n\n"
             "You run in a persistent loop until the task is FULLY COMPLETE.\n"
             "- You have unlimited tool calls. Use as many as needed. There is no step limit.\n"
             "- NEVER hallucinate or make up information. Only state facts you have VERIFIED from a primary source.\n"
@@ -472,37 +479,31 @@ def _process_message(session, daemon):
             "NEVER begin with filler like 'You're right', 'Sure', 'Of course', 'Alright', etc. "
             "Use second person (you/your).\n\n"
             "### ABSOLUTE RULE: You NEVER give up. You NEVER tell the user to do it themselves.\n"
-            "Replying with 'here is how YOU can do it' or 'paste it here and I will clean it up' is "
-            "a FAILURE. That is not helping — that is quitting. You must deliver the actual result.\n\n"
-            "### WHAT COUNTS AS FAILURE (triggers immediate escalation):\n"
-            "- web_fetch returns only a title, boilerplate, or <500 chars of useful content\n"
-            "- A tool returns DENIED or an error\n"
-            "- browser content extraction returns no meaningful text\n"
-            "- You are about to reply with instructions for the USER to do something manually\n"
-            "- You answered some parts of the request but not all — you are NOT done yet\n"
-            "- You are about to say 'if you want I can also...' or 'I can follow up with...' — just DO it\n"
-            "When ANY of these happen, DO NOT reply to the user. Keep using tools until EVERY part "
-            "of the request is fully answered with verified data.\n\n"
-            "### ESCALATION LADDER (follow IN ORDER until the task is done):\n"
-            "**Level 1 — Built-in tools**: web_fetch, browser, web_search, shell_exec.\n"
-            "**Level 2 — Python sandbox**: Write and run a script in `~/.ghost/sandbox/`:\n"
-            "  1. `shell_exec(command='mkdir -p ~/.ghost/sandbox && cd ~/.ghost/sandbox && "
-            "python3 -m venv .venv && source .venv/bin/activate && pip install <needed-pkg>')`\n"
-            "  2. Write script to `~/.ghost/sandbox/run.py` via file_write\n"
-            "  3. `shell_exec(command='cd ~/.ghost/sandbox && source .venv/bin/activate && python3 run.py')`\n"
+            "Saying 'I can't', 'I'm unable', 'not possible in this environment' = FORBIDDEN.\n"
+            "You have unlimited tools, a Python sandbox, and a browser. There is ALWAYS a way.\n\n"
+            "### MANDATORY ESCALATION LOOP:\n"
+            "When a tool fails (DENIED, error, empty result, boilerplate) you MUST move to the "
+            "next level. Do NOT reply to the user until you have tried ALL levels or succeeded.\n\n"
+            "**Level 1 — Direct tools**: Try web_fetch, web_search, or shell_exec.\n"
+            "**Level 2 — Research** (if Level 1 failed): `web_search('how to <task> programmatically')` "
+            "or `web_search('python library for <task>')` to discover the right library or API.\n"
+            "**Level 3 — Python sandbox** (use what Level 2 found): Run code in `~/.ghost/sandbox/`:\n"
+            "  1. `shell_exec('mkdir -p ~/.ghost/sandbox && cd ~/.ghost/sandbox && "
+            "python3 -m venv .venv && source .venv/bin/activate && pip install <pkg>')`\n"
+            "  2. Write script via file_write to `~/.ghost/sandbox/run.py`\n"
+            "  3. `shell_exec('cd ~/.ghost/sandbox && source .venv/bin/activate && python3 run.py')`\n"
             "  NEVER modify Ghost's own source code or `.venv`. The sandbox isolates everything.\n"
-            "**Level 3 — Browser automation**: Navigate, click, and extract via the browser tool.\n"
-            "**Level 4 — Combine**: Chain approaches (browser for auth + Python for processing).\n\n"
-            "### COMMON TASKS — KNOWN SOLUTIONS (skip straight to what works):\n"
-            "- **YouTube transcript**: `pip install youtube-transcript-api` in sandbox. Don't bother with web_fetch.\n"
-            "- **GitHub repo stats** (stars, forks, etc.): `web_fetch('https://api.github.com/repos/OWNER/REPO')` — returns JSON with exact numbers. Never parse HTML for stats.\n"
-            "- **JS-heavy sites** (Twitter, SPAs): Use browser tool, not web_fetch.\n"
-            "- **PDF content**: Download with shell_exec + extract with Python (`pymupdf` or `pdfplumber`).\n"
-            "- **API data**: Write a Python script with `requests` — faster than browser.\n\n"
+            "**Level 4 — Browser automation**: Navigate, click, and extract via the browser tool.\n"
+            "**Level 5 — Combine**: Chain approaches (e.g. browser for auth + sandbox for processing).\n\n"
+            "You may ONLY reply to the user after delivering actual results. If your response would "
+            "contain 'I couldn't', 'not available', or 'unable to' — STOP. You haven't tried all levels.\n\n"
             "### PRE-REPLY SELF-CHECK (do this BEFORE every response):\n"
-            "Count the numbered questions/parts in the user's request. Verify you have a concrete, "
+            "1. Count the numbered questions/parts in the user's request. Verify you have a concrete, "
             "verified answer for EACH one. If any answer is missing, vague, or says 'I could not' — "
-            "DO NOT SEND. Go back and use more tools to get the answer.\n\n"
+            "DO NOT SEND. Go back and use more tools to get the answer.\n"
+            "2. Delete any sentence containing 'if you want', 'let me know if', 'I can also', "
+            "'I can follow up', or 'would you like me to'. Either DO it or don't mention it. "
+            "End your reply after the deliverable — no upsells.\n\n"
             "### AFTER SUCCESS — formalize the solution:\n"
             "If the solution would be useful again, submit it as a permanent Ghost tool:\n"
             "  `add_future_feature(title='Add <tool_name> tool', description='<what it does, "
@@ -725,6 +726,8 @@ def _process_message(session, daemon):
 
             engine = getattr(daemon, "chat_engine", None) or daemon.engine
             set_shell_caller_context("interactive")
+            max_escalation_retries = 2
+            escalation_attempt = 0
             try:
                 loop_result = engine.run(
                     system_prompt=system_prompt,
@@ -741,6 +744,42 @@ def _process_message(session, daemon):
                     tool_event_bus=getattr(daemon, "tool_event_bus", None),
                     on_token=on_token,
                 )
+
+                while (
+                    escalation_attempt < max_escalation_retries
+                    and not session.cancelled
+                    and _detected_give_up(loop_result.text, engine=engine)
+                ):
+                    escalation_attempt += 1
+                    log.info(
+                        "Self-correction: detected give-up in response "
+                        "(attempt %d/%d), escalating",
+                        escalation_attempt, max_escalation_retries,
+                    )
+                    escalation_history = list(chat_history or [])
+                    escalation_history.append(
+                        {"role": "user", "content": user_message_with_context}
+                    )
+                    escalation_history.append(
+                        {"role": "assistant", "content": loop_result.text}
+                    )
+                    coaching_msg = _ESCALATION_COACHING
+                    session.token_chunks.clear()
+                    loop_result = engine.run(
+                        system_prompt=system_prompt,
+                        user_message=coaching_msg,
+                        tool_registry=chat_registry,
+                        max_steps=daemon.cfg.get("tool_loop_max_steps", 200),
+                        max_tokens=8192,
+                        force_tool=True,
+                        on_step=on_step,
+                        history=escalation_history,
+                        cancel_check=lambda: session.cancelled,
+                        enable_reasoning=enable_reasoning,
+                        tool_event_bus=getattr(daemon, "tool_event_bus", None),
+                        on_token=on_token,
+                    )
+
             finally:
                 set_shell_caller_context("autonomous")
             session.result = loop_result.text
