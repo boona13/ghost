@@ -169,7 +169,6 @@ ghost_code_intel.py             — Code intelligence and indexing
 
 # Data & Utilities
 ghost_data_extract.py           — Smart data extraction (emails, phones, URLs, etc.)
-ghost_email.py                  — Email account management (mail.tm)
 ghost_shell_sessions.py         — Persistent shell session management
 ghost_console.py                — Console logging and output
 ghost_usage.py                  — Usage tracking and statistics

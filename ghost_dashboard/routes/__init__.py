@@ -21,7 +21,6 @@ def register_routes(app: Flask):
     from .integrations import bp as integrations_bp
     from .autonomy import bp as autonomy_bp
     from .setup import bp as setup_bp
-    from .accounts import bp as accounts_bp
     from .security import bp as security_bp
     from .console import bp as console_bp
     from .channels import bp as channels_bp
@@ -42,7 +41,7 @@ def register_routes(app: Flask):
 
     for bp in [status_bp, config_bp, models_bp, identity_bp,
                skills_bp, cron_bp, memory_bp, feed_bp, daemon_bp, evolve_bp,
-               chat_bp, integrations_bp, autonomy_bp, setup_bp, accounts_bp,
+               chat_bp, integrations_bp, autonomy_bp, setup_bp,
                security_bp, console_bp, channels_bp, future_features_bp,
                voice_bp, canvas_bp, usage_bp, webhooks_bp, projects_bp,
                prs_bp, doctor_bp, langfuse_bp,

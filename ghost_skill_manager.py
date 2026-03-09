@@ -130,7 +130,6 @@ class SkillSecurityScanner:
         "semantic_memory_save", "canvas",
         "google_gmail", "google_calendar", "google_drive",
         "google_docs", "google_sheets",
-        "email_create", "email_inbox", "email_read",
         "credential_save", "credential_get", "credential_list", "credential_delete",
         "webhook_create", "webhook_list", "webhook_delete", "webhook_test",
         "x_check_action", "x_log_action", "x_action_history", "x_action_stats",

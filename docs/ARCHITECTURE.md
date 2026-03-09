@@ -153,7 +153,6 @@ Additional tool sets registered from other modules:
 | `ghost_evolve.py` | `evolve_plan`, `evolve_apply`, `evolve_test`, `evolve_deploy`, `evolve_rollback` |
 | `ghost_future_features.py` | `add_future_feature`, `list_future_features`, `get_future_feature`, `approve_future_feature`, etc. |
 | `ghost_integrations.py` | `google_gmail`, `google_calendar`, `google_drive`, `google_docs`, `google_sheets` |
-| `ghost_email.py` | `email_create`, `email_inbox`, `email_read` |
 | `ghost_credentials.py` | `credential_save`, `credential_get`, `credential_list`, `credential_delete` |
 | `ghost_autonomy.py` | `add_action_item`, `log_growth_activity`, `repair_state` |
 | `ghost_webhooks.py` | `webhook_create`, `webhook_list`, `webhook_delete`, `webhook_test` |
@@ -394,7 +393,6 @@ See [DASHBOARD.md](DASHBOARD.md) for the full page and API reference.
 | `ghost_integrations.py` | Google Workspace + third-party integrations |
 | `ghost_channels/` | 3 messaging channel implementations |
 | `ghost_webhooks.py` | Webhook triggers for event-driven automation |
-| `ghost_email.py` | Disposable email account management |
 | `ghost_mcp.py` | MCP client for external tool servers |
 
 ### Security

@@ -6,7 +6,7 @@ export default {
     models: "النماذج", skills: "المهارات", autonomy: "الاستقلالية", evolve: "التطور",
     prs: "طلبات الدمج", future_features: "ميزات مستقبلية", channels: "القنوات",
     webhooks: "Webhooks", integrations: "التكاملات",
-    langfuse: "المراقبة", browser_use: "متصفح الذكاء الاصطناعي", accounts: "الحسابات",
+    langfuse: "المراقبة", browser_use: "متصفح الذكاء الاصطناعي",
     config: "الإعدادات", cron: "المهام المجدولة", security: "الأمان", pairing: "إقران الأجهزة",
     nodes: "عُقد الذكاء الاصطناعي", tools: "أدوات", gallery: "معرض الوسائط",
   },
@@ -503,14 +503,6 @@ export default {
     growthLog: "سجل النمو",
     noGrowthActivity: "لا يوجد نشاط نمو بعد. سيبدأ Ghost بالتحسين المستقل وفق الجداول الزمنية المُعدّة.",
     itemResolved: "تم حل عنصر العمل", itemDismissed: "تم تجاهل عنصر العمل",
-  },
-  accounts: {
-    title: "الحسابات", subtitle: "بيانات اعتماد البريد الإلكتروني ووسائل التواصل الاجتماعي التي يديرها Ghost",
-    totalAccounts: "إجمالي الحسابات", services: "الخدمات", latest: "الأحدث",
-    noAccounts: "لا توجد حسابات بعد", noAccountsDesc: "اطلب من Ghost إنشاء بريد إلكتروني أو حساب تواصل اجتماعي",
-    service: "الخدمة", email: "البريد الإلكتروني", username: "اسم المستخدم", notes: "ملاحظات",
-    deleteConfirm: "حذف بيانات اعتماد {name}؟", deletedName: "تم حذف {name}",
-    none: "لا يوجد",
   },
   security: {
     title: "تدقيق الأمان",

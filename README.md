@@ -344,7 +344,7 @@ Specialized knowledge injected automatically when relevant:
 | **Research** | Deep researcher (multi-source, structured output, credibility scoring), news search, blog watcher, competitive intelligence |
 | **Content** | Content creator, social content, email drafting, translation, summarization |
 | **Media** | Spotify player, GIF search, video frame extraction, image generation |
-| **Social** | X/Twitter growth (post, like, comment, repost, follow with deduplication tracking), X account creator |
+| **Social** | X/Twitter growth (post, like, comment, repost, follow with deduplication tracking) |
 | **Finance** | Trading analysis (chart patterns, technical indicators, portfolio tracking) |
 | **System** | Ghost system management, webhooks, weather, tmux, 1password, PDF tools, speech-to-text |
 
@@ -472,7 +472,6 @@ ghost_skill_registry.py     GhostHub — public skill registry with security sca
 ghost_skill_manager.py      Skill manager — install, validate, security-scan community skills
 ghost_x_tracker.py          X/Twitter tracker — deduplication for social actions
 ghost_credentials.py        Credential storage — structured service credentials with audit trail
-ghost_email.py              Disposable email — instant accounts via mail.tm
 ghost_supervisor.py         Process supervisor — crash recovery, auto-rollback after 5 crashes
 ghost_platform.py           Cross-platform — macOS/Linux/Windows abstraction layer
 ghost_dashboard/            Flask web dashboard — 29+ pages, real-time SSE

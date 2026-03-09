@@ -6,7 +6,7 @@ export default {
     models: "模型", skills: "技能", autonomy: "自主性", evolve: "进化",
     prs: "拉取请求", future_features: "未来功能", channels: "频道",
     webhooks: "Webhooks", integrations: "集成",
-    langfuse: "可观测性", browser_use: "AI 浏览器", accounts: "账户",
+    langfuse: "可观测性", browser_use: "AI 浏览器",
     config: "配置", cron: "定时任务", security: "安全", pairing: "设备配对",
     nodes: "AI 节点", gallery: "媒体库", tools: "工具",
   },
@@ -503,14 +503,6 @@ export default {
     growthLog: "成长日志",
     noGrowthActivity: "暂无成长活动。Ghost 将根据配置的计划自动开始自我改进。",
     itemResolved: "待办事项已解决", itemDismissed: "待办事项已忽略",
-  },
-  accounts: {
-    title: "账户", subtitle: "由 Ghost 管理的电子邮件和社交媒体凭据",
-    totalAccounts: "总账户数", services: "服务", latest: "最近",
-    noAccounts: "暂无账户", noAccountsDesc: "让 Ghost 创建电子邮件或社交媒体账户",
-    service: "服务", email: "电子邮件", username: "用户名", notes: "备注",
-    deleteConfirm: "删除 {name} 的凭据？", deletedName: "已删除 {name}",
-    none: "无",
   },
   security: {
     title: "安全审计",

@@ -6,7 +6,7 @@ export default {
     models: "Models", skills: "Skills", autonomy: "Autonomy", evolve: "Evolution",
     prs: "Pull Requests", future_features: "Future Features", channels: "Channels",
     webhooks: "Webhooks", integrations: "Integrations",
-    langfuse: "Observability", browser_use: "AI Browser", accounts: "Accounts",
+    langfuse: "Observability", browser_use: "AI Browser",
     config: "Configuration", cron: "Cron Jobs", security: "Security", pairing: "Device Pairing",
     nodes: "AI Nodes", gallery: "Media Gallery", tools: "Tools",
   },
@@ -503,14 +503,6 @@ export default {
     growthLog: "Growth Log",
     noGrowthActivity: "No growth activity yet. Ghost will start improving autonomously based on the configured schedules.",
     itemResolved: "Action item resolved", itemDismissed: "Action item dismissed",
-  },
-  accounts: {
-    title: "Accounts", subtitle: "Email and social media credentials managed by Ghost",
-    totalAccounts: "Total Accounts", services: "Services", latest: "Latest",
-    noAccounts: "No accounts yet", noAccountsDesc: "Ask Ghost to create an email or social media account",
-    service: "Service", email: "Email", username: "Username", notes: "Notes",
-    deleteConfirm: "Delete credentials for {name}?", deletedName: "Deleted {name}",
-    none: "None",
   },
   security: {
     title: "Security Audit",

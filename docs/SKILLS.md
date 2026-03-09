@@ -25,7 +25,6 @@ Ghost ships with 42 bundled skills in the `skills/` directory:
 | `browser` | browse, open website, go to, visit, fill form, scrape | browser, shell_exec | Browser automation with snapshot+ref |
 | `code-reviewer` | code, function, class, def, const, import | file_read, shell_exec, memory_search | Code review and analysis |
 | `competitive-intel` | competitor, ai landscape, feature gap, ai agent trends | web_search, web_fetch, browser, memory | AI ecosystem research |
-| `email-creator` | create email, email account, new email, check inbox | email_create, email_inbox, email_read, credential_* | Disposable email creation |
 | `fullstack-development` | implement, feature, build, create, new endpoint | file_*, shell_exec, browser, evolve_* | Full-stack implementation standards |
 | `future_features` | future feature, feature backlog, queue feature | add_future_feature, list_future_features, get_feature_stats | Evolution queue management |
 | `general` | *(low priority catch-all)* | memory_search, web_search, file_read, shell_exec | Default fallback skill |
@@ -58,7 +57,6 @@ Ghost ships with 42 bundled skills in the `skills/` directory:
 | `video-frames` | video, frame, extract, ffmpeg | shell_exec, file_read | Video frame extraction |
 | `weather` | weather, forecast, temperature, rain | shell_exec, web_fetch | Weather via wttr.in |
 | `webhooks` | webhook, trigger, github webhook, stripe webhook | webhook_create, webhook_list, webhook_delete, webhook_test | Webhook trigger management |
-| `x-account-creator` | create x account, sign up twitter | browser, email_*, credential_* | X/Twitter account setup |
 | `x-growth` | post on x, tweet, like, repost, x growth | browser, generate_image, x_*_action, memory | X/Twitter growth automation |
 
 ## GhostHub Registry

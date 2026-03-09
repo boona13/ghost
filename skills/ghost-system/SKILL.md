@@ -59,7 +59,6 @@ Read this ENTIRE section before writing any code.
 | `ghost_autonomy.py` | Growth logging, action items, self-repair scheduling | `build_autonomy_tools()` |
 | `ghost_integrations.py` | Google APIs (Gmail/Calendar/Drive/Docs/Sheets) + Grok/X | `build_integration_tools()` |
 | `ghost_credentials.py` | Encrypted credential storage | `build_credential_tools()` |
-| `ghost_email.py` | Mail.tm API email accounts | `build_email_tools()` |
 | `ghost_x_tracker.py` | X/Twitter action dedup tracking (SQLite) | `build_x_tracker_tools()` |
 | `ghost_code_intel.py` | AST-based code analysis | `build_code_intel_tools()` |
 | `ghost_data_extract.py` | LLM-powered structured extraction | `build_data_extract_tools()` |

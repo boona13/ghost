@@ -46,7 +46,6 @@ from ghost_autonomy import (
 )
 from ghost_credentials import build_credential_tools
 from ghost_future_features import build_future_features_tools, FutureFeaturesStore
-from ghost_email import build_email_tools
 from ghost_hybrid_memory import build_hybrid_memory_tools
 from ghost_code_intel import build_code_intel_tools
 from ghost_data_extract import build_data_extract_tools
@@ -1032,10 +1031,6 @@ class GhostDaemon:
 
         # Credential management tools
         for tool_def in build_credential_tools():
-            self.tool_registry.register(tool_def)
-
-        # Email tools (mail.tm API — create accounts, check inbox, read messages)
-        for tool_def in build_email_tools():
             self.tool_registry.register(tool_def)
 
         # X/Twitter interaction tracker (prevents duplicate likes/retweets/follows)

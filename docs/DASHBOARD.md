@@ -193,13 +193,6 @@ AI-driven security auditing.
 - **Audit history** — Past scan results and findings
 - **Auto-fix** — One-click remediation for common issues
 
-### Accounts
-
-Credential management.
-
-- **Saved credentials** — View, add, delete service credentials
-- **Organized by service** — Each integration's stored credentials
-
 ### Setup
 
 Multi-provider setup wizard.
@@ -524,7 +517,6 @@ Scheduler status (running, job counts, next wake).
 | `GET /api/audit` | Audit log |
 | `GET /api/langfuse` | Observability config |
 | `POST /api/pairing` | Device pairing |
-| `GET /api/accounts` | Credential management |
 | `GET /api/voice/status` | Voice mode status |
 
 ---

@@ -6,7 +6,7 @@ export default {
     models: "Modelos", skills: "Habilidades", autonomy: "Autonomia", evolve: "Evolução",
     prs: "Pull Requests", future_features: "Funcionalidades Futuras", channels: "Canais",
     webhooks: "Webhooks", integrations: "Integrações",
-    langfuse: "Observabilidade", browser_use: "Navegador IA", accounts: "Contas",
+    langfuse: "Observabilidade", browser_use: "Navegador IA",
     config: "Configuração", cron: "Tarefas Agendadas", security: "Segurança", pairing: "Pareamento de Dispositivo",
     nodes: "Nós de IA", tools: "Ferramentas", gallery: "Galeria de Mídia",
   },
@@ -503,14 +503,6 @@ export default {
     growthLog: "Registro de Crescimento",
     noGrowthActivity: "Nenhuma atividade de crescimento ainda. O Ghost começará a melhorar de forma autônoma com base nos cronogramas configurados.",
     itemResolved: "Item de ação resolvido", itemDismissed: "Item de ação dispensado",
-  },
-  accounts: {
-    title: "Contas", subtitle: "Credenciais de e-mail e redes sociais gerenciadas pelo Ghost",
-    totalAccounts: "Total de Contas", services: "Serviços", latest: "Mais Recente",
-    noAccounts: "Nenhuma conta ainda", noAccountsDesc: "Peça ao Ghost para criar uma conta de e-mail ou rede social",
-    service: "Serviço", email: "E-mail", username: "Usuário", notes: "Notas",
-    deleteConfirm: "Excluir credenciais de {name}?", deletedName: "{name} excluído",
-    none: "Nenhum",
   },
   security: {
     title: "Auditoria de Segurança",
