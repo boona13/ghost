@@ -1,121 +1,159 @@
-"""LlamaParse document processing tool - parses PDFs, Word docs, Excel, images and 90+ formats into structured markdown/JSON using LlamaIndex's LlamaParse API."""
+"""LlamaParse document processing tool — uses the REST API directly (no SDK)
+to avoid pydantic/Python 3.14 incompatibilities in the llama-cloud package."""
 
 import json
 import os
-import warnings
+import time
+from pathlib import Path
+
+import requests
+
+LLAMA_API = "https://api.cloud.llamaindex.ai/api/v1/parsing"
 
 
 def register(api):
     """Entry point called by ToolManager with a ToolAPI instance."""
 
-    def _get_client():
-        """Lazy import and initialize LlamaParse client."""
-        # Suppress urllib3/requests warnings before importing
-        warnings.filterwarnings('ignore', category=UserWarning, module='urllib3')
-        warnings.filterwarnings('ignore', category=UserWarning, module='requests')
-        
-        from llama_cloud import LlamaParse
-        
-        api_key = api.get_setting("api_key") or os.environ.get("LLAMAPARSE_API_KEY")
-        if not api_key:
-            raise ValueError("LlamaParse API key not configured. Set LLAMAPARSE_API_KEY in tool settings or environment.")
-        
-        return LlamaParse(api_key=api_key)
+    def _api_key():
+        key = api.get_setting("api_key") or os.environ.get("LLAMAPARSE_API_KEY")
+        if not key:
+            raise ValueError(
+                "LlamaParse API key not configured. "
+                "Set LLAMAPARSE_API_KEY in tool settings or environment."
+            )
+        return key
 
-    def parse_document(source: str, tier: str = "fast", output_format: str = "markdown", 
-                       **kwargs):
-        """
-        Parse a document (file path or URL) using LlamaParse.
-        
-        Args:
-            source: File path or URL to document
-            tier: Parsing tier - 'fast', 'cost_effective', 'agentic', 'agentic_plus'
-            output_format: Output format - 'markdown', 'json', 'text'
-        """
+    def _headers():
+        return {
+            "Authorization": f"Bearer {_api_key()}",
+            "Accept": "application/json",
+        }
+
+    def parse_document(source: str, tier: str = "fast",
+                       output_format: str = "markdown", **kwargs):
+        """Parse a document (file path or URL) via the LlamaParse REST API."""
         try:
-            client = _get_client()
-            
-            # Determine if source is URL or file path
-            is_url = source.startswith(('http://', 'https://'))
-            
-            # Map tier to LlamaParse parameter
-            tier_map = {
-                "fast": "fast",
-                "cost_effective": "balanced", 
-                "agentic": "premium",
-                "agentic_plus": "ultra"
-            }
-            parsing_tier = tier_map.get(tier, "fast")
-            
-            # Parse the document
+            is_url = source.startswith(("http://", "https://"))
+
+            # ── Upload ────────────────────────────────────────
+            upload_url = f"{LLAMA_API}/upload"
+            data = {"parsing_mode": tier}
+
             if is_url:
-                result = client.load_data(source, parsing_tier=parsing_tier)
+                data["url"] = source
+                resp = requests.post(upload_url, headers=_headers(),
+                                     data=data, timeout=30)
             else:
-                result = client.load_data(source, parsing_tier=parsing_tier)
-            
-            # Extract text content
-            if result and len(result) > 0:
-                text = "\n\n".join([doc.text for doc in result if hasattr(doc, 'text')])
-                metadata = result[0].metadata if hasattr(result[0], 'metadata') else {}
+                fpath = Path(source).expanduser()
+                if not fpath.exists():
+                    return json.dumps({
+                        "status": "error",
+                        "error": f"File not found: {source}",
+                        "source": source,
+                    })
+                with open(fpath, "rb") as f:
+                    resp = requests.post(upload_url, headers=_headers(),
+                                         data=data,
+                                         files={"file": (fpath.name, f)},
+                                         timeout=60)
+
+            resp.raise_for_status()
+            job_id = resp.json().get("id")
+            if not job_id:
+                return json.dumps({
+                    "status": "error",
+                    "error": "No job ID returned from upload",
+                    "source": source,
+                })
+
+            # ── Poll until done (max ~90s) ────────────────────
+            status_url = f"{LLAMA_API}/job/{job_id}"
+            for _ in range(30):
+                time.sleep(3)
+                sr = requests.get(status_url, headers=_headers(), timeout=15)
+                sr.raise_for_status()
+                status = sr.json().get("status", "")
+                if status == "SUCCESS":
+                    break
+                if status in ("ERROR", "FAILED"):
+                    return json.dumps({
+                        "status": "error",
+                        "error": f"LlamaParse job failed: {sr.json()}",
+                        "source": source,
+                    })
             else:
-                text = ""
-                metadata = {}
-            
-            # Format output
-            if output_format == "json":
-                output = {
-                    "text": text,
-                    "metadata": metadata,
-                    "pages": len(result) if result else 0
-                }
-            else:
-                output = text
-            
+                return json.dumps({
+                    "status": "error",
+                    "error": "LlamaParse job timed out after 90s",
+                    "source": source,
+                })
+
+            # ── Fetch result ──────────────────────────────────
+            fmt = "markdown" if output_format == "markdown" else output_format
+            result_url = f"{LLAMA_API}/job/{job_id}/result/{fmt}"
+            rr = requests.get(result_url, headers=_headers(), timeout=30)
+            rr.raise_for_status()
+            result_data = rr.json()
+
+            text = ""
+            pages = result_data.get("pages", [])
+            if pages:
+                text = "\n\n".join(p.get("text", "") for p in pages)
+            elif isinstance(result_data, dict) and "text" in result_data:
+                text = result_data["text"]
+            elif isinstance(result_data, str):
+                text = result_data
+
             api.log(f"Parsed document: {source[:50]}... ({len(text)} chars)")
-            api.memory_save(f"Parsed document {source[:50]}... using LlamaParse ({tier} tier)", 
-                          tags=["llama_parse", "document"])
-            
+            api.memory_save(
+                f"Parsed document {source[:50]}... using LlamaParse ({tier} tier)",
+                tags=["llama_parse", "document"],
+            )
+
             return json.dumps({
                 "status": "success",
                 "source": source,
                 "format": output_format,
                 "tier": tier,
-                "content": output,
-                "character_count": len(text)
+                "content": text,
+                "character_count": len(text),
             })
-            
+
         except Exception as e:
             api.log(f"Parse failed: {e}")
             return json.dumps({
                 "status": "error",
                 "error": str(e),
-                "source": source
+                "source": source,
             })
 
     api.register_tool({
         "name": "llama_parse",
-        "description": "Parse documents (PDF, Word, Excel, images, etc.) into structured text using LlamaParse API. Supports file paths or URLs.",
+        "description": (
+            "Parse documents (PDF, Word, Excel, images, etc.) into structured "
+            "text using the LlamaParse API. Supports file paths or URLs."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
                 "source": {
                     "type": "string",
-                    "description": "File path or URL to the document to parse"
+                    "description": "File path or URL to the document to parse",
                 },
                 "tier": {
                     "type": "string",
                     "enum": ["fast", "cost_effective", "agentic", "agentic_plus"],
                     "default": "fast",
-                    "description": "Parsing quality tier - fast is quickest, agentic_plus is highest quality"
+                    "description": "Parsing quality tier",
                 },
                 "output_format": {
                     "type": "string",
                     "enum": ["markdown", "json", "text"],
                     "default": "markdown",
-                    "description": "Output format for parsed content"
-                }
+                    "description": "Output format for parsed content",
+                },
             },
-            "required": ["source"]
+            "required": ["source"],
         },
-        "execute": parse_document
+        "execute": parse_document,
     })
