@@ -129,6 +129,21 @@ def _check_config_hygiene(cfg: dict) -> list[Finding]:
             "Set strict_tool_registration: true in config.json",
         ))
 
+    if not cfg.get("diagnostic_redaction_enabled", True):
+        findings.append(Finding(
+            "config", SEVERITY_WARNING,
+            "Diagnostic redaction disabled",
+            "diagnostic_redaction_enabled=false can persist sensitive process/network metadata",
+            "Set diagnostic_redaction_enabled: true to persist only summarized redacted diagnostics",
+        ))
+    else:
+        findings.append(Finding(
+            "config", SEVERITY_INFO,
+            "Diagnostic redaction enabled",
+            "High-sensitivity diagnostics are configured for redacted persistence",
+            "Keep diagnostic_redaction_enabled=true",
+        ))
+
     # Check channel DM policy security
     if cfg.get("channel_inbound_enabled", False):
         dm_policy = cfg.get("channel_dm_policy", "open")
@@ -378,6 +393,63 @@ def _check_dependency_health() -> list[Finding]:
         pass
 
     return findings
+
+
+def sanitize_diagnostic_text(text: str, max_chars: int = 2000) -> str:
+    """Redact sensitive tokens/paths from diagnostic output and cap length."""
+    if not isinstance(text, str):
+        return ""
+
+    sanitized = text
+    token_patterns = [
+        r"\b(?:sk|xai|xi|ghp|gho|github_pat)-[A-Za-z0-9_\-]{8,}\b",
+        r"\bAKIA[0-9A-Z]{16}\b",
+        r"\bAIza[0-9A-Za-z_\-]{20,}\b",
+        r"\b(?:token|apikey|api_key|password|secret)=\S+",
+    ]
+    for pattern in token_patterns:
+        sanitized = re.sub(pattern, "[REDACTED]", sanitized, flags=re.IGNORECASE)
+
+    sanitized = re.sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", "[REDACTED_EMAIL]", sanitized)
+    sanitized = re.sub(r"/(Users|home)/[^\s:/]+", r"/\1/[REDACTED_USER]", sanitized)
+    sanitized = re.sub(r"\s-[A-Za-z][A-Za-z0-9_-]{1,30}\s+\S{20,}", " [REDACTED_ARG] ", sanitized)
+
+    if len(sanitized) > max_chars:
+        return sanitized[:max_chars] + "\n...[TRUNCATED]"
+    return sanitized
+
+
+def summarize_diagnostic_output(text: str, source: str = "") -> dict:
+    """Return safe aggregate diagnostics instead of raw process/network blobs."""
+    sanitized = sanitize_diagnostic_text(text or "", max_chars=4000)
+    lines = [ln.strip() for ln in sanitized.splitlines() if ln.strip()]
+    source_lower = (source or "").lower()
+
+    summary = {
+        "source": source or "unknown",
+        "line_count": len(lines),
+        "sample": lines[:8],
+        "diagnostic_redaction_enabled": True,
+    }
+
+    if "ps" in source_lower:
+        proc_names = {}
+        for ln in lines[:300]:
+            parts = ln.split()
+            if len(parts) >= 11:
+                pname = Path(parts[10]).name[:48]
+                proc_names[pname] = proc_names.get(pname, 0) + 1
+        summary["top_processes"] = sorted(proc_names.items(), key=lambda kv: kv[1], reverse=True)[:10]
+
+    if "lsof" in source_lower:
+        ports = []
+        for ln in lines[:300]:
+            m = re.search(r":(\d+)(?:\s|$)", ln)
+            if m:
+                ports.append(int(m.group(1)))
+        summary["listening_ports"] = sorted(set(ports))[:30]
+
+    return summary
 
 
 def run_security_audit(cfg: dict = None, categories: list = None) -> dict:
