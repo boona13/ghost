@@ -1,8 +1,32 @@
 ---
 name: ghost-nodes-pipelines
-description: "Create multi-step AI pipelines using GhostNodes — chain image gen, video, audio, vision, and 3D tools"
-triggers: ["pipeline", "create video", "product video", "podcast", "document analysis", "image and", "generate and then", "chain", "workflow", "multi-step"]
-tools: ["pipeline_create", "pipeline_run", "pipeline_status", "pipeline_list", "pipeline_cancel", "text_to_image_local", "image_to_image_local", "remove_background", "upscale_image", "text_to_video", "image_to_video", "bark_speak", "generate_music", "transcribe_audio", "florence_analyze", "ocr_extract", "image_to_3d_model"]
+description: Create multi-step AI pipelines using GhostNodes — chain image, video, audio, vision, and utility tools
+triggers:
+  - pipeline
+  - workflow
+  - chain tools
+  - multi-step
+  - automate media flow
+  - generate and then
+  - product video
+  - podcast workflow
+  - document analysis pipeline
+tools:
+  - pipeline_create
+  - pipeline_run
+  - pipeline_status
+  - pipeline_list
+  - pipeline_cancel
+  - text_to_image_local
+  - image_to_image_local
+  - remove_background
+  - upscale_image
+  - generate_video
+  - bark_speak
+  - generate_music
+  - transcribe_audio
+  - florence_analyze
+  - ocr_extract
 priority: 8
 ---
 
@@ -10,90 +34,69 @@ priority: 8
 
 You have access to a powerful AI pipeline system that chains multiple local AI tools together. Use `pipeline_create` and `pipeline_run` to build multi-step workflows.
 
-## Available Nodes & Tools
+## Available Tool Groups
 
-### Image Generation
-- `text_to_image_local` — FLUX.2 / FLUX.1 / SDXL: text-to-image, auto-selects best model for hardware
-- `image_to_image_local` — Transform existing images with a prompt
-- `remove_background` — Remove backgrounds (REMBG/U2-Net)
-- `upscale_image` — Upscale 2x-4x (Real-ESRGAN)
+### Image
+- `text_to_image_local` — local text-to-image generation
+- `image_to_image_local` — transform an existing image
+- `remove_background` — remove background from subject images
+- `upscale_image` — improve resolution for final outputs
 
 ### Video
-- `text_to_video` — Generate video clips from text (CogVideoX)
-- `image_to_video` — Animate an image into a video (CogVideoX img2video)
+- `generate_video` — unified text-to-video and image-to-video entry point (provider auto-selection)
 
-### Audio & Voice
-- `bark_speak` — Expressive TTS with Suno Bark (13+ languages, laughter, effects)
-- `generate_music` — Create music from text descriptions (Meta MusicGen)
-- `transcribe_audio` — Speech-to-text with Whisper (99 languages)
+### Audio
+- `bark_speak` — local expressive speech synthesis
+- `generate_music` — local background music generation
+- `transcribe_audio` — speech-to-text
 
-### Vision & Understanding
-- `florence_analyze` — Image captioning, OCR, object detection (Florence-2)
-- `ocr_extract` — Document OCR for 90+ languages (Surya)
+### Vision / OCR
+- `florence_analyze` — captioning and visual analysis
+- `ocr_extract` — OCR extraction from image documents
 
-### 3D
-- `image_to_3d_model` — Single-image 3D reconstruction (TripoSR)
+## Pipeline Patterns
 
-## Demo Pipelines
-
-### Product Video Pipeline
-Create a product video with generated images, animation, music, and voiceover:
+### 1) Product visual -> video teaser
 
 ```json
 [
-  {"id": "img", "tool_name": "text_to_image_local", "params": {"prompt": "professional product photo of [product], studio lighting, white background"}},
-  {"id": "nobg", "tool_name": "remove_background", "params": {}, "input_from": "img", "input_key": "image_path"},
-  {"id": "upscale", "tool_name": "upscale_image", "params": {"scale": 4}, "input_from": "nobg", "input_key": "image_path"},
-  {"id": "music", "tool_name": "generate_music", "params": {"prompt": "upbeat corporate background music, modern", "duration_secs": 15}},
-  {"id": "voice", "tool_name": "bark_speak", "params": {"text": "[voiceover script]"}}
+  {"id":"img","tool_name":"text_to_image_local","params":{"prompt":"studio product photo, clean background"}},
+  {"id":"nobg","tool_name":"remove_background","params":{},"input_from":"img","input_key":"image_path"},
+  {"id":"up","tool_name":"upscale_image","params":{"scale":2},"input_from":"nobg","input_key":"image_path"},
+  {"id":"vid","tool_name":"generate_video","params":{"prompt":"slow cinematic reveal of product on neutral background","duration":5},"input_from":"up","input_key":"image_path"}
 ]
 ```
 
-### Podcast Creator Pipeline
-Transcribe audio, generate summary, create cover art, and add intro music:
+### 2) Podcast support workflow
 
 ```json
 [
-  {"id": "transcribe", "tool_name": "transcribe_audio", "params": {"audio_path": "/path/to/recording.mp3", "model_size": "medium"}},
-  {"id": "cover", "tool_name": "text_to_image_local", "params": {"prompt": "podcast cover art, modern minimalist design, microphone icon"}},
-  {"id": "intro", "tool_name": "generate_music", "params": {"prompt": "podcast intro jingle, short and catchy", "duration_secs": 5}}
+  {"id":"tx","tool_name":"transcribe_audio","params":{"audio_path":"/path/to/episode.mp3","model_size":"base"}},
+  {"id":"cover","tool_name":"text_to_image_local","params":{"prompt":"minimal podcast cover art, microphone icon"}},
+  {"id":"intro","tool_name":"generate_music","params":{"prompt":"short clean podcast intro sting","duration_secs":5}}
 ]
 ```
 
-### Document Analyzer Pipeline
-Extract text from documents and caption visual elements in parallel:
+### 3) Document OCR + visual context
 
 ```json
 [
-  {"id": "ocr", "tool_name": "ocr_extract", "params": {"image_path": "/path/to/document.png"}},
-  {"id": "analyze", "tool_name": "florence_analyze", "params": {"image_path": "/path/to/document.png", "task": "detailed_caption"}}
+  {"id":"ocr","tool_name":"ocr_extract","params":{"image_path":"/path/to/doc.png","languages":["en"]}},
+  {"id":"cap","tool_name":"florence_analyze","params":{"image_path":"/path/to/doc.png","task":"detailed_caption"}}
 ]
 ```
 
-### Social Media Content Pipeline
-Generate an image, remove background, add style, and generate a caption:
+## Execution Rules
 
-```json
-[
-  {"id": "gen", "tool_name": "text_to_image_local", "params": {"prompt": "[subject], vibrant colors, social media style"}},
-  {"id": "caption", "tool_name": "florence_analyze", "params": {"task": "detailed_caption"}, "input_from": "gen", "input_key": "image_path"}
-]
-```
+1. Build with `pipeline_create` using JSON step arrays.
+2. Run with `pipeline_run`.
+3. Track with `pipeline_status`.
+4. Reuse with `pipeline_list`.
+5. Stop long runs with `pipeline_cancel`.
 
-## How to Create Pipelines
+## Quality Guardrails
 
-1. Use `pipeline_create` with a name and JSON array of steps
-2. Each step has: `id`, `tool_name`, `params`, and optionally `input_from` + `input_key`
-3. `input_from` references the `id` of a previous step — its output `path` is passed to the next step
-4. `input_key` specifies which parameter receives the previous step's output (default: "path")
-5. Use `pipeline_run` to execute the pipeline (add `"async_mode": "true"` for background execution)
-6. Check progress with `pipeline_status`
-7. Use `pipeline_list` to see all saved pipelines
-8. Use `pipeline_cancel` to stop a running pipeline
-
-## Tips
-
-- All tools run locally — no API keys needed for node tools
-- Check GPU status with `gpu_status` before running heavy pipelines
-- Use `media_list` to browse generated outputs
-- Intermediate results are cached — re-running with tweaks is fast
+- Keep steps minimal and explicit.
+- Use deterministic filenames/inputs where possible.
+- Prefer `generate_video` over deprecated `text_to_video` / `image_to_video` references.
+- If a step output key is ambiguous, set `input_key` explicitly.
