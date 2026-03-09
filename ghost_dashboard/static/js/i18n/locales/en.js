@@ -42,6 +42,7 @@ export default {
     hoursAgo: "{n}h ago", daysAgo: "{n}d ago", refreshing: "Refreshing...",
     errorPrefix: "Error: {error}", activeDot: "● active",
     unknownError: "Unknown error", ok: "OK", err: "ERR",
+    show: "Show", hide: "Hide",
   },
   status: {
     connected: "Connected", disconnected: "Disconnected", checking: "Checking...",

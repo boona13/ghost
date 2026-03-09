@@ -42,6 +42,7 @@ export default {
     hoursAgo: "{n} 小时前", daysAgo: "{n} 天前", refreshing: "刷新中...",
     errorPrefix: "错误：{error}", activeDot: "● 活跃",
     unknownError: "未知错误", ok: "正常", err: "错误",
+    show: "显示", hide: "隐藏",
   },
   status: {
     connected: "已连接", disconnected: "已断开", checking: "检查中...",

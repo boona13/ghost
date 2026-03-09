@@ -42,6 +42,7 @@ export default {
     hoursAgo: "منذ {n} ساعة", daysAgo: "منذ {n} يوم", refreshing: "جارٍ التحديث...",
     errorPrefix: "خطأ: {error}", activeDot: "● نشط",
     unknownError: "خطأ غير معروف", ok: "موافق", err: "خطأ",
+    show: "إظهار", hide: "إخفاء",
   },
   status: {
     connected: "متصل", disconnected: "غير متصل", checking: "جارٍ التحقق...",
