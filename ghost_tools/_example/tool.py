@@ -10,6 +10,13 @@ import json
 def register(api):
     """Entry point called by ToolManager with a ToolAPI instance."""
 
+    api.register_setting({
+        "key": "greeting_prefix",
+        "label": "Greeting Prefix",
+        "type": "string",
+        "description": "Word used to greet (e.g. Hello, Hi, Hey)",
+    })
+
     prefix = api.get_setting("greeting_prefix", "Hello")
 
     def execute_greet(name: str = "world", **kwargs):

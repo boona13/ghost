@@ -14,6 +14,16 @@ LLAMA_API = "https://api.cloud.llamaindex.ai/api/v1/parsing"
 def register(api):
     """Entry point called by ToolManager with a ToolAPI instance."""
 
+    api.register_setting({
+        "key": "api_key",
+        "label": "LlamaParse API Key",
+        "type": "string",
+        "secret": True,
+        "required": True,
+        "description": "API key from cloud.llamaindex.ai",
+        "env_var": "LLAMAPARSE_API_KEY",
+    })
+
     def _api_key():
         key = api.get_setting("api_key") or os.environ.get("LLAMAPARSE_API_KEY")
         if not key:
