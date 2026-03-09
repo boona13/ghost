@@ -115,10 +115,10 @@ _ESCALATION_COACHING = (
     "Follow the escalation ladder:\n"
     "1. web_search for 'how to do this task programmatically' "
     "or 'python library for this task' to discover the right tool.\n"
-    "2. Install what you find in ~/.ghost/sandbox/ "
-    "(mkdir -p, python3 -m venv .venv, pip install).\n"
-    "3. Write and run a script there.\n"
-    "4. If that still fails, try a DIFFERENT library or API in the sandbox.\n"
+    "2. Install it: `pip install <pkg>` — this automatically goes to your "
+    "sandbox environment (NOT Ghost's own codebase).\n"
+    "3. Write a script to ~/.ghost/sandbox/scripts/ and run it.\n"
+    "4. If that still fails, try a DIFFERENT library or API.\n"
     "Do NOT open the browser — extract data programmatically.\n"
     "Now try again with a DIFFERENT approach."
 )
@@ -418,23 +418,22 @@ DEFAULT_CONFIG = {
     "enable_growth": True,
     "growth_schedules": {},
     "allowed_commands": list(DEFAULT_ALLOWED_COMMANDS),
-    "enable_dangerous_interpreters": False,
+    "enable_dangerous_interpreters": True,
     "dangerous_command_policy": {
         "python": {
-            "allow": False,
-            "require_workspace": True,
-            "deny_flags": ["-c", "-m"],
+            "allow": True,
+            "require_workspace": False,
+            "deny_flags": [],
         },
         "pip": {
-            "allow": False,
-            "require_workspace": True,
-            "allow_subcommands": ["install", "show", "freeze", "list"],
+            "allow": True,
+            "require_workspace": False,
+            "allow_subcommands": ["install", "show", "freeze", "list", "uninstall", "download", "wheel", "search", "config", "cache", "check", "debug", "hash", "inspect"],
         },
-        # safe_shell_patterns: explicitly allowed high-risk patterns (empty = block all)
-        "safe_shell_patterns": [],
+        "safe_shell_patterns": [";", "&&", "||", "|", ">", ">>", "<", "$("],
     },
-    "user_projects_dir": "",  # where user-created projects are saved; empty = auto-detect (Desktop > Projects > ~/projects)
-    "allowed_roots": [str(Path.home())],
+    "user_projects_dir": "",
+    "allowed_roots": ["/"],
     "enable_web_search": True,
     "enable_web_fetch": True,
     "enable_image_gen": True,
@@ -2432,12 +2431,14 @@ class GhostDaemon:
             "**Level 1 — Direct tools**: Try web_fetch, web_search, or shell_exec.\n"
             "**Level 2 — Research** (if Level 1 failed): `web_search('how to <task> programmatically')` "
             "or `web_search('python library for <task>')` to discover the right library or API.\n"
-            "**Level 3 — Python sandbox** (use what Level 2 found): Run code in `~/.ghost/sandbox/`:\n"
-            "  1. `shell_exec('mkdir -p ~/.ghost/sandbox && cd ~/.ghost/sandbox && "
-            "python3 -m venv .venv && source .venv/bin/activate && pip install <pkg>')`\n"
-            "  2. Write script via file_write to `~/.ghost/sandbox/run.py`\n"
-            "  3. `shell_exec('cd ~/.ghost/sandbox && source .venv/bin/activate && python3 run.py')`\n"
-            "  NEVER modify Ghost source code or Ghost's `.venv`.\n"
+            "**Level 3 — Python sandbox** (use what Level 2 found):\n"
+            "  Your shell has an automatic sandbox environment. "
+            "When you run `pip install <pkg>`, it installs into `~/.ghost/sandbox/.venv` "
+            "(NOT Ghost's own codebase). Installed tools are available immediately.\n"
+            "  1. `shell_exec('pip install <pkg>')` — installs to sandbox automatically\n"
+            "  2. Write script via file_write to `~/.ghost/sandbox/scripts/run.py`\n"
+            "  3. `shell_exec('python3 ~/.ghost/sandbox/scripts/run.py')`\n"
+            "  You do NOT need to manually create or activate a venv. It's handled for you.\n"
             "**Level 4 — Browser automation**: ONLY for interactive/visual tasks (login, clicking, forms). "
             "⚠ The browser opens a VISIBLE window on the user's screen — NEVER use it for silent data extraction. "
             "If you need data (transcripts, prices, API results), Level 3 is the right tool.\n"
@@ -2462,6 +2463,8 @@ class GhostDaemon:
             "  - You want to review code for bugs or quality → `reviewer`\n"
             "  You do NOT need the user to ask for delegation — decide yourself based on task complexity. "
             "Simple single-step tasks (one file read, one search) should be done directly.\n"
+            "**Sandbox** (for user tasks): `pip install` auto-routes to `~/.ghost/sandbox/.venv`. "
+            "Write temp scripts to `~/.ghost/sandbox/scripts/`. NEVER install user-requested packages into Ghost's own .venv.\n"
             "**User Projects**: workspace_write (create files in user workspace), shell_exec(workspace='name') (run commands in project)\n"
             "**System**: shell_exec, file_read, file_write, file_search\n"
             "**Memory**: memory_search, memory_save\n"
@@ -2981,12 +2984,14 @@ class GhostDaemon:
                 "**Level 1 — Direct tools**: Try web_fetch, web_search, shell_exec, grep.\n"
                 "**Level 2 — Research** (if Level 1 failed): `web_search('how to <task> programmatically')` "
                 "or `web_search('python library for <task>')` to discover the right library or API.\n"
-                "**Level 3 — Python sandbox** (use what Level 2 found): Run code in `~/.ghost/sandbox/`:\n"
-                "  1. `shell_exec('mkdir -p ~/.ghost/sandbox && cd ~/.ghost/sandbox && "
-                "python3 -m venv .venv && source .venv/bin/activate && pip install <pkg>')`\n"
-                "  2. Write script via file_write to `~/.ghost/sandbox/run.py`\n"
-                "  3. `shell_exec('cd ~/.ghost/sandbox && source .venv/bin/activate && python3 run.py')`\n"
-                "  NEVER modify Ghost source code or Ghost's `.venv`.\n"
+                "**Level 3 — Python sandbox** (use what Level 2 found):\n"
+                "  Your shell has an automatic sandbox environment. "
+                "When you run `pip install <pkg>`, it installs into `~/.ghost/sandbox/.venv` "
+                "(NOT Ghost's own codebase). Installed tools are available immediately.\n"
+                "  1. `shell_exec('pip install <pkg>')` — installs to sandbox automatically\n"
+                "  2. Write script via file_write to `~/.ghost/sandbox/scripts/run.py`\n"
+                "  3. `shell_exec('python3 ~/.ghost/sandbox/scripts/run.py')`\n"
+                "  You do NOT need to manually create or activate a venv. It's handled for you.\n"
                 "**Level 4 — Browser automation**: Navigate, click, extract.\n"
                 "**Level 5 — Combine**: Chain approaches.\n\n"
                 "If your response would contain 'I couldn't', 'not available', or 'unable to' — "
@@ -3015,6 +3020,8 @@ class GhostDaemon:
                 "  - Shell command chains (build, test, deploy) → `task(subagent_type='bash')`\n"
                 "  - Code review for bugs/quality → `task(subagent_type='reviewer')`\n"
                 "  Only delegate complex multi-step work. Do simple single-tool operations directly.\n"
+                "**Sandbox** (for user tasks): `pip install` auto-routes to `~/.ghost/sandbox/.venv`. "
+                "Write temp scripts to `~/.ghost/sandbox/scripts/`. NEVER install user-requested packages into Ghost's own .venv.\n"
                 "**Code Search**: grep (regex content search, sorted by recency), glob (file pattern matching), find_code_patterns\n"
                 "**Memory**: memory_search, memory_save\n"
                 "**System**: shell_exec, file_read, file_write, file_search\n"

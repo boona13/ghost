@@ -161,3 +161,6 @@ pyzbar>=0.1.9
 
 # Auto-added by Ghost evolve
 youtube_transcript_api>=1.2.4
+
+# Auto-added by Ghost evolve
+yt-dlp>=2026.3.3

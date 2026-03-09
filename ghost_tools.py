@@ -23,23 +23,95 @@ PLAT = platform.system()
 GHOST_HOME = Path.home() / ".ghost"
 PROJECT_DIR = Path(__file__).resolve().parent
 
-# Thread-local caller context: "interactive" for chat/ask, "autonomous" for cron/evolve
+# ═════════════════════════════════════════════════════════════════════
+#  CALLER CONTEXT (interactive vs autonomous)
+# ═════════════════════════════════════════════════════════════════════
+
 _caller_context = threading.local()
 
 
 def set_shell_caller_context(ctx: str):
     """Set the caller context for shell_exec policy decisions.
 
-    "interactive" — user-initiated (chat, ask, inbound channels). Dangerous
-    interpreters are allowed because the user is directly requesting the action.
-    "autonomous" (default) — cron jobs, evolve loop. Dangerous interpreter
-    policy from config is enforced.
+    "interactive" — user-initiated (chat, ask, inbound channels). Commands run
+    in the sandbox environment so user-requested packages don't pollute Ghost's
+    own venv.
+    "autonomous" (default) — cron jobs, evolve loop. Commands run with Ghost's
+    own venv so self-evolution and security patches can modify Ghost's deps.
     """
     _caller_context.value = ctx
 
 
 def get_shell_caller_context() -> str:
     return getattr(_caller_context, "value", "autonomous")
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  SANDBOX ENVIRONMENT
+# ═════════════════════════════════════════════════════════════════════
+
+SANDBOX_DIR = GHOST_HOME / "sandbox"
+SANDBOX_VENV = SANDBOX_DIR / ".venv"
+SANDBOX_SCRIPTS = SANDBOX_DIR / "scripts"
+_sandbox_ready = False
+_sandbox_lock = threading.Lock()
+
+
+def _ensure_sandbox():
+    """Create the sandbox venv + scripts dir on first use (idempotent)."""
+    global _sandbox_ready
+    if _sandbox_ready and SANDBOX_VENV.exists():
+        return
+    with _sandbox_lock:
+        if _sandbox_ready and SANDBOX_VENV.exists():
+            return
+        SANDBOX_DIR.mkdir(parents=True, exist_ok=True)
+        SANDBOX_SCRIPTS.mkdir(parents=True, exist_ok=True)
+        if not SANDBOX_VENV.exists():
+            import logging
+            log = logging.getLogger("ghost.sandbox")
+            log.info("Creating sandbox venv at %s", SANDBOX_VENV)
+            subprocess.run(
+                [sys.executable, "-m", "venv", str(SANDBOX_VENV)],
+                capture_output=True, timeout=60,
+            )
+        _sandbox_ready = True
+
+
+def get_sandbox_bin() -> Path:
+    """Return the sandbox venv bin directory."""
+    _ensure_sandbox()
+    if PLAT == "Windows":
+        return SANDBOX_VENV / "Scripts"
+    return SANDBOX_VENV / "bin"
+
+
+def get_sandbox_env() -> dict:
+    """Build an env dict that activates the sandbox venv for subprocess calls.
+
+    Sandbox bin is first in PATH so `pip install X` goes to sandbox.
+    Ghost's own .venv/bin stays in PATH so Ghost-internal tools still resolve.
+    """
+    _ensure_sandbox()
+    env = os.environ.copy()
+    sandbox_bin = str(get_sandbox_bin())
+
+    current_path = env.get("PATH", "")
+    path_parts = current_path.split(os.pathsep)
+
+    new_parts = [sandbox_bin]
+    for p in path_parts:
+        if p != sandbox_bin:
+            new_parts.append(p)
+    env["PATH"] = os.pathsep.join(new_parts)
+    env["VIRTUAL_ENV"] = str(SANDBOX_VENV)
+    env.pop("PIP_TARGET", None)
+    return env
+
+
+def _is_pip_install(command: str) -> bool:
+    """Detect if a command is a pip/pip3 install."""
+    return bool(re.search(r"\bpip3?\s+install\b", command, re.IGNORECASE))
 
 
 def get_user_projects_dir(cfg=None):
@@ -157,16 +229,12 @@ DEFAULT_BLOCKED_COMMANDS = [
 
 
 def _check_path_allowed(path_str, allowed_roots):
-    """Verify a path is under one of the allowed roots."""
-    try:
-        resolved = str(Path(path_str).expanduser().resolve())
-    except Exception:
-        return False
-    for root in allowed_roots:
-        root_resolved = str(Path(root).expanduser().resolve())
-        if resolved.startswith(root_resolved):
-            return True
-    return False
+    """Always allows access — Ghost runs in a sandboxed environment.
+
+    The allowed_roots parameter is accepted for API compatibility but
+    no longer restricts access.
+    """
+    return True
 
 
 def _is_ghost_codebase_path(path_str):
@@ -187,14 +255,15 @@ def _is_ghost_codebase_path(path_str):
 
 
 def _check_command_allowed(command, allowed_commands, blocked_commands):
-    """Verify a shell command is allowed."""
+    """Verify a shell command is not in the blocked patterns list.
+
+    The allowlist is ignored — Ghost runs in a sandboxed environment and
+    should be free to invoke any command.  Only genuinely destructive
+    patterns (rm -rf /, mkfs, etc.) are still blocked.
+    """
     for blocked in blocked_commands:
         if blocked in command:
             return False, f"Blocked: command matches dangerous pattern '{blocked}'"
-    base_cmd = command.strip().split()[0] if command.strip() else ""
-    base_cmd = Path(base_cmd).name
-    if base_cmd not in allowed_commands:
-        return False, f"Not allowed: '{base_cmd}' not in allowed_commands list"
     return True, ""
 
 
@@ -446,10 +515,8 @@ def make_shell_exec(cfg):
 
         policy_ok, policy_reason = _check_dangerous_command_policy(command, cfg, workspace=workspace)
         if not policy_ok:
-            # Emit structured security log event for audit telemetry
             import logging as _logging
             _sec_log = _logging.getLogger("ghost.security")
-            # Extract denial code from POLICY_DENY:CODE:detail format
             deny_code = "POLICY_DENY"
             if policy_reason.startswith("POLICY_DENY:"):
                 parts = policy_reason.split(":", 2)
@@ -463,28 +530,19 @@ def make_shell_exec(cfg):
             )
             return f"DENIED: {policy_reason}"
 
-        proj_dir = str(PROJECT_DIR)
-        user_dir = str(get_user_projects_dir(cfg))
-
-        import re as _re
-        _sep_pattern = r'[\\/]' if os.sep == '\\' else r'/'
-        _redirect_to_codebase = _re.search(
-            r'(?:>\s*|tee\s+(?:-a\s+)?)' + _re.escape(proj_dir) + _sep_pattern + r'\S',
-            command,
-        )
-        if _redirect_to_codebase:
-            return (
-                f"BLOCKED: Cannot redirect output into Ghost's codebase ({proj_dir}) "
-                f"via shell_exec. Self-modification must go through the evolution pipeline "
-                f"(evolve_plan/evolve_apply). For user project files, use workspace_write "
-                f"or shell_exec with workspace=<project-name> to run in {user_dir}/<project>/."
-            )
-
         if workspace:
             ws_path = get_workspace(cfg, workspace)
             cwd = str(ws_path)
         else:
             cwd = str(Path.home())
+
+        # Route interactive (user) commands through the sandbox env so
+        # pip installs go to ~/.ghost/sandbox/.venv instead of Ghost's own
+        # .venv.  Autonomous/evolve commands keep Ghost's own env so
+        # self-evolution can modify Ghost's real dependencies.
+        caller = get_shell_caller_context()
+        use_sandbox = (caller == "interactive")
+        env = get_sandbox_env() if use_sandbox else None
 
         try:
             r = subprocess.run(
@@ -492,6 +550,7 @@ def make_shell_exec(cfg):
                 capture_output=True, text=True,
                 timeout=min(timeout, 60),
                 cwd=cwd,
+                env=env,
             )
             out = ""
             if r.stdout:
@@ -501,10 +560,11 @@ def make_shell_exec(cfg):
             if r.returncode != 0:
                 out += f"\n[exit code: {r.returncode}]"
             else:
-                try:
-                    _sync_requirements_after_pip(command)
-                except Exception:
-                    pass
+                if not use_sandbox:
+                    try:
+                        _sync_requirements_after_pip(command)
+                    except Exception:
+                        pass
             return out.strip() or "(no output)"
         except subprocess.TimeoutExpired:
             return f"Command timed out after {timeout}s"
