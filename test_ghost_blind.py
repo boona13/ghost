@@ -52,7 +52,7 @@ def get_json(path):
         return json.loads(resp.read())
 
 
-def run_test(idx, name, prompt, timeout=120):
+def run_test(idx, name, prompt, timeout=300):
     print(f"\n{'='*70}")
     print(f"TEST {idx+1}/10: {name}")
     print(f"{'='*70}")
@@ -133,6 +133,9 @@ if __name__ == "__main__":
     for i, (name, prompt) in enumerate(TESTS):
         r = run_test(i, name, prompt)
         results.append(r)
+        if i < len(TESTS) - 1:
+            print(f"\n  ⏳ Waiting 15s before next test (rate-limit buffer)...")
+            time.sleep(15)
 
     # Summary
     print(f"\n{'='*70}")
