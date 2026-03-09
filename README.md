@@ -415,7 +415,7 @@ The web dashboard at [http://localhost:3333](http://localhost:3333) provides ful
 | **Autonomy** | Action items, growth routine status, growth log, crash reports |
 | **Evolution** | Self-modification history, approve/reject pending changes, view diffs, rollback |
 | **Future Features** | Prioritized backlog for autonomous implementation — add, approve, reject, track |
-| **Channels** | Configure, enable/disable, test, and monitor 20+ messaging channels |
+| **Channels** | Configure, enable/disable, test, and monitor messaging channels (Telegram, Discord, WhatsApp) |
 | **Integrations** | Google OAuth, Grok, ElevenLabs, web search providers, image gen, vision, TTS |
 | **Configuration** | All settings with hot-reload — feature toggles, rate limits, growth schedules, security, voice, factory reset |
 | **Cron Jobs** | Create and manage scheduled tasks |

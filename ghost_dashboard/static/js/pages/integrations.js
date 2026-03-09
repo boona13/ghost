@@ -88,9 +88,9 @@ export async function render(container) {
               <ol class="text-xs text-zinc-400 list-decimal list-inside space-y-1 mb-3">
                 <li><a href="https://console.cloud.google.com/apis/credentials" target="_blank" class="text-ghost-400 hover:underline">Google Cloud Console</a></li>
                 <li>${t('integrations.oauthStep2')}</li>
-                <li>${t('integrations.oauthStep3')}: <code class="bg-surface-700 px-1 rounded">http://localhost:5000/api/integrations/google/callback</code></li>
+                <li>${t('integrations.oauthStep3')}: <code class="bg-surface-700 px-1 rounded">${window.location.origin}/api/integrations/google/callback</code></li>
               </ol>
-              <details class="group">
+              <details class="group" open>
                 <summary class="text-xs text-ghost-400 cursor-pointer hover:text-ghost-300">${t('integrations.advancedConfigCreds')}</summary>
                 <div class="mt-3 space-y-2">
                   <input type="text" id="google-client-id" placeholder="${t('integrations.clientId')}" class="form-input w-full text-sm">
