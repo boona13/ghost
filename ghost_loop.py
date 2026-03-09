@@ -18,7 +18,7 @@ import requests
 import traceback
 from ghost_tool_intent_security import ToolIntentSecurity
 from ghost_config_tool import _load_config
-from ghost_tools import get_shell_caller_context, set_shell_caller_context, get_artifacts_dir, set_artifacts_dir
+from ghost_tools import get_shell_caller_context, set_shell_caller_context
 from ghost_message_repair import repair_dangling_tool_calls
 from ghost_output_guard import guard_model_output
 from dataclasses import dataclass, field
@@ -2495,17 +2495,14 @@ class ToolLoopEngine:
                                 tool_result = f"BLOCKED by tool-intent security: {reason_intent}"
                             else:
                                 _caller_ctx = get_shell_caller_context()
-                                _art_dir = get_artifacts_dir()
                                 # Poll tools (browser, shell_exec) must run in main thread
                                 # because they use libraries (playwright) that are not thread-safe
                                 if fn_name in KNOWN_POLL_TOOLS:
                                     set_shell_caller_context(_caller_ctx)
-                                    set_artifacts_dir(_art_dir)
                                     tool_result = tool_registry.execute(fn_name, exec_args)
                                 else:
-                                    def _exec_tool_with_ctx(_ctx=_caller_ctx, _art=_art_dir, _name=fn_name, _args=exec_args):
+                                    def _exec_tool_with_ctx(_ctx=_caller_ctx, _name=fn_name, _args=exec_args):
                                         set_shell_caller_context(_ctx)
-                                        set_artifacts_dir(_art)
                                         return tool_registry.execute(_name, _args)
                                     tool_future = _llm_pool.submit(_exec_tool_with_ctx)
                                     while True:
