@@ -143,8 +143,12 @@ _PLATFORM_COMMANDS = {
 
 DEFAULT_ALLOWED_COMMANDS = _BASE_ALLOWED_COMMANDS + _PLATFORM_COMMANDS.get(PLAT, [])
 
+import tempfile as _tempfile
+_GHOST_SANDBOX = str(Path(_tempfile.gettempdir()) / "ghost_sandbox")
+
 DEFAULT_ALLOWED_ROOTS = [
     str(Path.home()),
+    _GHOST_SANDBOX,
 ]
 
 DEFAULT_BLOCKED_COMMANDS = [
