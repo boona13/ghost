@@ -148,7 +148,7 @@ export async function render(container) {
             </svg>
           </button>
           <input type="file" id="chat-file-input" class="chat-file-input" multiple
-            accept=".wav,.mp3,.m4a,.flac,.ogg,.webm,.aac,.jpg,.jpeg,.png,.gif,.webp,.bmp,.mp4,.mov,.avi,.mkv,.flv,.wmv,.m4v">
+            accept=".wav,.mp3,.m4a,.flac,.ogg,.webm,.aac,.jpg,.jpeg,.png,.gif,.webp,.bmp,.mp4,.mov,.avi,.mkv,.flv,.wmv,.m4v,.pdf,.txt,.md,.csv,.json,.xml,.html,.log">
           <textarea id="chat-input" class="chat-input"
             placeholder="${t('chat.messagePlaceholder')}"
             rows="1"></textarea>
@@ -564,6 +564,9 @@ export async function render(container) {
         att.duration_secs = data.duration_secs || null;
         att.transcript = data.transcript || null;
         att.transcriptError = data.transcript_error || null;
+        att.extracted_text = data.extracted_text || null;
+        att.extract_error = data.extract_error || null;
+        att.page_count = data.page_count || null;
       }
     } catch (err) {
       att.uploading = false;
@@ -580,13 +583,14 @@ export async function render(container) {
     }
     attachmentsEl.style.display = '';
     attachmentsEl.innerHTML = attachments.map(att => {
-      const icon = att.type === 'audio' ? '\u{1F3B5}' : att.type === 'video' ? '\u{1F3AC}' : att.type === 'image' ? '\u{1F5BC}' : '\u{1F4CE}';
+      const icon = att.type === 'audio' ? '\u{1F3B5}' : att.type === 'video' ? '\u{1F3AC}' : att.type === 'image' ? '\u{1F5BC}' : att.type === 'document' ? '\u{1F4C4}' : '\u{1F4CE}';
       let stateClass = 'ready';
       let statusText = '';
       if (att.uploading) { stateClass = 'uploading'; statusText = t('chat.uploading'); }
       else if (att.error) { stateClass = 'error'; statusText = att.error; }
       else if (att.transcript) { statusText = t('chat.transcribed'); }
       else if (att.transcriptError) { statusText = t('chat.noSTT'); }
+      else if (att.extracted_text) { statusText = att.page_count ? `${att.page_count} pg` : `${att.size_mb}MB`; }
       else if (att.duration_secs) { statusText = `${att.duration_secs}s`; }
       else if (att.size_mb) { statusText = `${att.size_mb}MB`; }
       return `
@@ -700,7 +704,10 @@ export async function render(container) {
           path: a.path,
           size_mb: a.size_mb,
           duration_secs: a.duration_secs,
-          transcript: a.transcript
+          transcript: a.transcript,
+          extracted_text: a.extracted_text,
+          extract_error: a.extract_error,
+          page_count: a.page_count,
         }));
       }
       const resp = await api.post('/api/chat/send', payload);

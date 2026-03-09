@@ -25,11 +25,13 @@ log = logging.getLogger(__name__)
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from ghost_projects import ProjectRegistry, format_project_for_prompt
+from ghost_tools import set_shell_caller_context
 
 # File upload configuration
 AUDIO_EXTENSIONS = {'.wav', '.mp3', '.m4a', '.flac', '.ogg', '.aac'}
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
 VIDEO_EXTENSIONS = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv', '.wmv', '.m4v'}
+DOCUMENT_EXTENSIONS = {'.pdf', '.txt', '.md', '.csv', '.json', '.xml', '.html', '.log'}
 UPLOAD_DIR = Path.home() / ".ghost" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -421,6 +423,27 @@ def _process_message(session, daemon):
                         f"\n**Video ({att['filename']}{meta_str}):** Saved at `{att.get('path', 'unknown')}`\n"
                         f"Use this exact path when tools need a video path argument.\n"
                     )
+                elif att.get('type') == 'document':
+                    if not attachment_context:
+                        attachment_context = "\n\n## ATTACHED FILES\n"
+                    extracted = att.get('extracted_text')
+                    attachment_context += (
+                        f"\n**Document ({att['filename']}):** Saved at `{att.get('path', 'unknown')}`\n"
+                    )
+                    if extracted:
+                        attachment_context += (
+                            f"Extracted content:\n```\n{extracted[:12000]}\n```\n"
+                        )
+                    elif att.get('extract_error'):
+                        attachment_context += (
+                            f"Text extraction failed: {att['extract_error']}. "
+                            f"Use shell_exec with python3 and pypdf to read this file.\n"
+                        )
+                    else:
+                        attachment_context += (
+                            "Could not extract text — file may be scanned/image-only. "
+                            "Use shell_exec with python3 to analyze this file.\n"
+                        )
                 else:
                     if not attachment_context:
                         attachment_context = "\n\n## ATTACHED FILES\n"
@@ -666,21 +689,25 @@ def _process_message(session, daemon):
                 session.token_chunks.append(chunk)
 
             engine = getattr(daemon, "chat_engine", None) or daemon.engine
-            loop_result = engine.run(
-                system_prompt=system_prompt,
-                user_message=user_message_with_context,
-                tool_registry=chat_registry,
-                max_steps=daemon.cfg.get("tool_loop_max_steps", 200),
-                max_tokens=8192,
-                force_tool=True,
-                on_step=on_step,
-                history=chat_history,
-                cancel_check=lambda: session.cancelled,
-                images=image_attachments if image_attachments else None,
-                enable_reasoning=enable_reasoning,
-                tool_event_bus=getattr(daemon, "tool_event_bus", None),
-                on_token=on_token,
-            )
+            set_shell_caller_context("interactive")
+            try:
+                loop_result = engine.run(
+                    system_prompt=system_prompt,
+                    user_message=user_message_with_context,
+                    tool_registry=chat_registry,
+                    max_steps=daemon.cfg.get("tool_loop_max_steps", 200),
+                    max_tokens=8192,
+                    force_tool=True,
+                    on_step=on_step,
+                    history=chat_history,
+                    cancel_check=lambda: session.cancelled,
+                    images=image_attachments if image_attachments else None,
+                    enable_reasoning=enable_reasoning,
+                    tool_event_bus=getattr(daemon, "tool_event_bus", None),
+                    on_token=on_token,
+                )
+            finally:
+                set_shell_caller_context("autonomous")
             session.result = loop_result.text
             session.tools_used = [tc["tool"] for tc in loop_result.tool_calls]
         else:
@@ -798,7 +825,7 @@ def upload_file():
 
     # Validate file extension
     ext = Path(file.filename).suffix.lower()
-    all_allowed = AUDIO_EXTENSIONS | IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
+    all_allowed = AUDIO_EXTENSIONS | IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | DOCUMENT_EXTENSIONS
     if ext not in all_allowed:
         return jsonify({"ok": False, "error": f"Unsupported file type: {ext}"}), 400
 
@@ -816,8 +843,10 @@ def upload_file():
         file_type = "audio"
     elif ext in VIDEO_EXTENSIONS:
         file_type = "video"
-    else:
+    elif ext in IMAGE_EXTENSIONS:
         file_type = "image"
+    else:
+        file_type = "document"
 
     file_size_mb = round(file_path.stat().st_size / (1024 * 1024), 2)
     result = {
@@ -859,6 +888,35 @@ def upload_file():
         except Exception as e:
             result["transcript"] = None
             result["transcript_error"] = str(e)
+
+    # Extract text from PDF documents
+    if ext == ".pdf":
+        try:
+            page_count = 0
+            try:
+                import fitz
+                doc = fitz.open(str(file_path))
+                page_count = len(doc)
+                pdf_text = "\n".join(p.get_text() for p in doc)
+            except ImportError:
+                from pypdf import PdfReader
+                reader = PdfReader(str(file_path))
+                page_count = len(reader.pages)
+                pdf_text = "\n".join(p.extract_text() or "" for p in reader.pages)
+            result["extracted_text"] = pdf_text.strip()[:16000] if pdf_text.strip() else None
+            result["page_count"] = page_count
+        except Exception as e:
+            result["extracted_text"] = None
+            result["extract_error"] = str(e)
+
+    # Extract text from plain text documents
+    if ext in {'.txt', '.md', '.csv', '.json', '.xml', '.html', '.log'}:
+        try:
+            content = file_path.read_text(encoding="utf-8", errors="replace")
+            result["extracted_text"] = content[:16000]
+        except Exception as e:
+            result["extracted_text"] = None
+            result["extract_error"] = str(e)
 
     return jsonify(result)
 
