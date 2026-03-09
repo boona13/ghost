@@ -84,7 +84,8 @@ function renderToolCard(tool, u) {
 
       ${hasError ? `<div class="mb-2 text-[10px] text-red-400/70 truncate cursor-help" title="${u.escapeHtml(tool.error)}">${u.escapeHtml(tool.error)}</div>` : ''}
 
-      <div class="flex gap-2 mt-auto pt-1">
+      <div class="flex gap-2 mt-auto pt-1 flex-wrap">
+        <button class="tool-detail-btn btn btn-sm text-xs bg-surface-700 text-zinc-300 hover:bg-sky-500/20 hover:text-sky-400 transition-colors" data-tool="${u.escapeHtml(tool.name)}">${t('tools.details')}</button>
         ${isEnabled
           ? `<button class="tool-toggle-btn btn btn-sm text-xs bg-surface-700 text-zinc-300 hover:bg-red-500/20 hover:text-red-400 transition-colors" data-tool="${u.escapeHtml(tool.name)}" data-action="disable">${t('tools.disable')}</button>`
           : `<button class="tool-toggle-btn btn btn-sm text-xs bg-surface-700 text-zinc-300 hover:bg-emerald-500/20 hover:text-emerald-400 transition-colors" data-tool="${u.escapeHtml(tool.name)}" data-action="enable">${t('tools.enable')}</button>`
@@ -131,11 +132,170 @@ function bindCardEvents(container, api, u) {
     });
   });
 
+  container.querySelectorAll('.tool-detail-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const name = btn.dataset.tool;
+      btn.disabled = true;
+      try {
+        const detail = await api.get(`/api/tools/${encodeURIComponent(name)}/detail`);
+        openDetailModal(detail, u);
+      } catch (e) {
+        u.toast(e.message || t('common.error'), 'error');
+      }
+      btn.disabled = false;
+    });
+  });
+
   container.querySelectorAll('.tool-delete-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       openDeleteModal(btn.dataset.tool, api, u, container);
     });
   });
+}
+
+/* ── Detail Modal ──────────────────────────────────────────────── */
+
+function renderParamSchema(params, u) {
+  const props = (params || {}).properties || {};
+  const required = new Set((params || {}).required || []);
+  const keys = Object.keys(props);
+  if (!keys.length) return `<span class="text-zinc-600">${t('tools.noParams')}</span>`;
+
+  return keys.map(k => {
+    const p = props[k];
+    const req = required.has(k);
+    const typeStr = Array.isArray(p.type) ? p.type.join(' | ') : (p.type || 'string');
+    return `
+      <div class="flex items-baseline gap-2 py-1">
+        <code class="text-[11px] text-ghost-400 font-mono">${u.escapeHtml(k)}</code>
+        <span class="text-[10px] text-zinc-600">${u.escapeHtml(typeStr)}</span>
+        ${req ? `<span class="text-[10px] text-amber-400/70">required</span>` : ''}
+        ${p.description ? `<span class="text-[10px] text-zinc-500 truncate">${u.escapeHtml(p.description)}</span>` : ''}
+      </div>`;
+  }).join('');
+}
+
+function openDetailModal(tool, u) {
+  const existing = document.getElementById('tool-detail-overlay');
+  if (existing) existing.remove();
+
+  const m = tool.manifest || {};
+  const cat = m.category || 'utility';
+  const icon = CATEGORY_ICONS[cat] || '📦';
+  const isLoaded = tool.loaded;
+  const isEnabled = tool.enabled;
+  const hasError = !!tool.error;
+
+  const statusDot = hasError ? 'bg-red-400' : isLoaded ? 'bg-emerald-400' : isEnabled ? 'bg-yellow-400' : 'bg-zinc-600';
+  const statusColor = hasError ? 'text-red-400' : isLoaded ? 'text-emerald-400' : isEnabled ? 'text-yellow-400' : 'text-zinc-500';
+  const statusText = hasError ? t('tools.errorStatus') : isLoaded ? t('tools.loadedStatus') : isEnabled ? t('tools.enabledStatus') : t('tools.disabledStatus');
+
+  const llmTools = tool.llm_tools || [];
+  const crons = tool.crons || [];
+  const deps = m.deps || [];
+  const hooks = m.hooks || [];
+
+  const overlay = document.createElement('div');
+  overlay.id = 'tool-detail-overlay';
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-panel" style="max-width:620px;max-height:85vh;overflow-y:auto">
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-3">
+          <span class="text-2xl">${icon}</span>
+          <div>
+            <h2 class="text-base font-semibold text-white">${u.escapeHtml(tool.name)}</h2>
+            <div class="text-xs text-zinc-500">${t('tools.version', { version: m.version || '?' })} · ${t('tools.by', { author: m.author || 'ghost' })} · ${u.escapeHtml(cat)}</div>
+          </div>
+        </div>
+        <div class="flex items-center gap-3">
+          <div class="flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full ${statusDot}"></span>
+            <span class="text-xs ${statusColor}">${statusText}</span>
+          </div>
+          <button id="detail-close" class="text-zinc-500 hover:text-white text-lg leading-none" aria-label="${t('tools.close')}">&times;</button>
+        </div>
+      </div>
+
+      ${m.description ? `
+        <div class="mb-4">
+          <div class="text-[10px] uppercase tracking-wider text-zinc-600 mb-1">${t('tools.detailDescription')}</div>
+          <p class="text-sm text-zinc-300 leading-relaxed">${u.escapeHtml(m.description)}</p>
+        </div>
+      ` : ''}
+
+      <div class="mb-4">
+        <div class="text-[10px] uppercase tracking-wider text-zinc-600 mb-1">${t('tools.detailPath')}</div>
+        <code class="text-[11px] text-zinc-400 font-mono bg-surface-800 px-2 py-1 rounded block">${u.escapeHtml(tool.path || '')}</code>
+      </div>
+
+      ${hasError ? `
+        <div class="mb-4">
+          <div class="text-[10px] uppercase tracking-wider text-red-400/70 mb-1">${t('tools.detailError')}</div>
+          <pre class="text-[11px] text-red-400/80 bg-red-500/5 border border-red-500/10 rounded p-2 whitespace-pre-wrap max-h-32 overflow-y-auto">${u.escapeHtml(tool.error)}</pre>
+        </div>
+      ` : ''}
+
+      ${llmTools.length ? `
+        <div class="mb-4">
+          <div class="text-[10px] uppercase tracking-wider text-zinc-600 mb-2">${t('tools.detailLlmTools')} (${llmTools.length})</div>
+          <div class="space-y-3">
+            ${llmTools.map(lt => `
+              <div class="bg-surface-800 rounded-lg p-3">
+                <div class="flex items-center gap-2 mb-1">
+                  <code class="text-xs text-ghost-400 font-mono font-semibold">${u.escapeHtml(lt.name)}</code>
+                </div>
+                ${lt.description ? `<p class="text-[11px] text-zinc-400 mb-2">${u.escapeHtml(lt.description)}</p>` : ''}
+                <div class="text-[10px] uppercase tracking-wider text-zinc-600 mb-1">${t('tools.detailParams')}</div>
+                <div class="pl-2 border-l-2 border-surface-600">
+                  ${renderParamSchema(lt.parameters, u)}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
+
+      ${deps.length ? `
+        <div class="mb-4">
+          <div class="text-[10px] uppercase tracking-wider text-zinc-600 mb-1">${t('tools.detailDeps')}</div>
+          <div class="flex gap-1.5 flex-wrap">
+            ${deps.map(d => `<span class="text-[10px] px-2 py-0.5 bg-surface-800 text-zinc-400 rounded font-mono">${u.escapeHtml(d)}</span>`).join('')}
+          </div>
+        </div>
+      ` : ''}
+
+      ${hooks.length ? `
+        <div class="mb-4">
+          <div class="text-[10px] uppercase tracking-wider text-zinc-600 mb-1">${t('tools.detailHooks')}</div>
+          <div class="flex gap-1.5 flex-wrap">
+            ${hooks.map(h => `<span class="text-[10px] px-2 py-0.5 bg-purple-500/10 text-purple-400 rounded font-mono">${u.escapeHtml(h)}</span>`).join('')}
+          </div>
+        </div>
+      ` : ''}
+
+      ${crons.length ? `
+        <div class="mb-4">
+          <div class="text-[10px] uppercase tracking-wider text-zinc-600 mb-1">${t('tools.detailCrons')}</div>
+          <div class="flex gap-1.5 flex-wrap">
+            ${crons.map(c => `<span class="text-[10px] px-2 py-0.5 bg-sky-500/10 text-sky-400 rounded font-mono">${u.escapeHtml(c)}</span>`).join('')}
+          </div>
+        </div>
+      ` : ''}
+    </div>`;
+
+  document.body.appendChild(overlay);
+
+  function close() {
+    overlay.classList.add('modal-closing');
+    setTimeout(() => overlay.remove(), 200);
+    document.removeEventListener('keydown', onEsc);
+  }
+  function onEsc(e) { if (e.key === 'Escape') close(); }
+  document.addEventListener('keydown', onEsc);
+
+  overlay.querySelector('#detail-close')?.addEventListener('click', close);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
 }
 
 /* ── Settings Modal ─────────────────────────────────────────────── */

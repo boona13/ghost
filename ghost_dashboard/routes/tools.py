@@ -40,6 +40,34 @@ def list_tools():
     return jsonify({"tools": tools, "total": len(tools)})
 
 
+@bp.route("/api/tools/<name>/detail")
+def get_tool_detail(name):
+    tm = _get_tool_manager()
+    if not tm:
+        return jsonify({"error": "Tool system not initialized"}), 503
+
+    info = tm.tools.get(name)
+    if not info:
+        return jsonify({"error": f"Tool '{name}' not found"}), 404
+
+    entry = info.to_dict()
+
+    daemon = _get_daemon()
+    registry = getattr(daemon, "tool_registry", None) if daemon else None
+    llm_tools = []
+    if registry and info.loaded and info.tools:
+        for tool_name in info.tools:
+            tool_def = registry.get(tool_name)
+            if tool_def:
+                llm_tools.append({
+                    "name": tool_def.get("name", tool_name),
+                    "description": tool_def.get("description", ""),
+                    "parameters": tool_def.get("parameters", {}),
+                })
+    entry["llm_tools"] = llm_tools
+    return jsonify(entry)
+
+
 @bp.route("/api/tools/<name>/settings")
 def get_tool_settings(name):
     tm = _get_tool_manager()
