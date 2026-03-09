@@ -687,6 +687,13 @@ def make_file_write(cfg):
                     f.write(content)
             else:
                 p.write_text(content, encoding="utf-8")
+
+            try:
+                from ghost_artifacts import auto_register
+                auto_register(str(p))
+            except Exception:
+                pass
+
             return f"OK: wrote {len(content)} chars to {path}"
         except Exception as e:
             return f"Write error: {e}"

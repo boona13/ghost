@@ -284,6 +284,13 @@ def build_image_gen_tools(auth_store=None, cfg=None, api_key=None):
             )
             if path is None:
                 return json.dumps({"status": "error", "error": info})
+
+            try:
+                from ghost_artifacts import auto_register
+                auto_register(path)
+            except Exception:
+                pass
+
             return json.dumps({
                 "status": "ok",
                 "path": path,

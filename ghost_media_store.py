@@ -131,6 +131,12 @@ class MediaStore:
         log.info("Media saved: %s (%s, %d bytes, node=%s, provider=%s)",
                  safe_name, media_type, size_bytes, source_node, provider)
 
+        try:
+            from ghost_artifacts import auto_register
+            auto_register(str(out_path))
+        except Exception:
+            pass
+
         if self.tool_event_bus:
             try:
                 self.tool_event_bus.emit(

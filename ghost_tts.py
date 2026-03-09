@@ -230,6 +230,12 @@ def build_tts_tools(auth_store=None, cfg=None):
         if "error" in result:
             return f"TTS error: {result['error']}"
 
+        try:
+            from ghost_artifacts import auto_register
+            auto_register(result["file"])
+        except Exception:
+            pass
+
         size_kb = Path(result["file"]).stat().st_size / 1024
         return json.dumps({
             "status": "ok",

@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from ghost_projects import ProjectRegistry, format_project_for_prompt
 from ghost_tools import set_shell_caller_context
 from ghost import _detected_give_up, _ESCALATION_COACHING
+from ghost_artifacts import set_current_message_id, get_artifacts_dir
 
 # File upload configuration
 AUDIO_EXTENSIONS = {'.wav', '.mp3', '.m4a', '.flac', '.ogg', '.aac'}
@@ -335,7 +336,8 @@ def _process_message(session, daemon):
     """Run the user message through Ghost's tool loop in a background thread."""
     try:
         session.status = "processing"
-        
+        set_current_message_id(session.id)
+
         # Check for /think directive and reasoning mode
         enable_reasoning = session.enable_reasoning
         if _reasoning_available:
@@ -597,6 +599,13 @@ def _process_message(session, daemon):
             "When creating or editing SKILL.md files, `triggers:` MUST be a flat YAML list of plain strings.\n"
             "WRONG: `- keywords: [\"a\",\"b\"]`  WRONG: `- {match: \"x\"}`\n"
             "RIGHT: `- a`  `- b`  `- x`\n"
+            "\n## ARTIFACTS — DELIVERABLE FILES\n"
+            f"When you produce files the user wants (CSVs, images, charts, PDFs, audio, scripts, etc.), "
+            f"save them to `{get_artifacts_dir(session.id)}/`.\n"
+            f"The user will be able to download them directly from the chat.\n"
+            f"Use `file_write` with a path inside this directory for any deliverable output.\n"
+            f"Example: `file_write(path='{get_artifacts_dir(session.id)}/analysis.csv', content='...')`\n"
+            f"Generated images and audio files are automatically copied to this folder.\n"
         )
 
         if matched_skills and daemon.skill_loader:
@@ -821,6 +830,7 @@ def _process_message(session, daemon):
         session.finished_at = time.time()
         return
     finally:
+        set_current_message_id(None)
         try:
             from ghost_node_manager import clear_node_progress_callback
             clear_node_progress_callback()
@@ -1353,3 +1363,62 @@ def get_generation(session_id):
         })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ============================================================================
+# Artifacts API — deliverable files produced during chat
+# ============================================================================
+
+from ghost_artifacts import list_artifacts, ARTIFACTS_ROOT
+
+_SAFE_SERVE_MIME = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
+    ".svg": "image/svg+xml",
+    ".pdf": "application/pdf",
+    ".csv": "text/csv",
+    ".json": "application/json",
+    ".xml": "application/xml",
+    ".html": "text/html",
+    ".txt": "text/plain",
+    ".md": "text/markdown",
+    ".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg",
+    ".m4a": "audio/mp4", ".flac": "audio/flac",
+    ".mp4": "video/mp4", ".webm": "video/webm",
+    ".zip": "application/zip",
+    ".py": "text/plain", ".js": "text/plain", ".ts": "text/plain",
+    ".css": "text/plain", ".sql": "text/plain",
+}
+
+
+@bp.route("/api/chat/artifacts/<message_id>")
+def get_artifacts(message_id):
+    """List artifact files for a specific chat message."""
+    if ".." in message_id or "/" in message_id or "\\" in message_id:
+        return jsonify({"ok": False, "error": "Invalid message_id"}), 400
+    items = list_artifacts(message_id)
+    return jsonify({"ok": True, "message_id": message_id, "artifacts": items})
+
+
+@bp.route("/api/chat/artifacts/<message_id>/<filename>")
+def serve_artifact(message_id, filename):
+    """Serve an artifact file for download/preview."""
+    if ".." in message_id or "/" in message_id or "\\" in message_id:
+        abort(400)
+    if ".." in filename or "/" in filename or "\\" in filename:
+        abort(400)
+
+    artifact_dir = ARTIFACTS_ROOT / message_id
+    if not artifact_dir.is_dir():
+        abort(404)
+
+    file_path = (artifact_dir / filename).resolve()
+    if not file_path.is_relative_to(artifact_dir.resolve()):
+        abort(403)
+    if not file_path.exists():
+        abort(404)
+
+    ext = file_path.suffix.lower()
+    mime = _SAFE_SERVE_MIME.get(ext, "application/octet-stream")
+
+    return send_from_directory(str(artifact_dir), filename, mimetype=mime)

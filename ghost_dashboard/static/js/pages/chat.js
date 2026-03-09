@@ -8,9 +8,12 @@ let _lastMessageFromVoice = false;
 let _activeProjectId = null;
 let _reasoningMode = false;
 let _currentSessionId = 'default';
+let _sessionArtifacts = {};  // message_id -> [{filename, size_human, category, ...}]
+let _artifactsExpanded = false;
 
 window.addEventListener('hashchange', () => {
   if (voicePollTimer) { clearInterval(voicePollTimer); voicePollTimer = null; }
+  // _artifactPollTimer is cleaned up inside the render scope
 });
 
 function _getActiveMessage() {
@@ -131,6 +134,24 @@ export async function render(container) {
         ` : ''}
       </div>
 
+      <div id="chat-artifacts-panel" class="chat-artifacts-panel" style="display:none">
+        <div class="chat-artifacts-header" id="artifacts-header">
+          <div class="chat-artifacts-badge">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+            </svg>
+            <span>Artifacts</span>
+            <span class="badge-count" id="artifacts-count">0</span>
+          </div>
+          <svg class="chat-artifacts-chevron" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+          </svg>
+        </div>
+        <div class="chat-artifacts-body" id="artifacts-body">
+          <div class="chat-artifacts-grid" id="artifacts-grid"></div>
+        </div>
+      </div>
+
       <div class="chat-input-area chat-drop-zone" id="chat-drop-zone">
         <div id="chat-attachments" class="chat-attachments" style="display:none"></div>
         <div class="chat-input-wrapper">
@@ -227,6 +248,134 @@ export async function render(container) {
   let processing = false;
   let activeMessageId = null;
   let attachments = [];
+  let _artifactPollTimer = null;
+
+  // ── Artifacts panel logic ──────────────────────────────────────
+  const artifactsPanel = container.querySelector('#chat-artifacts-panel');
+  const artifactsHeader = container.querySelector('#artifacts-header');
+  const artifactsGrid = container.querySelector('#artifacts-grid');
+  const artifactsCount = container.querySelector('#artifacts-count');
+
+  artifactsHeader?.addEventListener('click', () => {
+    _artifactsExpanded = !_artifactsExpanded;
+    if (_artifactsExpanded) {
+      artifactsPanel.classList.add('expanded');
+    } else {
+      artifactsPanel.classList.remove('expanded');
+    }
+  });
+
+  function _getAllArtifacts() {
+    const all = [];
+    for (const mid of Object.keys(_sessionArtifacts)) {
+      for (const a of _sessionArtifacts[mid]) {
+        all.push({ ...a, message_id: mid });
+      }
+    }
+    all.sort((a, b) => (b.modified || 0) - (a.modified || 0));
+    return all;
+  }
+
+  function renderArtifactsPanel() {
+    const all = _getAllArtifacts();
+    if (all.length === 0) {
+      artifactsPanel.style.display = 'none';
+      return;
+    }
+    artifactsPanel.style.display = '';
+    artifactsCount.textContent = all.length;
+
+    const esc = window.GhostUtils?.escapeHtml || ((s) => s);
+    artifactsGrid.innerHTML = all.map(a => {
+      const url = `/api/chat/artifacts/${a.message_id}/${encodeURIComponent(a.filename)}`;
+      const icon = _artifactIcon(a.category, a.ext);
+      const isImage = a.category === 'image';
+      const isAudio = a.category === 'audio';
+
+      return `
+        <div class="artifact-card" title="${esc(a.filename)}" data-url="${url}" data-cat="${a.category}" data-fname="${esc(a.filename)}">
+          ${isImage
+            ? `<img class="artifact-thumb" src="${url}" alt="${esc(a.filename)}" loading="lazy">`
+            : `<div class="artifact-icon">${icon}</div>`
+          }
+          <div class="artifact-info">
+            <div class="artifact-name">${esc(a.filename)}</div>
+            <div class="artifact-size">${a.size_human || ''}</div>
+          </div>
+          ${isAudio ? `<div class="artifact-audio-mini"><audio controls preload="none" src="${url}"></audio></div>` : ''}
+          <a class="artifact-download" href="${url}" download="${esc(a.filename)}" title="Download" onclick="event.stopPropagation()">
+            <svg width="10" height="10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+            </svg>
+          </a>
+        </div>`;
+    }).join('');
+
+    artifactsGrid.querySelectorAll('.artifact-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const url = card.dataset.url;
+        const cat = card.dataset.cat;
+        const fname = card.dataset.fname;
+        if (!url) return;
+        if (cat === 'image') {
+          window.open(url, '_blank');
+        } else {
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = fname;
+          link.click();
+        }
+      });
+    });
+  }
+
+  function _artifactIcon(category) {
+    const icons = {
+      image: '\u{1F5BC}\uFE0F',
+      audio: '\u{1F3B5}',
+      video: '\u{1F3AC}',
+      pdf: '\u{1F4C4}',
+      spreadsheet: '\u{1F4CA}',
+      data: '\u{1F4CB}',
+    };
+    return icons[category] || '\u{1F4CE}';
+  }
+
+  async function pollArtifacts(messageId) {
+    if (!messageId) return;
+    try {
+      const data = await api.get(`/api/chat/artifacts/${messageId}`);
+      if (data.ok && data.artifacts && data.artifacts.length > 0) {
+        _sessionArtifacts[messageId] = data.artifacts;
+        renderArtifactsPanel();
+      }
+    } catch { /* artifacts endpoint may not be ready yet */ }
+  }
+
+  function startArtifactPolling(messageId) {
+    stopArtifactPolling();
+    pollArtifacts(messageId);
+    _artifactPollTimer = setInterval(() => pollArtifacts(messageId), 3000);
+  }
+
+  function stopArtifactPolling() {
+    if (_artifactPollTimer) {
+      clearInterval(_artifactPollTimer);
+      _artifactPollTimer = null;
+    }
+  }
+
+  // Restore artifacts from history messages
+  for (const msg of history) {
+    if (msg.message_id) {
+      api.get(`/api/chat/artifacts/${msg.message_id}`).then(data => {
+        if (data.ok && data.artifacts && data.artifacts.length > 0) {
+          _sessionArtifacts[msg.message_id] = data.artifacts;
+          renderArtifactsPanel();
+        }
+      }).catch(() => {});
+    }
+  }
 
   for (const msg of history) {
     appendMessage(messagesEl, 'user', msg.user_message || '');
@@ -296,6 +445,10 @@ export async function render(container) {
 
   newSessionBtn.addEventListener('click', async () => {
     try { await api.post('/api/chat/clear'); } catch {}
+    _sessionArtifacts = {};
+    _artifactsExpanded = false;
+    artifactsPanel.style.display = 'none';
+    artifactsPanel.classList.remove('expanded');
     messagesEl.innerHTML = `
       <div id="chat-empty" class="chat-empty">
         <div class="chat-empty-orb">
@@ -733,6 +886,7 @@ export async function render(container) {
     activeMessageId = null;
     _lastMessageFromVoice = false;
     _clearActiveMessage();
+    stopArtifactPolling();
     stopBtn.style.display = 'none';
     stopBtn.disabled = false;
     sendBtn.style.display = '';
@@ -753,6 +907,8 @@ export async function render(container) {
     let progressEl = null;
     let streamingEl = null;
     let streamedText = '';
+
+    startArtifactPolling(messageId);
 
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data);
@@ -808,6 +964,7 @@ export async function render(container) {
       if (data.type === 'done') {
         eventSource.close();
         eventSource = null;
+        stopArtifactPolling();
         if (streamingEl) { streamingEl.remove(); streamingEl = null; }
         thinkingEl.remove();
 
@@ -831,6 +988,8 @@ export async function render(container) {
           try { api.post('/api/voice/speak', { text: data.result }); } catch {}
         }
 
+        pollArtifacts(messageId);
+
         scrollToBottom(messagesEl);
         resetInput();
       }
@@ -838,6 +997,7 @@ export async function render(container) {
       if (data.type === 'error') {
         eventSource.close();
         eventSource = null;
+        stopArtifactPolling();
         thinkingEl.remove();
         stepsContainer.remove();
         appendMessage(messagesEl, 'error', data.error);
@@ -848,6 +1008,7 @@ export async function render(container) {
       if (data.done && data.error) {
         eventSource.close();
         eventSource = null;
+        stopArtifactPolling();
         thinkingEl.remove();
         stepsContainer.remove();
         appendMessage(messagesEl, 'error', data.error);
@@ -859,6 +1020,7 @@ export async function render(container) {
     eventSource.onerror = () => {
       eventSource.close();
       eventSource = null;
+      stopArtifactPolling();
       try { thinkingEl.remove(); } catch {}
       try { stepsContainer.remove(); } catch {}
 
