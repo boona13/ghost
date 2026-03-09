@@ -2356,6 +2356,9 @@ class GhostDaemon:
                 try:
                     img_data = fpath.read_bytes()
                     image_b64 = base64.b64encode(img_data).decode()
+                    media_text_parts.append(
+                        f"[Image: {fpath.name} (path: {fpath})]"
+                    )
                     if not msg.text:
                         msg.text = "The user sent an image. Describe and analyze it."
                 except Exception as exc:
