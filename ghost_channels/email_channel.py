@@ -182,15 +182,17 @@ class Provider(ChannelProvider):
                             body = payload.decode("utf-8", errors="replace")
 
                     if body.strip():
-                        sender = parsed.get("From", "unknown")
+                        raw_from = parsed.get("From", "unknown")
+                        sender_name, sender_addr = email.utils.parseaddr(raw_from)
+                        sender_id = sender_addr or raw_from
                         msg = InboundMessage(
                             channel_id="email",
-                            sender_id=sender,
-                            sender_name=sender,
+                            sender_id=sender_id,
+                            sender_name=sender_name or sender_id,
                             text=body.strip(),
                             timestamp=time.time(),
                             raw={"subject": parsed.get("Subject", ""),
-                                 "from": sender},
+                                 "from": raw_from},
                         )
                         on_message(msg)
 

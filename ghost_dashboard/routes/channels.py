@@ -139,10 +139,19 @@ def configure_channel(channel_id):
     all_cfg[channel_id] = existing
     save_channels_config(all_cfg)
 
+    # Auto-start inbound listener if the channel supports it
+    inbound_started = False
+    if ok and prov.meta.supports_inbound:
+        from ghost_dashboard import get_daemon
+        daemon = get_daemon()
+        if daemon and hasattr(daemon, "inbound_dispatcher") and daemon.inbound_dispatcher:
+            inbound_started = daemon.inbound_dispatcher.start_one(channel_id)
+
     return jsonify({
         "ok": ok,
         "channel": channel_id,
         "config": _sanitize_config(data),
+        "inbound_started": inbound_started,
         "message": "Configured successfully" if ok else "Saved but configure() returned False",
     })
 

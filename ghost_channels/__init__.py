@@ -628,6 +628,60 @@ class InboundDispatcher:
             except Exception as exc:
                 log.error("Failed to start inbound for %s: %s", cid, exc)
 
+    def start_one(self, channel_id: str) -> bool:
+        """Start inbound listener for a single channel (e.g. after wizard config)."""
+        if channel_id in self._active:
+            return True
+        if not self.config.get("channel_inbound_enabled", True):
+            return False
+        channels_cfg = load_channels_config()
+        if not channels_cfg.get(channel_id, {}).get("enabled", False):
+            return False
+        prov = self.registry.get(channel_id)
+        if not prov or not prov.meta.supports_inbound:
+            return False
+
+        dm_policy = self.config.get("channel_dm_policy", "open")
+        allowed = set(self.config.get("channel_allowed_senders", []))
+
+        def _make_handler(_cid, _prov):
+            def handler(msg: InboundMessage):
+                msg.channel_id = _cid
+                if self._security_enforcer:
+                    try:
+                        decision = self._security_enforcer.check_message(
+                            msg.sender_id, msg.text, _cid
+                        )
+                        if not decision.allowed:
+                            log.warning("Inbound blocked by security: %s | %s | risk=%s | reason=%s",
+                                       _cid, msg.sender_id, decision.risk_score, decision.reason)
+                            return
+                    except Exception as e:
+                        log.error("Security check failed, falling back to basic policy: %s", e)
+                        if dm_policy == "allowlist" and msg.sender_id not in allowed:
+                            log.info("Inbound from %s blocked (allowlist): %s", _cid, msg.sender_id)
+                            return
+                else:
+                    if dm_policy == "allowlist" and msg.sender_id not in allowed:
+                        log.info("Inbound from %s blocked (allowlist): %s", _cid, msg.sender_id)
+                        return
+                _append_inbound_log(msg)
+                try:
+                    self.on_message(msg)
+                except Exception as exc:
+                    log.error("Error processing inbound from %s: %s", _cid, exc)
+            return handler
+
+        try:
+            started = prov.start_inbound(_make_handler(channel_id, prov))
+            if started:
+                self._active.append(channel_id)
+                log.info("Inbound listener started: %s", channel_id)
+                return True
+        except Exception as exc:
+            log.error("Failed to start inbound for %s: %s", channel_id, exc)
+        return False
+
     def stop_all(self):
         for cid in self._active:
             prov = self.registry.get(cid)
