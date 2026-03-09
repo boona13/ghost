@@ -49,9 +49,9 @@ def _build_date_context() -> str:
     )
 
 MAX_RETRIES = 2
-RATE_LIMIT_MAX_RETRIES = 6   # rate limits deserve more patience than server errors
+RATE_LIMIT_MAX_RETRIES = 1   # try once more then move to fallback — don't waste minutes
 RETRY_DELAY = 1.5
-RATE_LIMIT_BASE_DELAY = 5.0  # longer base delay for 429s
+RATE_LIMIT_BASE_DELAY = 3.0  # short delay before switching to fallback
 DEFAULT_MAX_TOKENS = 4096
 DEFAULT_TOOL_RESULT_LIMIT = 6000
 DEFAULT_TIMEOUT = 30

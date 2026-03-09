@@ -144,3 +144,20 @@ moviepy>=2.0                 # Programmatic video editing (wraps ffmpeg internal
 # mlx; sys_platform == "darwin"
 # mlx-flux; sys_platform == "darwin"
 # pyobjc-framework-Cocoa; sys_platform == "darwin"
+
+# Auto-added by Ghost evolve
+pandas>=3.0.1
+matplotlib>=3.10.8
+
+# Auto-added by Ghost evolve
+qrcode>=8.2
+opencv-python-headless>=4.11.0.86
+
+# Auto-added by Ghost evolve
+youtube-transcript-api>=1.2.4
+
+# Auto-added by Ghost evolve
+pyzbar>=0.1.9
+
+# Auto-added by Ghost evolve
+youtube_transcript_api>=1.2.4

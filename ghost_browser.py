@@ -789,6 +789,9 @@ def build_browser_tools():
             "name": "browser",
             "description": (
                 "Control a real Chromium browser using Playwright.\n\n"
+                "⚠ WARNING: This opens a VISIBLE browser window on the user's screen. "
+                "NEVER use for silent data extraction (transcripts, prices, scraping). "
+                "For data extraction, use shell_exec with Python scripts in ~/.ghost/sandbox/ instead.\n\n"
                 "## WORKFLOW (snapshot -> ref -> act):\n"
                 "1. navigate -> go to URL\n"
                 "2. snapshot -> Playwright accessibility tree with refs (e0, e1, ...)\n"

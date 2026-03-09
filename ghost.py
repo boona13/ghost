@@ -111,7 +111,8 @@ _ESCALATION_COACHING = (
     "2. Install what you find in ~/.ghost/sandbox/ "
     "(mkdir -p, python3 -m venv .venv, pip install).\n"
     "3. Write and run a script there.\n"
-    "4. If that fails, try the browser tool.\n"
+    "4. If that still fails, try a DIFFERENT library or API in the sandbox.\n"
+    "Do NOT open the browser — extract data programmatically.\n"
     "Now try again with a DIFFERENT approach."
 )
 
@@ -164,7 +165,7 @@ def _detected_give_up(text: str, engine=None) -> bool:
             temperature=0.0,
             max_tokens=5,
         )
-        verdict = (result.text or "").strip().upper()
+        verdict = (result or "").strip().upper()
         is_give_up = verdict.startswith("YES")
         if is_give_up:
             log.info("Give-up classifier: YES — will escalate")
@@ -2385,7 +2386,9 @@ class GhostDaemon:
             "  2. Write script via file_write to `~/.ghost/sandbox/run.py`\n"
             "  3. `shell_exec('cd ~/.ghost/sandbox && source .venv/bin/activate && python3 run.py')`\n"
             "  NEVER modify Ghost source code or Ghost's `.venv`.\n"
-            "**Level 4 — Browser automation**: Navigate, click, extract.\n"
+            "**Level 4 — Browser automation**: ONLY for interactive/visual tasks (login, clicking, forms). "
+            "⚠ The browser opens a VISIBLE window on the user's screen — NEVER use it for silent data extraction. "
+            "If you need data (transcripts, prices, API results), Level 3 is the right tool.\n"
             "**Level 5 — Combine**: Chain approaches.\n\n"
             "If your response would contain 'I couldn't', 'not available', or 'unable to' — "
             "STOP. You haven't tried all levels.\n\n"
@@ -2402,15 +2405,21 @@ class GhostDaemon:
             "**User Projects**: workspace_write (create files in user workspace), shell_exec(workspace='name') (run commands in project)\n"
             "**System**: shell_exec, file_read, file_write, file_search\n"
             "**Memory**: memory_search, memory_save\n"
-            "**Web**: web_search, web_fetch (primary URL reader), browser (fallback for JS/interactive)\n"
+            "**Web**: web_search, web_fetch (primary URL reader). browser = visible UI only (NOT for data extraction)\n"
             "**Ghost Self-Improvement**: add_future_feature (ONLY for Ghost's own codebase)\n"
             "**Communication**: send_email, notify, channel_send\n"
             "**Other**: app_control, uptime\n\n"
             "## URL & WEB TOOL RULES (CRITICAL — follow exactly)\n"
             "When the user's message contains a URL (http/https link):\n"
             "1. **ALWAYS use `web_fetch`** to retrieve the actual page content. NEVER guess or recall from memory.\n"
-            "2. If `web_fetch` returns limited content, AUTOMATICALLY use the browser tool as fallback.\n"
+            "2. **AUTOMATIC FALLBACK**: If `web_fetch` returns limited content, escalate to **Level 3 (Python sandbox)** — "
+            "NOT the browser. Use `web_search` to find the right Python library, install it in the sandbox, "
+            "and run a script to extract the data programmatically.\n"
             "3. After fetching, summarize or analyze the ACTUAL fetched content.\n\n"
+            "⚠ **BROWSER IS NOT A DATA EXTRACTION TOOL.** The browser opens a real, visible window on the "
+            "user's screen. NEVER use it to silently scrape data, read transcripts, or extract content. "
+            "Use it ONLY when the user explicitly says 'open/browse/go to' or the task truly requires "
+            "interactive UI (login forms, clicking buttons, visual verification).\n\n"
             "When the user asks for current information, news, research, or facts you don't know:\n"
             "1. **Use `web_search`** first to find relevant sources.\n"
             "2. If you need to read a specific article/page from the results, use `web_fetch` on the URL.\n\n"
