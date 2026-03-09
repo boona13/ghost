@@ -27,7 +27,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from ghost_projects import ProjectRegistry, format_project_for_prompt
 from ghost_tools import set_shell_caller_context
 from ghost import _detected_give_up, _ESCALATION_COACHING
-from ghost_artifacts import set_current_message_id, get_artifacts_dir
+from ghost_artifacts import (
+    set_current_message_id, get_artifacts_dir, scan_tool_result_for_artifacts,
+)
 
 # File upload configuration
 AUDIO_EXTENSIONS = {'.wav', '.mp3', '.m4a', '.flac', '.ogg', '.aac'}
@@ -670,13 +672,22 @@ def _process_message(session, daemon):
         def on_step(step_num, tool_name, tool_result):
             import re
             session.token_chunks.clear()
-            result_str = str(tool_result)[:500]
+            full_result = str(tool_result)
+            result_str = full_result[:500]
             session.steps.append({
                 "step": step_num,
                 "tool": tool_name,
                 "result": result_str,
                 "time": datetime.now().isoformat(),
             })
+
+            try:
+                scan_tool_result_for_artifacts(
+                    session.id, tool_name, full_result[:3000],
+                )
+            except Exception:
+                log.debug("Artifact scan failed for step %d", step_num, exc_info=True)
+
             if tool_name == "evolve_plan":
                 evo_match = re.search(r"Evolution planned:\s*(\w+)", result_str)
                 if evo_match:

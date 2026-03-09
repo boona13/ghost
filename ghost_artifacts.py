@@ -199,3 +199,66 @@ def auto_register(source_path: str | Path, copy: bool = True) -> str | None:
     if str(src).startswith(str(dest_dir)):
         return str(src)
     return register_artifact(mid, source_path, copy=copy)
+
+
+# ── Programmatic post-step scanner ──────────────────────────────────
+# This is the PRIMARY artifact registration mechanism. It runs after
+# every tool step in the chat pipeline, scans the tool result for file
+# paths, and registers any artifact-worthy files. Zero LLM reliance.
+
+import re
+
+_PATH_RE = re.compile(
+    r'(?:'
+    r'"(?:path|file|filename|output|saved)"\s*:\s*"([^"]+)"'  # JSON keys
+    r'|'
+    r'(?:saved?|wrote|written|generated|created|output)\s+(?:to|at|:)\s*[`"]?'
+    r'([/~][^\s`"\'<>,;]+)'                                    # prose paths
+    r'|'
+    r'(?:^|[\s"`:])(/(?:Users|home|tmp|var)[^\s`"\'<>,;]+)'   # absolute paths
+    r'|'
+    r'(~/.ghost/[^\s`"\'<>,;]+)'                               # ~/.ghost/ paths
+    r')',
+    re.IGNORECASE,
+)
+
+
+def scan_tool_result_for_artifacts(message_id: str, tool_name: str,
+                                   tool_result: str) -> list[str]:
+    """Scan a tool result string for file paths and register artifacts.
+
+    Called by the chat pipeline's on_step callback after every tool execution.
+    Returns list of newly registered artifact paths.
+
+    This is the MAIN artifact registration path — it catches everything
+    regardless of whether individual tool hooks remembered to call auto_register.
+    """
+    if not message_id or not tool_result:
+        return []
+
+    registered = []
+
+    for m in _PATH_RE.finditer(tool_result):
+        raw = m.group(1) or m.group(2) or m.group(3) or m.group(4)
+        if not raw:
+            continue
+        raw = raw.rstrip('.,;:)\'"')
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            continue
+        if not path.exists() or not path.is_file():
+            continue
+        if not is_artifact_worthy(str(path)):
+            continue
+
+        dest_dir = get_artifacts_dir(message_id).resolve()
+        if str(path.resolve()).startswith(str(dest_dir)):
+            continue
+
+        result = register_artifact(message_id, str(path), copy=True)
+        if result:
+            registered.append(result)
+            log.info("Post-step artifact scan [%s]: %s -> %s",
+                     tool_name, path.name, result)
+
+    return registered

@@ -117,12 +117,51 @@ _BRIDGE_SCRIPT = """
 """
 
 
+GHOST_HOME = Path.home() / ".ghost"
+
+_SAFE_GHOST_DIRS = {
+    "generated_images", "audio", "artifacts", "media", "canvas", "sandbox",
+}
+
+
+@bp.route("/ghost-files/<path:filepath>")
+def serve_ghost_file(filepath):
+    """Serve files from ~/.ghost/ subdirectories (images, audio, artifacts, media).
+
+    Only allows access to known safe subdirectories to prevent path traversal.
+    """
+    full = (GHOST_HOME / filepath).resolve()
+    ghost_resolved = GHOST_HOME.resolve()
+    if not full.is_relative_to(ghost_resolved):
+        abort(403)
+    rel = full.relative_to(ghost_resolved)
+    top_dir = rel.parts[0] if rel.parts else ""
+    if top_dir not in _SAFE_GHOST_DIRS:
+        abort(403)
+    if not full.is_file():
+        abort(404)
+    return send_from_directory(str(full.parent), full.name)
+
+
 @bp.route("/canvas/content/<path:filepath>")
 def canvas_content(filepath):
     """Serve static files from a canvas session directory, injecting JS bridge for HTML."""
     full = (CANVAS_ROOT / filepath).resolve()
+
     if not full.is_relative_to(CANVAS_ROOT.resolve()):
+        # The target might be an absolute path to a Ghost-managed file
+        # (e.g. ~/.ghost/generated_images/foo.png). Redirect to ghost-files route.
+        abs_path = Path("/" + filepath)
+        ghost_resolved = GHOST_HOME.resolve()
+        try:
+            if abs_path.resolve().is_relative_to(ghost_resolved):
+                rel = abs_path.resolve().relative_to(ghost_resolved)
+                from flask import redirect
+                return redirect(f"/ghost-files/{rel}")
+        except (ValueError, OSError):
+            pass
         abort(403)
+
     if not full.is_file():
         abort(404)
     if full.suffix.lower() in ('.html', '.htm'):

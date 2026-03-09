@@ -124,9 +124,19 @@ class CanvasEngine:
         """Turn a target into the canonical /canvas/content/... path, avoiding double-prefixing."""
         if target.startswith(("http://", "https://")):
             return target
+        if target.startswith("/ghost-files/"):
+            return target
         prefix = f"/canvas/content/{self._session_id}/"
         if target.startswith(prefix) or target.startswith("/canvas/content/"):
             return target
+        ghost_home = str(Path.home() / ".ghost")
+        if target.startswith(ghost_home) or target.startswith("~/.ghost/"):
+            abs_path = Path(target).expanduser().resolve()
+            try:
+                rel = abs_path.relative_to(Path(ghost_home).resolve())
+                return f"/ghost-files/{rel}"
+            except ValueError:
+                pass
         return f"{prefix}{target.lstrip('/')}"
 
     def present(self, target: str | None = None) -> dict:
