@@ -1,6 +1,11 @@
-/** Structured Memory page — browse context sections, facts, and queue status */
+/** Structured Memory page — live-updating context sections, facts, and queue status */
+
+let _pollTimer = null;
+let _lastUpdated = null;
 
 export async function render(container) {
+  _stopPolling();
+
   const { GhostAPI: api, GhostUtils: u } = window;
 
   let status, memData;
@@ -14,11 +19,11 @@ export async function render(container) {
     return;
   }
 
+  _lastUpdated = status.lastUpdated;
+
   const filledSections = Object.values(status.sections || {}).filter(Boolean).length;
   const totalSections = Object.keys(status.sections || {}).length;
   const lastUpdated = status.lastUpdated ? u.timeAgo(status.lastUpdated) : 'Never';
-  const queueLabel = status.queue_processing ? 'Processing' : status.queue_pending > 0 ? `${status.queue_pending} pending` : 'Idle';
-  const queueColor = status.queue_processing ? 'text-amber-400' : status.queue_pending > 0 ? 'text-blue-400' : 'text-emerald-400';
 
   const categoryBadges = Object.entries(status.facts_by_category || {})
     .map(([cat, count]) => `<span class="badge badge-zinc text-[10px]">${u.escapeHtml(cat)}: ${count}</span>`)
@@ -34,15 +39,26 @@ export async function render(container) {
     </div>
     <p class="page-desc">Persistent context extracted from conversations — user profile, history, and confidence-scored facts.</p>
 
+    <!-- Live processing banner -->
+    <div id="sm-processing-banner" class="mt-4 ${status.queue_processing || status.queue_pending > 0 ? '' : 'hidden'}">
+      <div class="flex items-center gap-3 px-4 py-3 rounded-lg border" style="background:rgba(245,158,11,0.06);border-color:rgba(245,158,11,0.15)">
+        <div class="animate-spin w-4 h-4 border-2 border-amber-400 border-t-transparent rounded-full flex-shrink-0"></div>
+        <div>
+          <div class="text-xs font-medium text-amber-300" id="sm-banner-text">${_getBannerText(status)}</div>
+          <div class="text-[10px] text-amber-400/60">Page will update automatically when done.</div>
+        </div>
+      </div>
+    </div>
+
     <!-- Stat cards -->
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-6 mb-6">
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-4 mb-6">
       <div class="metric-card-v2">
         <div class="metric-card-icon-wrap bg-ghost-500/10">
           <svg class="w-4 h-4 text-ghost-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
         </div>
         <div>
           <div class="metric-card-label">Last Updated</div>
-          <div class="metric-card-value text-sm">${u.escapeHtml(lastUpdated)}</div>
+          <div class="metric-card-value text-sm" id="sm-stat-updated">${u.escapeHtml(lastUpdated)}</div>
         </div>
       </div>
       <div class="metric-card-v2">
@@ -52,7 +68,7 @@ export async function render(container) {
         <div>
           <div class="metric-card-label">Facts</div>
           <div class="flex items-baseline gap-2">
-            <div class="metric-card-value">${status.facts_count}</div>
+            <div class="metric-card-value" id="sm-stat-facts">${status.facts_count}</div>
             <div class="metric-card-sub">stored</div>
           </div>
         </div>
@@ -64,7 +80,7 @@ export async function render(container) {
         <div>
           <div class="metric-card-label">Sections</div>
           <div class="flex items-baseline gap-2">
-            <div class="metric-card-value">${filledSections}/${totalSections}</div>
+            <div class="metric-card-value" id="sm-stat-sections">${filledSections}/${totalSections}</div>
             <div class="metric-card-sub">filled</div>
           </div>
         </div>
@@ -75,30 +91,34 @@ export async function render(container) {
         </div>
         <div>
           <div class="metric-card-label">Queue</div>
-          <div class="metric-card-value text-sm ${queueColor}">${queueLabel}</div>
+          <div class="metric-card-value text-sm" id="sm-stat-queue">${_queueBadge(status)}</div>
         </div>
       </div>
     </div>
 
     <!-- User Context -->
-    ${renderSectionGroup('User Context', 'user', memData.user || {}, [
+    <div id="sm-section-user">
+    ${renderSectionGroup('User Context', memData.user || {}, [
       ['workContext', 'Work Context'],
       ['personalContext', 'Personal Context'],
       ['topOfMind', 'Top of Mind'],
     ], u)}
+    </div>
 
     <!-- History -->
-    ${renderSectionGroup('History', 'history', memData.history || {}, [
+    <div id="sm-section-history">
+    ${renderSectionGroup('History', memData.history || {}, [
       ['recentMonths', 'Recent Months'],
       ['earlierContext', 'Earlier Context'],
       ['longTermBackground', 'Long-term Background'],
     ], u)}
+    </div>
 
     <!-- Facts -->
     <div class="mt-6">
       <div class="flex items-center justify-between mb-3">
-        <h2 class="text-sm font-semibold text-zinc-400">Facts (${status.facts_count} total)</h2>
-        <div class="flex gap-2 items-center">
+        <h2 class="text-sm font-semibold text-zinc-400">Facts (<span id="sm-facts-total">${status.facts_count}</span> total)</h2>
+        <div class="flex gap-2 items-center" id="sm-category-badges">
           ${categoryBadges}
           <select id="sm-fact-filter" class="form-input text-xs py-1 px-2 bg-surface-800 border-surface-700 text-zinc-300 rounded">
             <option value="">All categories</option>
@@ -113,9 +133,81 @@ export async function render(container) {
   `;
 
   bindEvents(container, api, u, memData);
+  _startPolling(container, api, u, status);
 }
 
-function renderSectionGroup(title, _groupKey, groupData, sections, u) {
+function _getBannerText(status) {
+  if (status.queue_processing) return 'Memory is being updated by the LLM — extracting facts and context...';
+  if (status.queue_pending > 0) return `${status.queue_pending} conversation(s) queued for memory processing...`;
+  return '';
+}
+
+function _queueBadge(status) {
+  if (status.queue_processing) return '<span class="text-amber-400 flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>Processing</span>';
+  if (status.queue_pending > 0) return `<span class="text-blue-400">${status.queue_pending} pending</span>`;
+  return '<span class="text-emerald-400">Idle</span>';
+}
+
+function _startPolling(container, api, u, initialStatus) {
+  const isActive = initialStatus.queue_processing || initialStatus.queue_pending > 0;
+  const interval = isActive ? 3000 : 10000;
+
+  _pollTimer = setInterval(async () => {
+    if (!container.querySelector('#sm-processing-banner')) {
+      _stopPolling();
+      return;
+    }
+    try {
+      const status = await api.get('/api/structured-memory/status');
+
+      const banner = container.querySelector('#sm-processing-banner');
+      const bannerText = container.querySelector('#sm-banner-text');
+      if (banner) {
+        if (status.queue_processing || status.queue_pending > 0) {
+          banner.classList.remove('hidden');
+          if (bannerText) bannerText.textContent = _getBannerText(status);
+        } else {
+          banner.classList.add('hidden');
+        }
+      }
+
+      const queueEl = container.querySelector('#sm-stat-queue');
+      if (queueEl) queueEl.innerHTML = _queueBadge(status);
+
+      const factsEl = container.querySelector('#sm-stat-facts');
+      if (factsEl) factsEl.textContent = status.facts_count;
+
+      const updatedEl = container.querySelector('#sm-stat-updated');
+      if (updatedEl && status.lastUpdated) updatedEl.textContent = u.timeAgo(status.lastUpdated);
+
+      const filledSections = Object.values(status.sections || {}).filter(Boolean).length;
+      const totalSections = Object.keys(status.sections || {}).length;
+      const secEl = container.querySelector('#sm-stat-sections');
+      if (secEl) secEl.textContent = `${filledSections}/${totalSections}`;
+
+      if (status.lastUpdated !== _lastUpdated && !status.queue_processing) {
+        _lastUpdated = status.lastUpdated;
+        _stopPolling();
+        await render(container);
+      } else {
+        const newInterval = (status.queue_processing || status.queue_pending > 0) ? 3000 : 10000;
+        if (newInterval !== interval) {
+          _stopPolling();
+          _startPolling(container, api, u, status);
+        }
+      }
+    } catch { /* network hiccup, keep polling */ }
+  }, interval);
+}
+
+function _stopPolling() {
+  if (_pollTimer) {
+    clearInterval(_pollTimer);
+    _pollTimer = null;
+  }
+}
+
+function renderSectionGroup(title, groupData, sections, u) {
   const sectionCards = sections.map(([key, label]) => {
     const entry = groupData[key];
     if (!entry || typeof entry !== 'object') {
