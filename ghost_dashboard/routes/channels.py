@@ -130,10 +130,13 @@ def configure_channel(channel_id):
         return jsonify({"error": "No config data provided"}), 400
 
     data["enabled"] = True
-    ok = prov.configure(data)
 
     all_cfg = load_channels_config()
-    all_cfg[channel_id] = data
+    existing = all_cfg.get(channel_id, {})
+    existing.update(data)
+    ok = prov.configure(existing)
+
+    all_cfg[channel_id] = existing
     save_channels_config(all_cfg)
 
     return jsonify({
