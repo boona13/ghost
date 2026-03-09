@@ -155,7 +155,6 @@ ghost_api_key_posture.py        — API key risk analysis
 ghost_secret_refs.py            — Secret reference management
 ghost_credentials.py            — Secure credential storage
 ghost_audit_log.py              — Security and configuration audit event logging
-ghost_device_auth.py            — Device authentication and linking flows
 
 # Diagnostics & Setup
 ghost_doctor.py                 — Health diagnostics and repair

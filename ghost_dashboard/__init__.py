@@ -80,42 +80,6 @@ def create_app():
             return dict(csrf_token=generate_csrf)
         return dict(csrf_token=lambda: "")
 
-    try:
-        from ghost_device_auth import get_pairing_store as _get_pairing_store
-        _has_device_auth = True
-    except ImportError:
-        _has_device_auth = False
-
-    _AUTH_EXEMPT_PREFIXES = ("/static/",)
-    _AUTH_EXEMPT_PATHS = ("/", "/api/pairing/request", "/api/pairing/poll")
-
-    @app.before_request
-    def enforce_device_token():
-        from flask import request, jsonify
-
-        if not _has_device_auth:
-            return None
-
-        if request.remote_addr in ("127.0.0.1", "::1", "localhost"):
-            return None
-
-        path = request.path
-        if path in _AUTH_EXEMPT_PATHS:
-            return None
-        for prefix in _AUTH_EXEMPT_PREFIXES:
-            if path.startswith(prefix):
-                return None
-
-        auth_header = request.headers.get("Authorization", "")
-        if not auth_header.startswith("Bearer "):
-            return jsonify({"error": "Unauthorized"}), 401
-
-        token = auth_header[7:]
-        device = _get_pairing_store().verify_token(token)
-        if device is None:
-            return jsonify({"error": "Unauthorized"}), 401
-
-        return None
 
     @app.after_request
     def add_no_cache(response):

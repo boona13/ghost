@@ -378,10 +378,6 @@ Visual output panel for rich HTML/CSS/JS content. Ghost can build interactive de
 
 Cancel or inject prompts into an active LLM generation in real-time. The interrupt system supports full state machine tracking (idle → connecting → streaming → complete/cancelled) with accumulated chunk inspection.
 
-### Device Pairing
-
-Multi-device access with short-code approval flow. Request a pairing code → approve/reject from the dashboard → scoped token issuance → token rotation and device revocation.
-
 ### X/Twitter Deduplication
 
 SQLite-backed interaction tracker that prevents duplicate social media actions. Before any like/retweet/follow/comment, Ghost checks if the action was already performed — preventing double-likes and bot-like behavior.

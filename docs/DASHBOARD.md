@@ -250,13 +250,6 @@ Observability and tracing.
 - **Trace viewer** — LLM call traces with token counts and latency
 - **Configuration** — Langfuse connection settings
 
-### Pairing
-
-Device authentication and linking.
-
-- **Pair device** — Link new devices to Ghost
-- **Manage devices** — View and revoke paired devices
-
 ### Usage
 
 Usage tracking and statistics.
@@ -516,7 +509,6 @@ Scheduler status (running, job counts, next wake).
 | `GET /api/media` | Media gallery |
 | `GET /api/audit` | Audit log |
 | `GET /api/langfuse` | Observability config |
-| `POST /api/pairing` | Device pairing |
 | `GET /api/voice/status` | Voice mode status |
 
 ---

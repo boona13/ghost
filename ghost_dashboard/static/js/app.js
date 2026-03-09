@@ -24,13 +24,12 @@ import { render as webhooks } from './pages/webhooks.js';
 import { render as projects } from './pages/projects.js';
 import { render as prs } from './pages/prs.js';
 import { render as langfuse } from './pages/langfuse.js';
-import { render as pairing } from './pages/pairing.js';
 import { render as nodes } from './pages/nodes.js';
 import { render as gallery } from './pages/gallery.js';
 import { render as audit } from './pages/audit.js';
 import { render as evolve_theater } from './pages/evolve_theater.js';
 import { render as tools } from './pages/tools.js';
-const pages = { overview, chat, models, config, soul, user, skills, cron, memory, feed, evolve, integrations, autonomy, setup, security, console: console_page, channels, future_features, webhooks, projects, prs, langfuse, pairing, nodes, gallery, audit, evolve_theater, tools };
+const pages = { overview, chat, models, config, soul, user, skills, cron, memory, feed, evolve, integrations, autonomy, setup, security, console: console_page, channels, future_features, webhooks, projects, prs, langfuse, nodes, gallery, audit, evolve_theater, tools };
 const container = document.getElementById('page-content');
 let currentPage = null;
 let pollTimer = null;
@@ -160,7 +159,6 @@ const CMD_PAGES = [
   { page: 'cron', label: 'Cron Jobs', section: 'System' },
   { page: 'security', label: 'Security', section: 'System' },
   { page: 'audit', label: 'Audit Log', section: 'System' },
-  { page: 'pairing', label: 'Device Pairing', section: 'System' },
 ];
 
 function openCmdPalette() {

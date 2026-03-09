@@ -298,7 +298,7 @@ ghost_dashboard/
     integrations.py, autonomy.py, setup.py, accounts.py,
     security.py, console.py, channels.py, future_features.py,
     voice.py, canvas.py, usage.py, webhooks.py, projects.py,
-    prs.py, doctor.py, langfuse.py, pairing.py, nodes.py,
+    prs.py, doctor.py, langfuse.py, nodes.py,
     media.py, audit.py
   templates/
     index.html             SPA shell (Tailwind CDN)
@@ -404,7 +404,6 @@ See [DASHBOARD.md](DASHBOARD.md) for the full page and API reference.
 | `ghost_secret_refs.py` | Secret reference management |
 | `ghost_credentials.py` | Secure credential storage |
 | `ghost_audit_log.py` | Security audit event logging |
-| `ghost_device_auth.py` | Device authentication flows |
 
 ### Code Intelligence
 | Module | Purpose |
