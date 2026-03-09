@@ -14,10 +14,12 @@ import uuid
 from collections import deque
 from datetime import datetime
 
+from ghost_security_audit import sanitize_diagnostic_text
 
 RING_BUFFER_SIZE = 500
 MAX_DETAIL_LEN = 500
 MAX_RESULT_LEN = 300
+SENSITIVE_CATEGORIES = {"security", "security_patrol", "security_audit", "audit", "error"}
 
 
 class ConsoleEventBus:
@@ -31,7 +33,15 @@ class ConsoleEventBus:
         self._seq = 0
 
     def emit(self, level: str, category: str, title: str,
-             detail: str = "", result: str = "", duration_ms: int = None):
+             detail: str = "", result: str = "", duration_ms: int = None,
+             safety_mask: bool = False):
+        safe_detail = detail or ""
+        safe_result = result or ""
+        normalized_category = (category or "").lower()
+        if safety_mask or normalized_category in SENSITIVE_CATEGORIES:
+            safe_detail = sanitize_diagnostic_text(safe_detail, max_chars=MAX_DETAIL_LEN)
+            safe_result = sanitize_diagnostic_text(safe_result, max_chars=MAX_RESULT_LEN)
+
         evt = {
             "id": f"evt_{uuid.uuid4().hex[:8]}",
             "seq": self._next_seq(),
@@ -39,10 +49,10 @@ class ConsoleEventBus:
             "level": level,
             "category": category,
             "title": title,
-            "detail": (detail or "")[:MAX_DETAIL_LEN],
+            "detail": safe_detail[:MAX_DETAIL_LEN],
         }
-        if result:
-            evt["result"] = result[:MAX_RESULT_LEN]
+        if safe_result:
+            evt["result"] = safe_result[:MAX_RESULT_LEN]
         if duration_ms is not None:
             evt["duration_ms"] = duration_ms
 

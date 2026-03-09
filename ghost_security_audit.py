@@ -398,7 +398,7 @@ def _check_dependency_health() -> list[Finding]:
 
 
 def sanitize_diagnostic_text(text: str, max_chars: int = 2000) -> str:
-    """Redact sensitive tokens/paths from diagnostic output and cap length."""
+    """Redact sensitive tokens/paths/CLI args from diagnostic output and cap length."""
     if not isinstance(text, str):
         return ""
 
@@ -407,10 +407,18 @@ def sanitize_diagnostic_text(text: str, max_chars: int = 2000) -> str:
         r"\b(?:sk|xai|xi|ghp|gho|github_pat)-[A-Za-z0-9_\-]{8,}\b",
         r"\bAKIA[0-9A-Z]{16}\b",
         r"\bAIza[0-9A-Za-z_\-]{20,}\b",
-        r"\b(?:token|apikey|api_key|password|secret)=\S+",
+        r"\b(?:token|apikey|api_key|password|passwd|secret|bearer)=\S+",
+        r"\bpostgres(?:ql)?://[^\s@]+:[^\s@]+@",
     ]
     for pattern in token_patterns:
         sanitized = re.sub(pattern, "[REDACTED]", sanitized, flags=re.IGNORECASE)
+
+    sensitive_cli = re.compile(
+        r"(?i)(--?(?:token|api[-_]?key|password|passwd|secret|bearer|authorization|access[-_]?token|refresh[-_]?token|dsn)\s*[=\s]+)([^\s,;]+)"
+    )
+    sanitized = sensitive_cli.sub(r"\1[REDACTED]", sanitized)
+    sanitized = re.sub(r"(?i)(authorization:\s*bearer\s+)[^\s]+", r"\1[REDACTED]", sanitized)
+    sanitized = re.sub(r"(?i)([?&](?:token|api[_-]?key|access[_-]?token|password|passwd|secret)=)[^&#\s]+", r"\1[REDACTED]", sanitized)
 
     sanitized = re.sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", "[REDACTED_EMAIL]", sanitized)
     sanitized = re.sub(r"/(Users|home)/[^\s:/]+", r"/\1/[REDACTED_USER]", sanitized)
@@ -432,6 +440,8 @@ def summarize_diagnostic_output(text: str, source: str = "") -> dict:
         "line_count": len(lines),
         "sample": lines[:8],
         "diagnostic_redaction_enabled": True,
+        "redaction_applied": sanitized != (text or ""),
+        "audit_note": "Sensitive arguments/tokens were redacted from diagnostics where detected.",
     }
 
     if "ps" in source_lower:
