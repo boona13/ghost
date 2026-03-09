@@ -246,6 +246,10 @@ export async function render(container) {
         showWhatsAppModal(container);
         return;
       }
+      if (id === 'email') {
+        showEmailModal(container);
+        return;
+      }
       if (id === 'telegram') {
         showTelegramModal(container);
         return;
@@ -601,6 +605,415 @@ function showWhatsAppModal(pageContainer) {
       }
     } catch (_) {}
   })();
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+//  Email Setup Wizard
+// ═══════════════════════════════════════════════════════════════
+
+const EMAIL_PRESETS = {
+  gmail: {
+    label: 'Gmail',
+    smtp_host: 'smtp.gmail.com', smtp_port: 587,
+    imap_host: 'imap.gmail.com', imap_port: 993, use_tls: true,
+    help_url: 'https://myaccount.google.com/apppasswords',
+    help_text: 'channels.emailGmailHelp',
+  },
+  outlook: {
+    label: 'Outlook / Hotmail',
+    smtp_host: 'smtp.office365.com', smtp_port: 587,
+    imap_host: 'outlook.office365.com', imap_port: 993, use_tls: true,
+    help_url: 'https://support.microsoft.com/en-us/account-billing/using-app-passwords-with-apps-that-don-t-support-two-step-verification-5896ed9b-4263-e681-128a-a6f2979a7944',
+    help_text: 'channels.emailOutlookHelp',
+  },
+  custom: {
+    label: 'Custom SMTP / IMAP',
+    smtp_host: '', smtp_port: 587,
+    imap_host: '', imap_port: 993, use_tls: true,
+    help_url: '',
+    help_text: 'channels.emailCustomHelp',
+  },
+};
+
+function showEmailModal(pageContainer) {
+  const { GhostAPI: api, GhostUtils: u } = window;
+
+  let selectedPreset = 'gmail';
+  let smtpOk = false;
+  let imapOk = false;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4';
+  overlay.innerHTML = `
+    <div class="bg-surface-800 rounded-xl border border-surface-600 p-6 w-full max-w-md shadow-2xl">
+      <div class="flex items-center gap-3 mb-5">
+        <span class="text-3xl">\u2709</span>
+        <div>
+          <h3 class="text-sm font-semibold text-white">${t('channels.emailSetup')}</h3>
+          <p class="text-[11px] text-zinc-500">${t('channels.emailSetupDesc')}</p>
+        </div>
+      </div>
+
+      <!-- Step indicator -->
+      <div class="flex items-center gap-2 mb-5">
+        <div id="em-dot-1" class="w-2 h-2 rounded-full bg-emerald-400"></div>
+        <div class="flex-1 h-0.5 bg-surface-600 rounded"><div id="em-bar-1" class="h-full rounded bg-surface-600 transition-all duration-500" style="width:0%"></div></div>
+        <div id="em-dot-2" class="w-2 h-2 rounded-full bg-surface-600"></div>
+        <div class="flex-1 h-0.5 bg-surface-600 rounded"><div id="em-bar-2" class="h-full rounded bg-surface-600 transition-all duration-500" style="width:0%"></div></div>
+        <div id="em-dot-3" class="w-2 h-2 rounded-full bg-surface-600"></div>
+        <div class="flex-1 h-0.5 bg-surface-600 rounded"><div id="em-bar-3" class="h-full rounded bg-surface-600 transition-all duration-500" style="width:0%"></div></div>
+        <div id="em-dot-4" class="w-2 h-2 rounded-full bg-surface-600"></div>
+      </div>
+
+      <!-- Step 1: Provider Selection -->
+      <div id="em-step-1">
+        <div class="text-[10px] text-zinc-600 mb-3">${t('channels.emailStep', {n: '1'})} — ${t('channels.emailChooseProvider')}</div>
+        <div class="space-y-2">
+          ${Object.entries(EMAIL_PRESETS).map(([key, p]) => `
+            <label class="flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all
+              ${key === 'gmail' ? 'border-emerald-500/60 bg-emerald-500/5' : 'border-surface-600 hover:border-surface-500'}">
+              <input type="radio" name="em-provider" value="${key}" ${key === 'gmail' ? 'checked' : ''}
+                class="accent-emerald-400" />
+              <div>
+                <div class="text-xs text-zinc-200 font-medium">${p.label}</div>
+                <div class="text-[10px] text-zinc-500">${p.smtp_host || t('channels.emailManualConfig')}</div>
+              </div>
+            </label>
+          `).join('')}
+        </div>
+        <div id="em-provider-help" class="mt-3 p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
+          <p class="text-[11px] text-blue-300 font-medium mb-1">${t('channels.emailAppPasswordTitle')}</p>
+          <ol class="text-[10px] text-blue-200/80 space-y-0.5 list-decimal list-inside">
+            <li>${t('channels.emailGmailStep1')}</li>
+            <li>${t('channels.emailGmailStep2')}</li>
+            <li>${t('channels.emailGmailStep3')}</li>
+            <li>${t('channels.emailGmailStep4')}</li>
+          </ol>
+          <a id="em-help-link" href="https://myaccount.google.com/apppasswords" target="_blank"
+            class="inline-block mt-2 text-[10px] text-blue-400 hover:text-blue-300 underline">${t('channels.emailOpenSettings')}</a>
+        </div>
+        <div class="flex justify-end gap-2 mt-4">
+          <button id="em-cancel-1" class="px-3 py-1.5 rounded bg-surface-600 text-zinc-400 text-sm hover:bg-surface-500">${t('common.cancel')}</button>
+          <button id="em-next-1" class="px-4 py-1.5 rounded bg-emerald-600 text-white text-sm hover:bg-emerald-500 font-medium">${t('common.next')}</button>
+        </div>
+      </div>
+
+      <!-- Step 2: Credentials -->
+      <div id="em-step-2" class="hidden">
+        <div class="text-[10px] text-zinc-600 mb-3">${t('channels.emailStep', {n: '2'})} — ${t('channels.emailCredentials')}</div>
+        <div id="em-custom-hosts" class="hidden space-y-3 mb-3">
+          <div class="grid grid-cols-3 gap-2">
+            <div class="col-span-2">
+              <label class="block text-[10px] text-zinc-500 mb-1">SMTP Host</label>
+              <input id="em-smtp-host" type="text" placeholder="smtp.example.com"
+                class="w-full bg-surface-700 border border-surface-600 rounded px-2.5 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 font-mono" />
+            </div>
+            <div>
+              <label class="block text-[10px] text-zinc-500 mb-1">Port</label>
+              <input id="em-smtp-port" type="number" value="587"
+                class="w-full bg-surface-700 border border-surface-600 rounded px-2.5 py-2 text-sm text-zinc-200 focus:outline-none focus:border-zinc-500 font-mono" />
+            </div>
+          </div>
+          <div class="grid grid-cols-3 gap-2">
+            <div class="col-span-2">
+              <label class="block text-[10px] text-zinc-500 mb-1">IMAP Host</label>
+              <input id="em-imap-host" type="text" placeholder="imap.example.com"
+                class="w-full bg-surface-700 border border-surface-600 rounded px-2.5 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 font-mono" />
+            </div>
+            <div>
+              <label class="block text-[10px] text-zinc-500 mb-1">Port</label>
+              <input id="em-imap-port" type="number" value="993"
+                class="w-full bg-surface-700 border border-surface-600 rounded px-2.5 py-2 text-sm text-zinc-200 focus:outline-none focus:border-zinc-500 font-mono" />
+            </div>
+          </div>
+        </div>
+        <div class="space-y-3">
+          <div>
+            <label class="block text-[10px] text-zinc-500 mb-1">${t('channels.emailAddress')}</label>
+            <input id="em-username" type="email" placeholder="you@gmail.com"
+              class="w-full bg-surface-700 border border-surface-600 rounded px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500" />
+          </div>
+          <div>
+            <label class="block text-[10px] text-zinc-500 mb-1">${t('channels.emailAppPassword')}</label>
+            <div class="relative">
+              <input id="em-password" type="password" placeholder="${t('channels.emailAppPasswordPlaceholder')}"
+                class="w-full bg-surface-700 border border-surface-600 rounded px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 font-mono pr-10" />
+              <button id="em-pw-toggle" type="button" class="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 text-xs">
+                ${t('common.show')}
+              </button>
+            </div>
+          </div>
+        </div>
+        <div id="em-smtp-status" class="text-[11px] mt-3 hidden"></div>
+        <div class="flex justify-end gap-2 mt-4">
+          <button id="em-back-2" class="px-3 py-1.5 rounded bg-surface-600 text-zinc-400 text-sm hover:bg-surface-500">${t('common.back')}</button>
+          <button id="em-test-smtp" class="px-4 py-1.5 rounded bg-blue-600 text-white text-sm hover:bg-blue-500 font-medium">${t('channels.emailTestConnection')}</button>
+          <button id="em-next-2" class="px-4 py-1.5 rounded bg-emerald-600 text-white text-sm hover:bg-emerald-500 font-medium opacity-50 cursor-not-allowed" disabled>${t('common.next')}</button>
+        </div>
+      </div>
+
+      <!-- Step 3: Recipient & Inbound -->
+      <div id="em-step-3" class="hidden">
+        <div class="text-[10px] text-zinc-600 mb-3">${t('channels.emailStep', {n: '3'})} — ${t('channels.emailRecipient')}</div>
+        <div class="space-y-3">
+          <div>
+            <label class="block text-[10px] text-zinc-500 mb-1">${t('channels.emailDefaultTo')}</label>
+            <input id="em-default-to" type="email" placeholder="you@gmail.com"
+              class="w-full bg-surface-700 border border-surface-600 rounded px-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500" />
+            <p class="text-[10px] text-zinc-600 mt-1">${t('channels.emailDefaultToHint')}</p>
+          </div>
+          <div class="flex items-center gap-3 p-3 rounded-lg border border-surface-600">
+            <input id="em-enable-inbound" type="checkbox" checked class="accent-emerald-400" />
+            <div>
+              <div class="text-xs text-zinc-200">${t('channels.emailEnableInbound')}</div>
+              <div class="text-[10px] text-zinc-500">${t('channels.emailEnableInboundHint')}</div>
+            </div>
+          </div>
+        </div>
+        <div id="em-imap-status" class="text-[11px] mt-3 hidden"></div>
+        <div class="flex justify-end gap-2 mt-4">
+          <button id="em-back-3" class="px-3 py-1.5 rounded bg-surface-600 text-zinc-400 text-sm hover:bg-surface-500">${t('common.back')}</button>
+          <button id="em-next-3" class="px-4 py-1.5 rounded bg-emerald-600 text-white text-sm hover:bg-emerald-500 font-medium">${t('channels.emailSaveConnect')}</button>
+        </div>
+      </div>
+
+      <!-- Step 4: Connected -->
+      <div id="em-step-4" class="hidden">
+        <div class="flex flex-col items-center py-6">
+          <div class="w-16 h-16 rounded-full bg-emerald-500/20 flex items-center justify-center mb-3">
+            <svg class="w-8 h-8 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+            </svg>
+          </div>
+          <p class="text-sm font-semibold text-emerald-400">${t('channels.emailConnected')}</p>
+          <p class="text-[11px] text-zinc-400 mt-1">${t('channels.emailConnectedDesc')}</p>
+          <div id="em-test-result" class="text-[10px] text-zinc-500 mt-3"></div>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const close = () => { overlay.remove(); if (pageContainer) render(pageContainer); };
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+
+  // Step navigation helpers
+  const dots = [1,2,3,4].map(i => overlay.querySelector('#em-dot-' + i));
+  const bars = [1,2,3].map(i => overlay.querySelector('#em-bar-' + i));
+  const steps = [1,2,3,4].map(i => overlay.querySelector('#em-step-' + i));
+
+  function goToStep(n) {
+    steps.forEach((s, i) => s.classList.toggle('hidden', i !== n - 1));
+    dots.forEach((d, i) => {
+      d.className = i < n
+        ? 'w-2 h-2 rounded-full bg-emerald-400'
+        : 'w-2 h-2 rounded-full bg-surface-600';
+    });
+    bars.forEach((b, i) => {
+      b.style.width = i < n - 1 ? '100%' : '0%';
+      b.className = i < n - 1
+        ? 'h-full rounded bg-emerald-400 transition-all duration-500'
+        : 'h-full rounded bg-surface-600 transition-all duration-500';
+    });
+  }
+
+  // Provider radio handling
+  const radios = overlay.querySelectorAll('input[name="em-provider"]');
+  const providerHelp = overlay.querySelector('#em-provider-help');
+  const helpLink = overlay.querySelector('#em-help-link');
+  const customHosts = overlay.querySelector('#em-custom-hosts');
+
+  function updateProvider(key) {
+    selectedPreset = key;
+    radios.forEach(r => {
+      const lbl = r.closest('label');
+      if (r.value === key) {
+        lbl.className = lbl.className.replace('border-surface-600 hover:border-surface-500', '').replace('border-emerald-500/60 bg-emerald-500/5', '') + ' border-emerald-500/60 bg-emerald-500/5';
+      } else {
+        lbl.className = lbl.className.replace('border-emerald-500/60 bg-emerald-500/5', '') + ' border-surface-600 hover:border-surface-500';
+      }
+    });
+    const preset = EMAIL_PRESETS[key];
+    customHosts.classList.toggle('hidden', key !== 'custom');
+    if (preset.help_url) {
+      helpLink.href = preset.help_url;
+      helpLink.classList.remove('hidden');
+    } else {
+      helpLink.classList.add('hidden');
+    }
+  }
+
+  radios.forEach(r => r.addEventListener('change', () => updateProvider(r.value)));
+
+  // Password toggle
+  const pwInput = overlay.querySelector('#em-password');
+  overlay.querySelector('#em-pw-toggle').addEventListener('click', function() {
+    const isPassword = pwInput.type === 'password';
+    pwInput.type = isPassword ? 'text' : 'password';
+    this.textContent = isPassword ? t('common.hide') : t('common.show');
+  });
+
+  // Cancel buttons
+  overlay.querySelector('#em-cancel-1').addEventListener('click', close);
+
+  // Step 1 -> 2
+  overlay.querySelector('#em-next-1').addEventListener('click', () => {
+    smtpOk = false;
+    overlay.querySelector('#em-next-2').disabled = true;
+    overlay.querySelector('#em-next-2').classList.add('opacity-50', 'cursor-not-allowed');
+    overlay.querySelector('#em-smtp-status').classList.add('hidden');
+    goToStep(2);
+  });
+
+  // Step 2 -> 1
+  overlay.querySelector('#em-back-2').addEventListener('click', () => goToStep(1));
+
+  // Test SMTP
+  overlay.querySelector('#em-test-smtp').addEventListener('click', async () => {
+    const btn = overlay.querySelector('#em-test-smtp');
+    const status = overlay.querySelector('#em-smtp-status');
+    const preset = EMAIL_PRESETS[selectedPreset];
+
+    const smtp_host = selectedPreset === 'custom' ? overlay.querySelector('#em-smtp-host').value.trim() : preset.smtp_host;
+    const smtp_port = selectedPreset === 'custom' ? parseInt(overlay.querySelector('#em-smtp-port').value) : preset.smtp_port;
+    const username = overlay.querySelector('#em-username').value.trim();
+    const password = overlay.querySelector('#em-password').value;
+
+    if (!username || !password) {
+      status.textContent = t('channels.emailFillCredentials');
+      status.className = 'text-[11px] mt-3 text-red-400';
+      status.classList.remove('hidden');
+      return;
+    }
+    if (selectedPreset === 'custom' && !smtp_host) {
+      status.textContent = t('channels.emailFillSmtpHost');
+      status.className = 'text-[11px] mt-3 text-red-400';
+      status.classList.remove('hidden');
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = t('channels.emailTesting');
+    status.textContent = t('channels.emailTestingConnection');
+    status.className = 'text-[11px] mt-3 text-zinc-400';
+    status.classList.remove('hidden');
+
+    try {
+      const resp = await api.post('/api/channels/email/test-smtp', {
+        smtp_host, smtp_port, username, password, use_tls: preset.use_tls,
+      });
+      if (resp.ok) {
+        status.innerHTML = '\u2705 ' + t('channels.emailSmtpSuccess');
+        status.className = 'text-[11px] mt-3 text-emerald-400';
+        smtpOk = true;
+        overlay.querySelector('#em-next-2').disabled = false;
+        overlay.querySelector('#em-next-2').classList.remove('opacity-50', 'cursor-not-allowed');
+      } else {
+        status.textContent = '\u274c ' + (resp.error || t('channels.emailSmtpFailed'));
+        status.className = 'text-[11px] mt-3 text-red-400';
+      }
+    } catch (err) {
+      status.textContent = '\u274c ' + err.message;
+      status.className = 'text-[11px] mt-3 text-red-400';
+    }
+    btn.disabled = false;
+    btn.textContent = t('channels.emailTestConnection');
+  });
+
+  // Step 2 -> 3
+  overlay.querySelector('#em-next-2').addEventListener('click', () => {
+    if (!smtpOk) return;
+    const username = overlay.querySelector('#em-username').value.trim();
+    const toField = overlay.querySelector('#em-default-to');
+    if (!toField.value) toField.value = username;
+    goToStep(3);
+  });
+
+  // Step 3 -> 2
+  overlay.querySelector('#em-back-3').addEventListener('click', () => goToStep(2));
+
+  // Step 3 -> Save & Connect
+  overlay.querySelector('#em-next-3').addEventListener('click', async () => {
+    const btn = overlay.querySelector('#em-next-3');
+    const imapStatus = overlay.querySelector('#em-imap-status');
+    const preset = EMAIL_PRESETS[selectedPreset];
+
+    const smtp_host = selectedPreset === 'custom' ? overlay.querySelector('#em-smtp-host').value.trim() : preset.smtp_host;
+    const smtp_port = selectedPreset === 'custom' ? parseInt(overlay.querySelector('#em-smtp-port').value) : preset.smtp_port;
+    const imap_host = selectedPreset === 'custom' ? overlay.querySelector('#em-imap-host').value.trim() : preset.imap_host;
+    const imap_port = selectedPreset === 'custom' ? parseInt(overlay.querySelector('#em-imap-port').value) : preset.imap_port;
+    const username = overlay.querySelector('#em-username').value.trim();
+    const password = overlay.querySelector('#em-password').value;
+    const default_to = overlay.querySelector('#em-default-to').value.trim();
+    const enableInbound = overlay.querySelector('#em-enable-inbound').checked;
+
+    btn.disabled = true;
+    btn.textContent = t('channels.emailSaving');
+
+    // Test IMAP if inbound enabled
+    if (enableInbound && imap_host) {
+      imapStatus.textContent = t('channels.emailTestingImap');
+      imapStatus.className = 'text-[11px] mt-3 text-zinc-400';
+      imapStatus.classList.remove('hidden');
+      try {
+        const imapResp = await api.post('/api/channels/email/test-imap', {
+          imap_host, imap_port, username, password,
+        });
+        if (imapResp.ok) {
+          imapStatus.innerHTML = '\u2705 ' + t('channels.emailImapSuccess');
+          imapStatus.className = 'text-[11px] mt-3 text-emerald-400';
+          imapOk = true;
+        } else {
+          imapStatus.textContent = '\u26a0\ufe0f ' + t('channels.emailImapFailed') + ': ' + (imapResp.error || '');
+          imapStatus.className = 'text-[11px] mt-3 text-amber-400';
+        }
+      } catch (err) {
+        imapStatus.textContent = '\u26a0\ufe0f IMAP: ' + err.message;
+        imapStatus.className = 'text-[11px] mt-3 text-amber-400';
+      }
+    }
+
+    // Save config
+    try {
+      const config = {
+        smtp_host, smtp_port, imap_host: enableInbound ? imap_host : '',
+        imap_port, username, password, from_addr: username,
+        default_to, use_tls: preset.use_tls, enabled: true,
+      };
+      await api.post('/api/channels/email/configure', config);
+
+      // Add sender to allowlist if inbound enabled
+      if (enableInbound && username) {
+        try { await api.post('/api/channels/email/add-sender', { email: username }); } catch (_) {}
+      }
+
+      // Send test email
+      const testResult = overlay.querySelector('#em-test-result');
+      goToStep(4);
+      try {
+        const testResp = await api.post('/api/channels/email/test', {
+          to: default_to,
+          message: 'Hello from Ghost! Your email channel is now connected.',
+        });
+        if (testResp.ok) {
+          testResult.textContent = t('channels.emailTestSent');
+        } else {
+          testResult.textContent = t('channels.emailTestFailed') + ': ' + (testResp.error || '');
+        }
+      } catch (err) {
+        testResult.textContent = t('channels.emailTestFailed') + ': ' + err.message;
+      }
+
+      setTimeout(close, 4000);
+    } catch (err) {
+      imapStatus.textContent = '\u274c ' + t('channels.emailSaveFailed') + ': ' + err.message;
+      imapStatus.className = 'text-[11px] mt-3 text-red-400';
+      imapStatus.classList.remove('hidden');
+      btn.disabled = false;
+      btn.textContent = t('channels.emailSaveConnect');
+    }
+  });
 }
 
 

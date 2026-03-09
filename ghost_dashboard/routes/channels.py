@@ -477,6 +477,93 @@ def telegram_bot_info():
 
 
 # ═══════════════════════════════════════════════════════════════
+#  Email Setup Wizard
+# ═══════════════════════════════════════════════════════════════
+
+@bp.route("/api/channels/email/test-smtp", methods=["POST"])
+def email_test_smtp():
+    """Test SMTP connection with provided credentials."""
+    data = request.get_json(force=True) or {}
+    smtp_host = data.get("smtp_host", "")
+    smtp_port = int(data.get("smtp_port", 587))
+    username = data.get("username", "")
+    password = data.get("password", "")
+    use_tls = data.get("use_tls", True)
+
+    if not smtp_host or not username or not password:
+        return jsonify({"ok": False, "error": "smtp_host, username, and password are required"}), 400
+
+    import smtplib
+    import ssl
+    try:
+        ctx = ssl.create_default_context()
+        if smtp_port == 465:
+            server = smtplib.SMTP_SSL(smtp_host, smtp_port, context=ctx, timeout=10)
+        else:
+            server = smtplib.SMTP(smtp_host, smtp_port, timeout=10)
+            if use_tls:
+                server.starttls(context=ctx)
+        server.login(username, password)
+        server.quit()
+        return jsonify({"ok": True, "message": "SMTP connection successful"})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)})
+
+
+@bp.route("/api/channels/email/test-imap", methods=["POST"])
+def email_test_imap():
+    """Test IMAP connection with provided credentials."""
+    data = request.get_json(force=True) or {}
+    imap_host = data.get("imap_host", "")
+    imap_port = int(data.get("imap_port", 993))
+    username = data.get("username", "")
+    password = data.get("password", "")
+
+    if not imap_host or not username or not password:
+        return jsonify({"ok": False, "error": "imap_host, username, and password are required"}), 400
+
+    import imaplib
+    import ssl
+    try:
+        ctx = ssl.create_default_context()
+        conn = imaplib.IMAP4_SSL(imap_host, imap_port, ssl_context=ctx)
+        conn.login(username, password)
+        conn.logout()
+        return jsonify({"ok": True, "message": "IMAP connection successful"})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)})
+
+
+@bp.route("/api/channels/email/add-sender", methods=["POST"])
+def email_add_sender():
+    """Auto-add an email address to the global allowlist during setup."""
+    data = request.get_json(force=True) or {}
+    sender_email = data.get("email", "").strip()
+    if not sender_email:
+        return jsonify({"ok": False, "error": "No email address provided"}), 400
+
+    try:
+        from ghost import load_config, save_config
+        ghost_cfg = load_config()
+        allowed = ghost_cfg.get("channel_allowed_senders", [])
+        added = False
+        if sender_email not in allowed:
+            allowed.append(sender_email)
+            ghost_cfg["channel_allowed_senders"] = allowed
+            save_config(ghost_cfg)
+            added = True
+
+            from ghost_dashboard import get_daemon
+            daemon = get_daemon()
+            if daemon:
+                daemon.cfg["channel_allowed_senders"] = allowed
+
+        return jsonify({"ok": True, "added_to_allowlist": added})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)})
+
+
+# ═══════════════════════════════════════════════════════════════
 #  Discord Setup Wizard
 # ═══════════════════════════════════════════════════════════════
 
