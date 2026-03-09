@@ -215,7 +215,8 @@ class Provider(ChannelProvider, ActionsMixin, StreamingMixin,
                 timestamp=message.created_at.timestamp(),
                 raw={"guild_id": str(message.guild.id) if message.guild else ""},
             )
-            _inbound_callback(msg)
+            import asyncio
+            await asyncio.to_thread(_inbound_callback, msg)
 
         def _run():
             try:
