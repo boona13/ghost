@@ -29,7 +29,7 @@ from hashlib import md5
 import ghost_platform
 
 from ghost_loop import ToolLoopEngine, ToolRegistry
-from ghost_tools import build_default_tools, make_notify, get_user_projects_dir, DEFAULT_ALLOWED_COMMANDS
+from ghost_tools import build_default_tools, make_notify, get_user_projects_dir, DEFAULT_ALLOWED_COMMANDS, set_shell_caller_context
 from ghost_usage import UsageTracker, set_usage_tracker
 from ghost_skills import SkillLoader
 from ghost_plugins import PluginLoader, HookRunner
@@ -2365,40 +2365,30 @@ class GhostDaemon:
                     log.debug("Failed to read inbound image %s: %s", fpath, exc)
 
             elif ext == ".pdf":
+                pdf_text = ""
                 try:
-                    import subprocess as _sp
-                    result = _sp.run(
-                        [sys.executable, "-c",
-                         "import sys; "
-                         "from pathlib import Path; "
-                         "try:\n"
-                         "  import fitz; doc=fitz.open(sys.argv[1]); "
-                         "  print('\\n'.join(p.get_text() for p in doc))\n"
-                         "except ImportError:\n"
-                         "  try:\n"
-                         "    from pypdf import PdfReader; r=PdfReader(sys.argv[1]); "
-                         "    print('\\n'.join(p.extract_text() or '' for p in r.pages))\n"
-                         "  except ImportError:\n"
-                         "    print('[PDF received but no PDF library available. "
-                         "Install pymupdf or pypdf to extract text.]')",
-                         str(fpath)],
-                        capture_output=True, text=True, timeout=30,
-                    )
-                    pdf_text = result.stdout.strip()
-                    if pdf_text:
-                        media_text_parts.append(
-                            f"[PDF: {fpath.name} (path: {fpath})]\n{pdf_text[:8000]}"
-                        )
-                    else:
-                        media_text_parts.append(
-                            f"[PDF: {fpath.name} (path: {fpath}) — empty or unreadable. "
-                            f"Use llama_parse with source=\"{fpath}\" to extract content.]"
+                    try:
+                        import fitz
+                        doc = fitz.open(str(fpath))
+                        pdf_text = "\n".join(p.get_text() for p in doc)
+                    except ImportError:
+                        from pypdf import PdfReader
+                        reader = PdfReader(str(fpath))
+                        pdf_text = "\n".join(
+                            p.extract_text() or "" for p in reader.pages
                         )
                 except Exception as exc:
                     log.debug("PDF extraction failed for %s: %s", fpath, exc)
+
+                if pdf_text.strip():
                     media_text_parts.append(
-                        f"[PDF: {fpath.name} (path: {fpath}) — extraction failed. "
-                        f"Use llama_parse with source=\"{fpath}\" to extract content.]"
+                        f"[PDF: {fpath.name} (path: {fpath})]\n{pdf_text[:8000]}"
+                    )
+                else:
+                    media_text_parts.append(
+                        f"[PDF: {fpath.name} (path: {fpath}) — empty or unreadable. "
+                        f"Try shell_exec with python3 and pypdf to extract content, "
+                        f"or the file may be scanned/image-only.]"
                     )
 
             elif ext in TEXT_EXTS:
@@ -2431,22 +2421,26 @@ class GhostDaemon:
             inbound_registry = self.tool_registry.subset(inbound_names)
             skill_model = self._resolve_skill_model(matched_skills)
 
-            loop_result = self.engine.run(
-                system_prompt=system_prompt,
-                user_message=msg.text[:self.cfg.get("max_input_chars", 16000)],
-                tool_registry=inbound_registry,
-                max_steps=self.cfg.get("tool_loop_max_steps", 200),
-                temperature=0.3,
-                max_tokens=8192,
-                on_step=terminal_step,
-                hook_runner=self.hooks,
-                history=channel_history,
-                force_tool=True,
-                tool_intent_security=self.tool_intent_security,
-                model_override=skill_model,
-                tool_event_bus=self.tool_event_bus,
-                image_b64=image_b64,
-            )
+            set_shell_caller_context("interactive")
+            try:
+                loop_result = self.engine.run(
+                    system_prompt=system_prompt,
+                    user_message=msg.text[:self.cfg.get("max_input_chars", 16000)],
+                    tool_registry=inbound_registry,
+                    max_steps=self.cfg.get("tool_loop_max_steps", 200),
+                    temperature=0.3,
+                    max_tokens=8192,
+                    on_step=terminal_step,
+                    hook_runner=self.hooks,
+                    history=channel_history,
+                    force_tool=True,
+                    tool_intent_security=self.tool_intent_security,
+                    model_override=skill_model,
+                    tool_event_bus=self.tool_event_bus,
+                    image_b64=image_b64,
+                )
+            finally:
+                set_shell_caller_context("autonomous")
             reply = loop_result.text
             self._tool_count += len(loop_result.tool_calls)
             tools_used = [tc["tool"] for tc in loop_result.tool_calls]
@@ -2554,20 +2548,24 @@ class GhostDaemon:
 
             skill_model = self._resolve_skill_model(matched_skills)
 
-            loop_result = self.engine.run(
-                system_prompt=system_prompt,
-                user_message=llm_input[:self.cfg.get("max_input_chars", 4000)],
-                tool_registry=tool_reg,
-                max_steps=self.cfg.get("tool_loop_max_steps", 200),
-                temperature=0.3,
-                max_tokens=2048,
-                on_step=terminal_step,
-                force_tool=True,
-                hook_runner=self.hooks,
-                tool_intent_security=self.tool_intent_security,
-                model_override=skill_model,
-                tool_event_bus=self.tool_event_bus,
-            )
+            set_shell_caller_context("interactive")
+            try:
+                loop_result = self.engine.run(
+                    system_prompt=system_prompt,
+                    user_message=llm_input[:self.cfg.get("max_input_chars", 4000)],
+                    tool_registry=tool_reg,
+                    max_steps=self.cfg.get("tool_loop_max_steps", 200),
+                    temperature=0.3,
+                    max_tokens=2048,
+                    on_step=terminal_step,
+                    force_tool=True,
+                    hook_runner=self.hooks,
+                    tool_intent_security=self.tool_intent_security,
+                    model_override=skill_model,
+                    tool_event_bus=self.tool_event_bus,
+                )
+            finally:
+                set_shell_caller_context("autonomous")
             result = loop_result.text
             self._tool_count += len(loop_result.tool_calls)
             tools_used = [tc["tool"] for tc in loop_result.tool_calls]
@@ -2666,17 +2664,21 @@ class GhostDaemon:
             # Determine if any matched skill has a model override
             skill_model = self._resolve_skill_model(matched_skills)
 
-            loop_result = self.engine.run(
-                system_prompt=system_prompt,
-                user_message=ctx + "Analyze this image:",
-                tool_registry=tool_reg,
-                max_steps=self.cfg.get("tool_loop_max_steps", 200),
-                image_b64=img_b64,
-                hook_runner=self.hooks,
-                tool_intent_security=self.tool_intent_security,
-                model_override=skill_model,
-                tool_event_bus=self.tool_event_bus,
-            )
+            set_shell_caller_context("interactive")
+            try:
+                loop_result = self.engine.run(
+                    system_prompt=system_prompt,
+                    user_message=ctx + "Analyze this image:",
+                    tool_registry=tool_reg,
+                    max_steps=self.cfg.get("tool_loop_max_steps", 200),
+                    image_b64=img_b64,
+                    hook_runner=self.hooks,
+                    tool_intent_security=self.tool_intent_security,
+                    model_override=skill_model,
+                    tool_event_bus=self.tool_event_bus,
+                )
+            finally:
+                set_shell_caller_context("autonomous")
             result = loop_result.text
             tools_used = [tc["tool"] for tc in loop_result.tool_calls]
             tokens_used = loop_result.total_tokens
@@ -2866,18 +2868,22 @@ class GhostDaemon:
                 ]
                 ask_registry = self.tool_registry.subset(ask_names)
                 terminal_print("ask", f"[ask] {source[:50]}...", "Ghost is thinking...")
-                loop_result = self.engine.run(
-                    system_prompt=system_prompt,
-                    user_message=source,
-                    tool_registry=ask_registry,
-                    max_steps=self.cfg.get("tool_loop_max_steps", 200),
-                    max_tokens=8192,
-                    force_tool=True,
-                    on_step=terminal_step,
-                    hook_runner=self.hooks,
-                    tool_intent_security=self.tool_intent_security,
-                    tool_event_bus=self.tool_event_bus,
-                )
+                set_shell_caller_context("interactive")
+                try:
+                    loop_result = self.engine.run(
+                        system_prompt=system_prompt,
+                        user_message=source,
+                        tool_registry=ask_registry,
+                        max_steps=self.cfg.get("tool_loop_max_steps", 200),
+                        max_tokens=8192,
+                        force_tool=True,
+                        on_step=terminal_step,
+                        hook_runner=self.hooks,
+                        tool_intent_security=self.tool_intent_security,
+                        tool_event_bus=self.tool_event_bus,
+                    )
+                finally:
+                    set_shell_caller_context("autonomous")
                 result = loop_result.text
                 self._tool_count += len(loop_result.tool_calls)
                 tools_used = [tc["tool"] for tc in loop_result.tool_calls]
@@ -2904,17 +2910,21 @@ class GhostDaemon:
 
             if self.cfg.get("enable_tool_loop", True) and self.tool_registry.get_all():
                 system_prompt = PROMPTS.get(prompt_type, PROMPTS["long_text"])
-                loop_result = self.engine.run(
-                    system_prompt=system_prompt,
-                    user_message=ctx + source[:4000],
-                    tool_registry=self.tool_registry.subset(["memory_search", "file_read", "shell_exec"]),
-                    max_steps=4,
-                    max_tokens=2048,
-                    hook_runner=self.hooks,
-                    tool_intent_security=self.tool_intent_security,
-                    model_override=None,
-                    tool_event_bus=self.tool_event_bus,
-                )
+                set_shell_caller_context("interactive")
+                try:
+                    loop_result = self.engine.run(
+                        system_prompt=system_prompt,
+                        user_message=ctx + source[:4000],
+                        tool_registry=self.tool_registry.subset(["memory_search", "file_read", "shell_exec"]),
+                        max_steps=4,
+                        max_tokens=2048,
+                        hook_runner=self.hooks,
+                        tool_intent_security=self.tool_intent_security,
+                        model_override=None,
+                        tool_event_bus=self.tool_event_bus,
+                    )
+                finally:
+                    set_shell_caller_context("autonomous")
                 result = loop_result.text
             else:
                 result = self.llm.analyze(prompt_type, source, context_prefix=ctx)

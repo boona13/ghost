@@ -1,9 +1,0 @@
-name: llama_parse
-version: 1.0.0
-description: LlamaParse document processing tool - parses PDFs, Word docs, Excel,
-  images and 90+ formats into structured markdown/JSON using LlamaIndex's LlamaParse
-  API
-author: ghost
-category: utility
-deps:
-- llama-cloud>=1.0

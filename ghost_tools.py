@@ -15,12 +15,31 @@ import sys
 import platform
 import requests
 import time
+import threading
 from pathlib import Path
 from datetime import datetime
 
 PLAT = platform.system()
 GHOST_HOME = Path.home() / ".ghost"
 PROJECT_DIR = Path(__file__).resolve().parent
+
+# Thread-local caller context: "interactive" for chat/ask, "autonomous" for cron/evolve
+_caller_context = threading.local()
+
+
+def set_shell_caller_context(ctx: str):
+    """Set the caller context for shell_exec policy decisions.
+
+    "interactive" — user-initiated (chat, ask, inbound channels). Dangerous
+    interpreters are allowed because the user is directly requesting the action.
+    "autonomous" (default) — cron jobs, evolve loop. Dangerous interpreter
+    policy from config is enforced.
+    """
+    _caller_context.value = ctx
+
+
+def get_shell_caller_context() -> str:
+    return getattr(_caller_context, "value", "autonomous")
 
 
 def get_user_projects_dir(cfg=None):
@@ -229,6 +248,11 @@ def _check_dangerous_command_policy(command: str, cfg: dict, workspace=None):
 
     base_cmd = Path(tokens[0]).name
     if not _is_dangerous_interpreter(base_cmd):
+        return True, ""
+
+    # Interactive callers (chat, ask, inbound channels) get full access to
+    # allowed commands — the allowlist + blocked list already gate safety.
+    if get_shell_caller_context() == "interactive":
         return True, ""
 
     if not cfg.get("enable_dangerous_interpreters", False):
