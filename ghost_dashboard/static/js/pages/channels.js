@@ -764,7 +764,7 @@ function showEmailModal(pageContainer) {
             <p class="text-[10px] text-zinc-600 mt-1">${t('channels.emailDefaultToHint')}</p>
           </div>
           <div class="flex items-center gap-3 p-3 rounded-lg border border-surface-600">
-            <input id="em-enable-inbound" type="checkbox" checked class="accent-emerald-400" />
+            <input id="em-enable-inbound" type="checkbox" class="accent-emerald-400" />
             <div>
               <div class="text-xs text-zinc-200">${t('channels.emailEnableInbound')}</div>
               <div class="text-[10px] text-zinc-500">${t('channels.emailEnableInboundHint')}</div>
