@@ -172,13 +172,6 @@ def _check_config_hygiene(cfg: dict) -> list[Finding]:
         ))
 
     found_interpreters = set(allowed_cmds) & DANGEROUS_INTERPRETERS
-    if found_interpreters:
-        findings.append(Finding(
-            "config", SEVERITY_WARNING,
-            "Interpreter/package-manager commands in allowlist",
-            f"Commands {sorted(found_interpreters)} are in allowed_commands and increase RCE risk",
-            "Remove python/pip from allowlist and rely on sandboxed tools for code execution",
-        ))
 
     # Check interpreter security posture
     policy = cfg.get("dangerous_command_policy") or {}
@@ -227,6 +220,15 @@ def _check_config_hygiene(cfg: dict) -> list[Finding]:
                 f"Commands {sorted(found_interpreters)} are in allowed_commands but enable_dangerous_interpreters=false blocks execution",
                 "Guarded by policy gate - no action needed unless you want to remove for defense in depth",
             ))
+
+    # Emit a single finding for interpreter allowlist posture (deduplicated flow)
+    if found_interpreters and interpreters_enabled:
+        findings.append(Finding(
+            "config", SEVERITY_WARNING,
+            "Interpreter/package-manager commands in allowlist",
+            f"Commands {sorted(found_interpreters)} are in allowed_commands and increase RCE risk",
+            "Keep dangerous interpreter policy hardened (workspace-only + deny flags) and remove from allowlist if not required",
+        ))
 
     return findings
 
@@ -389,8 +391,8 @@ def _check_dependency_health() -> list[Finding]:
                         f"Current: {current}, Latest: {latest}",
                         f"Update with: pip install --upgrade {pkg_name}",
                     ))
-    except Exception:
-        pass
+    except (json.JSONDecodeError, OSError, subprocess.SubprocessError) as exc:
+        log.warning("Dependency audit check failed: %s", exc)
 
     return findings
 
