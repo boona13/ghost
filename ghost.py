@@ -2384,25 +2384,31 @@ class GhostDaemon:
                     pdf_text = result.stdout.strip()
                     if pdf_text:
                         media_text_parts.append(
-                            f"[PDF: {fpath.name}]\n{pdf_text[:8000]}"
+                            f"[PDF: {fpath.name} (path: {fpath})]\n{pdf_text[:8000]}"
                         )
                     else:
-                        media_text_parts.append(f"[PDF: {fpath.name} — empty or unreadable]")
+                        media_text_parts.append(
+                            f"[PDF: {fpath.name} (path: {fpath}) — empty or unreadable. "
+                            f"Use llama_parse with source=\"{fpath}\" to extract content.]"
+                        )
                 except Exception as exc:
                     log.debug("PDF extraction failed for %s: %s", fpath, exc)
-                    media_text_parts.append(f"[PDF: {fpath.name} — extraction failed]")
+                    media_text_parts.append(
+                        f"[PDF: {fpath.name} (path: {fpath}) — extraction failed. "
+                        f"Use llama_parse with source=\"{fpath}\" to extract content.]"
+                    )
 
             elif ext in TEXT_EXTS:
                 try:
                     content = fpath.read_text(encoding="utf-8", errors="replace")[:8000]
                     media_text_parts.append(
-                        f"[File: {fpath.name}]\n```\n{content}\n```"
+                        f"[File: {fpath.name} (path: {fpath})]\n```\n{content}\n```"
                     )
                 except Exception as exc:
                     log.debug("Failed to read text file %s: %s", fpath, exc)
 
             else:
-                media_text_parts.append(f"[Attachment: {fpath.name} ({ext})]")
+                media_text_parts.append(f"[Attachment: {fpath.name} (path: {fpath})]")
 
         if media_text_parts:
             msg.text = (msg.text + "\n\n" + "\n\n".join(media_text_parts)).strip()
