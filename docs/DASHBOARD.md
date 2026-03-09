@@ -18,7 +18,7 @@ Running `python ghost.py dashboard` starts the dashboard as a standalone Flask s
 
 The status API returns `"embedded": false` with no `live` data.
 
-## Pages (29)
+## Pages (28)
 
 ### Chat
 

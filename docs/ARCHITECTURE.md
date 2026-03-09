@@ -286,20 +286,21 @@ Nodes are managed by the `NodeManager` with GPU-aware scheduling via `ghost_pipe
 
 ### `ghost_dashboard/` — Web Dashboard
 
-Flask web application with 29 page modules and 31 API blueprints.
+Flask web application with 28 page modules and 31 API blueprints.
 
 **Architecture:**
 ```
 ghost_dashboard/
   __init__.py              App factory, get_daemon(), start/stop
   routes/                  31 API blueprint modules
+
     status.py, config.py, models.py, identity.py, skills.py,
     cron.py, memory.py, feed.py, daemon.py, evolve.py, chat.py,
-    integrations.py, autonomy.py, setup.py, accounts.py,
-    security.py, console.py, channels.py, future_features.py,
+    integrations.py, autonomy.py, setup.py, security.py,
+    console.py, channels.py, future_features.py,
     voice.py, canvas.py, usage.py, webhooks.py, projects.py,
     prs.py, doctor.py, langfuse.py, nodes.py,
-    media.py, audit.py
+    media.py, audit.py, tools.py
   templates/
     index.html             SPA shell (Tailwind CDN)
   static/
@@ -308,7 +309,7 @@ ghost_dashboard/
       api.js, utils.js     HTTP client, utilities
       app.js               Hash-based router, sidebar polling
       i18n/                Internationalization (en, ar, zh-CN, pt-BR)
-      pages/               29 page modules
+      pages/               28 page modules
 ```
 
 See [DASHBOARD.md](DASHBOARD.md) for the full page and API reference.
@@ -536,7 +537,7 @@ All daemon threads are marked `daemon=True`, so they die when the main thread ex
   ghost_providers.py             Multi-provider LLM
   ghost_channels/                3 messaging channels (Telegram, Discord, WhatsApp)
   ghost_nodes/                   23 AI capability nodes
-  ghost_dashboard/               Web dashboard (Flask, 31 blueprints, 29 pages)
+  ghost_dashboard/               Web dashboard (Flask, 31 blueprints, 28 pages)
   skills/                        Bundled skills (42)
   SOUL.md                        Agent personality
   USER.md                        User profile

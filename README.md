@@ -394,7 +394,7 @@ Run untrusted code in isolated Docker containers with read-only root, tmpfs moun
 
 ## Dashboard
 
-The web dashboard at [http://localhost:3333](http://localhost:3333) provides full management with 29+ pages:
+The web dashboard at [http://localhost:3333](http://localhost:3333) provides full management with 28+ pages:
 
 | Page | What It Does |
 |---|---|
@@ -470,8 +470,8 @@ ghost_x_tracker.py          X/Twitter tracker — deduplication for social actio
 ghost_credentials.py        Credential storage — structured service credentials with audit trail
 ghost_supervisor.py         Process supervisor — crash recovery, auto-rollback after 5 crashes
 ghost_platform.py           Cross-platform — macOS/Linux/Windows abstraction layer
-ghost_dashboard/            Flask web dashboard — 29+ pages, real-time SSE
-  routes/                   33 API blueprint modules
+ghost_dashboard/            Flask web dashboard — 28+ pages, real-time SSE
+  routes/                   31 API blueprint modules
   static/js/pages/          Frontend page modules (SPA, no build step)
   templates/                HTML shell
 ghost_channels/             3 messaging channel implementations
