@@ -177,8 +177,12 @@ def _check_config_hygiene(cfg: dict) -> list[Finding]:
     policy = cfg.get("dangerous_command_policy") or {}
     py_policy = policy.get("python") or {}
     pip_policy = policy.get("pip") or {}
-    
-    interpreters_enabled = cfg.get("enable_dangerous_interpreters", False)
+    blocked_commands_raw = cfg.get("blocked_commands") or []
+    blocked_commands = {
+        str(cmd).strip() for cmd in blocked_commands_raw if isinstance(cmd, str) and str(cmd).strip()
+    }
+
+    interpreters_enabled = bool(cfg.get("enable_dangerous_interpreters", False))
     
     if interpreters_enabled:
         # Check if policy has adequate protections
@@ -211,23 +215,35 @@ def _check_config_hygiene(cfg: dict) -> list[Finding]:
                 "enable_dangerous_interpreters=true but python.allow=false and pip.allow=false",
                 "Feature is effectively disabled by policy - safe configuration",
             ))
-    else:
-        # Interpreters disabled - check if they're in allowlist
-        if found_interpreters:
-            findings.append(Finding(
-                "config", SEVERITY_INFO,
-                "Interpreters in allowlist guarded by policy",
-                f"Commands {sorted(found_interpreters)} are in allowed_commands but enable_dangerous_interpreters=false blocks execution",
-                "Guarded by policy gate - no action needed unless you want to remove for defense in depth",
-            ))
+    # Effective executability assessment: emit warning only when runnable.
+    effectively_executable = []
+    effectively_blocked = []
+    for cmd in sorted(found_interpreters):
+        if cmd in blocked_commands:
+            effectively_blocked.append(cmd)
+            continue
+        base = "python" if cmd.startswith("python") else "pip"
+        cmd_policy = py_policy if base == "python" else pip_policy
+        cmd_allow = bool(cmd_policy.get("allow", False))
+        if interpreters_enabled and cmd_allow:
+            effectively_executable.append(cmd)
+        else:
+            effectively_blocked.append(cmd)
 
-    # Emit a single finding for interpreter allowlist posture (deduplicated flow)
-    if found_interpreters and interpreters_enabled:
+    if effectively_executable:
         findings.append(Finding(
             "config", SEVERITY_WARNING,
-            "Interpreter/package-manager commands in allowlist",
-            f"Commands {sorted(found_interpreters)} are in allowed_commands and increase RCE risk",
-            "Keep dangerous interpreter policy hardened (workspace-only + deny flags) and remove from allowlist if not required",
+            "Dangerous interpreters effectively executable",
+            f"Commands {effectively_executable} are in allowed_commands and currently executable under dangerous interpreter policy",
+            "Prefer policy controls first: keep require_workspace + deny_flags strict, use blocked_commands for targeted denials, and keep audit logging. Avoid blanket allowlist removals unless capability impact is validated.",
+        ))
+
+    if effectively_blocked:
+        findings.append(Finding(
+            "config", SEVERITY_INFO,
+            "Dangerous interpreters listed but effectively blocked",
+            f"Commands {effectively_blocked} are in allowed_commands but blocked by global gate, per-command allow=false, and/or blocked_commands",
+            "Current state provides defense-in-depth. Keep policy gates and blocked_commands as primary controls; allowlist removal is optional and may reduce autonomy/self-repair diagnostics.",
         ))
 
     return findings
