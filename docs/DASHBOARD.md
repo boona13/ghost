@@ -165,7 +165,7 @@ Prioritized backlog for autonomous implementation.
 
 ### Channels
 
-Configure and manage 20+ messaging channels.
+Configure and manage messaging channels (Telegram, Discord, WhatsApp).
 
 - **Channel cards** — Status, message counts, health indicators
 - **Configure** — Per-channel settings, API keys, webhook URLs

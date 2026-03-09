@@ -10,8 +10,8 @@ This document describes the internal architecture of the Ghost system — how th
 │                                                                       │
 │  ┌────────────┐  ┌────────────┐  ┌──────────────┐                    │
 │  │  Dashboard  │  │  Channels  │  │  Cron Tasks  │                    │
-│  │  Chat UI   │  │ (20+ msg   │  │  (scheduled  │                    │
-│  │  (primary) │  │  platforms) │  │   routines)  │                    │
+│  │  Chat UI   │  │ (Telegram,  │  │  (scheduled  │                    │
+│  │  (primary) │  │ Discord, WA)│  │   routines)  │                    │
 │  └─────┬──────┘  └─────┬──────┘  └──────┬───────┘                    │
 │        │               │                │                             │
 │        └───────────────┼────────────────┘                             │
@@ -71,7 +71,7 @@ main()
        ├── PluginLoader
        ├── CronService (10+ autonomous routines)
        ├── Multi-provider LLM chain (7 providers)
-       └── Channel gateway (20+ messaging platforms)
+       └── Channel gateway (Telegram, Discord, WhatsApp)
   └─▶ GhostDaemon.run()
        ├── Print banner, start cron, start dashboard thread
        ├── Write PID file, set signal handlers
@@ -277,19 +277,13 @@ Nodes are managed by the `NodeManager` with GPU-aware scheduling via `ghost_pipe
 
 ### `ghost_channels/` — Messaging Channels
 
-20+ messaging platform integrations. Each channel gets: message queuing with WAL, exponential backoff retries, crash recovery, per-channel formatting, streaming, DM security policies, rate limiting, health monitoring, and onboarding wizards.
+3 messaging platform integrations. Each channel gets: message queuing with WAL, exponential backoff retries, crash recovery, per-channel formatting, streaming, DM security policies, rate limiting, health monitoring, and onboarding wizards.
 
 | Channel | Implementation |
 |---|---|
-| WhatsApp | neonize QR + Business API webhook |
 | Telegram | Bot API with reactions, threading, streaming |
 | Discord | Webhook + discord.py bot mode |
-| Slack | Webhook + Socket Mode |
-| iMessage | AppleScript + chat.db (macOS) |
-| Signal | signal-cli REST API |
-| Email | SMTP/IMAP with IDLE push |
-| Matrix, MS Teams, Google Chat, Mattermost, Line, IRC, Nostr | Various |
-| ntfy, Pushover, SMS, Webhook | Push/fallback |
+| WhatsApp | neonize QR + Business API webhook |
 
 ### `ghost_dashboard/` — Web Dashboard
 
@@ -398,7 +392,7 @@ See [DASHBOARD.md](DASHBOARD.md) for the full page and API reference.
 | Module | Purpose |
 |---|---|
 | `ghost_integrations.py` | Google Workspace + third-party integrations |
-| `ghost_channels/` | 20+ messaging channel implementations |
+| `ghost_channels/` | 3 messaging channel implementations |
 | `ghost_webhooks.py` | Webhook triggers for event-driven automation |
 | `ghost_email.py` | Disposable email account management |
 | `ghost_mcp.py` | MCP client for external tool servers |
@@ -543,7 +537,7 @@ All daemon threads are marked `daemon=True`, so they die when the main thread ex
   ghost_cron.py                  Cron scheduler
   ghost_evolve.py                Evolution engine
   ghost_providers.py             Multi-provider LLM
-  ghost_channels/                20+ messaging channels
+  ghost_channels/                3 messaging channels (Telegram, Discord, WhatsApp)
   ghost_nodes/                   23 AI capability nodes
   ghost_dashboard/               Web dashboard (Flask, 31 blueprints, 29 pages)
   skills/                        Bundled skills (42)

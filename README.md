@@ -6,7 +6,7 @@ Ghost is an autonomous, self-evolving AI agent that runs locally on your machine
 
 It's a full operating system for AI autonomy — not a chatbot.
 
-> **One agent. 185 tools. 22 AI nodes. 7 LLM providers. 20+ messaging channels. Zero cloud dependencies.**
+> **One agent. 185 tools. 22 AI nodes. 7 LLM providers. 3 messaging channels. Zero cloud dependencies.**
 
 ---
 
@@ -17,10 +17,10 @@ Most AI tools wait for instructions. Ghost operates autonomously.
 - **Self-evolution** — Ghost modifies its own codebase through a complete CI/CD pipeline: plan → apply → test → adversarial PR review → deploy → rollback. Every change is backed up, tested, reviewed by a separate LLM, and auto-rolled back if it fails.
 - **Self-healing** — If Ghost crashes, it reads the crash report, diagnoses the root cause from the traceback, writes a fix, tests it, and restarts. After 5 consecutive crashes, the supervisor auto-rolls back to the last known good state.
 - **Adversarial PR review** — Every self-modification goes through a separate LLM instance acting as a strict senior code reviewer. The reviewer searches the codebase with ripgrep, leaves inline comments, suggests exact code replacements, and submits APPROVE / REQUEST_CHANGES / BLOCK verdicts. Rejected PRs preserve the branch and all feedback for fix-and-resubmit — up to 5 rounds.
-- **185+ built-in tools** — File system, shell, browser automation, web search, web fetch, vision, image generation, TTS, voice, Google Workspace, 20+ messaging channels, cron, credentials, code intelligence, data extraction, security audits, and more.
+- **185+ built-in tools** — File system, shell, browser automation, web search, web fetch, vision, image generation, TTS, voice, Google Workspace, messaging channels, cron, credentials, code intelligence, data extraction, security audits, and more.
 - **22 AI nodes** — Local image generation (Stable Diffusion / FLUX), video generation (Kling, Runway, Minimax), audio (TTS, STT, music, voice cloning), vision (captioning, OCR, depth estimation), with an intelligent GPU load balancer and pipeline engine to chain them together.
 - **10 autonomous routines** — Tech scouting, bug hunting, security patrols, competitive intelligence, skill improvement, soul evolution, health checks, and more — all on configurable cron schedules.
-- **Multi-channel** — Talk to Ghost on WhatsApp, Telegram, Slack, Discord, iMessage, Signal, email, and 14+ more channels. Every channel gets message queuing, crash recovery, streaming, and security policies.
+- **Multi-channel** — Talk to Ghost on Telegram, Discord, and WhatsApp. Every channel gets message queuing, crash recovery, streaming, and security policies.
 - **Local-first** — Runs on your machine. Your data stays on your machine. No cloud subscription. No telemetry.
 
 ---
@@ -134,7 +134,7 @@ Ghost's tool system is a multi-turn execution engine. The LLM calls tools, gets 
 | **TTS** | `text_to_speech`, `tts_voices` | Edge TTS (free), OpenAI, ElevenLabs |
 | **Canvas** | `canvas` | Live HTML/CSS/JS visual output panel with JS bridge injection |
 | **Google Workspace** | Gmail, Calendar, Drive, Docs, Sheets | Full OAuth 2.0 — read, write, search, share, manage |
-| **Channels** | 19 messaging tools | Send, broadcast, react, edit, unsend, poll, thread context, security |
+| **Channels** | Messaging tools | Send, broadcast, react, edit, unsend, poll, thread context, security |
 | **Cron** | `cron_add/list/remove/run` | Standard cron, fixed intervals, one-shot, and event-driven scheduling |
 | **Credentials** | `credential_save/get/list` | Structured credential storage with audit logging |
 | **Data Extraction** | `smart_extract`, `extract_table` | 15+ pattern types: emails, phones, prices, credit cards, UUIDs, tables |
@@ -321,20 +321,13 @@ Configure one or all — Ghost automatically falls back through your provider ch
 
 ---
 
-## 20+ Messaging Channels
+## Messaging Channels
 
 | Channel | How It Works |
 |---|---|
-| **WhatsApp** | QR code linking via neonize or Business API via webhook |
 | **Telegram** | Bot API with reactions, threading, streaming, and polls |
 | **Discord** | Webhook (zero-dependency) or full bot mode via discord.py |
-| **Slack** | Webhook or Socket Mode with threads, reactions, and file uploads |
-| **iMessage** | AppleScript + chat.db polling (macOS) |
-| **Signal** | signal-cli REST API |
-| **Email** | SMTP/IMAP with IDLE push |
-| **Matrix, MS Teams, Google Chat, Mattermost, Line, IRC, Nostr** | Various integrations |
-| **ntfy, Pushover** | Push notifications |
-| **SMS, Webhook** | Universal fallback |
+| **WhatsApp** | QR code linking via neonize or Business API via webhook |
 
 Every channel gets: message queuing with write-ahead logging, exponential backoff retries, crash recovery, per-channel formatting, real-time streaming, DM security policies, rate limiting, health monitoring, and per-channel onboarding wizards.
 
@@ -486,7 +479,7 @@ ghost_dashboard/            Flask web dashboard — 29+ pages, real-time SSE
   routes/                   33 API blueprint modules
   static/js/pages/          Frontend page modules (SPA, no build step)
   templates/                HTML shell
-ghost_channels/             20+ messaging channel implementations
+ghost_channels/             3 messaging channel implementations
 ghost_nodes/                22 bundled AI capability nodes
 skills/                     42+ bundled skill definitions
 SOUL.md                     Agent personality and development standards
