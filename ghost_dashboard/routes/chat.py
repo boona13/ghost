@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from ghost_projects import ProjectRegistry, format_project_for_prompt
-from ghost_tools import set_shell_caller_context
+from ghost_tools import set_shell_caller_context, set_artifacts_dir
 from ghost import _detected_give_up, _ESCALATION_COACHING
 
 # File upload configuration
@@ -640,6 +640,21 @@ def _process_message(session, daemon):
                     f"**Project path:** `{active_project.path}` — write final versions here with `file_write`\n"
                 )
 
+        artifacts_abs = str(Path.home() / ".ghost" / "artifacts" / session.id)
+        system_prompt += (
+            f"\n\n## ARTIFACTS — IMPORTANT\n"
+            f"This message's artifact directory is:\n"
+            f"  `{artifacts_abs}/`\n\n"
+            f"When you produce ANY file the user wants (images, charts, CSVs, PDFs, code, etc.), "
+            f"you MUST save them to exactly `{artifacts_abs}/<filename>` using file_write. "
+            f"Do NOT save to any other location. Do NOT omit the message ID folder. "
+            f"The user will see these as downloadable artifacts in the chat. "
+            f"Use descriptive filenames (e.g. `top_languages_2025.png`, not `output.png`). "
+            f"Images created with `generate_image` are automatically copied to this directory. "
+            f"The sandbox (`~/.ghost/sandbox/`) is for intermediate work only — "
+            f"final deliverables MUST go to `{artifacts_abs}/`.\n"
+        )
+
         chat_history = _build_chat_history(daemon, max_turns=10)
 
         active_evolution_ids = []
@@ -733,6 +748,7 @@ def _process_message(session, daemon):
 
             engine = getattr(daemon, "chat_engine", None) or daemon.engine
             set_shell_caller_context("interactive")
+            set_artifacts_dir(str(Path.home() / ".ghost" / "artifacts" / session.id))
             max_escalation_retries = 2
             escalation_attempt = 0
             try:
@@ -789,6 +805,7 @@ def _process_message(session, daemon):
 
             finally:
                 set_shell_caller_context("autonomous")
+                set_artifacts_dir(None)
             session.result = loop_result.text
             session.tools_used = [tc["tool"] for tc in loop_result.tool_calls]
         else:
@@ -1156,10 +1173,29 @@ def message_status(message_id):
 def stream_status(message_id):
     """SSE endpoint for real-time step and token-level updates."""
     def generate():
+        import mimetypes as _mt
         last_step_count = 0
         last_progress_count = 0
         last_token_count = 0
         approval_sent = False
+        last_artifacts = set()
+        artifacts_dir = Path.home() / ".ghost" / "artifacts" / message_id
+
+        def _scan_artifacts():
+            """Return set of filenames currently in the artifacts dir."""
+            if not artifacts_dir.is_dir():
+                return set()
+            return {f.name for f in artifacts_dir.iterdir() if f.is_file()}
+
+        def _artifact_info(name):
+            p = artifacts_dir / name
+            mime, _ = _mt.guess_type(name)
+            return {
+                "name": name,
+                "size": p.stat().st_size,
+                "type": mime or "application/octet-stream",
+            }
+
         while True:
             with _chat_lock:
                 session = _chat_sessions.get(message_id)
@@ -1186,11 +1222,23 @@ def stream_status(message_id):
                 yield f"data: {json.dumps({'type': 'token', 'text': batch})}\n\n"
                 last_token_count = cur_token_count
 
+            current_files = _scan_artifacts()
+            new_files = current_files - last_artifacts
+            if new_files:
+                file_list = [_artifact_info(n) for n in sorted(new_files)]
+                yield f"data: {json.dumps({'type': 'artifacts', 'message_id': message_id, 'files': file_list})}\n\n"
+                last_artifacts = current_files
+
             if session.pending_approval and not approval_sent:
                 yield f"data: {json.dumps({'type': 'approval_needed', 'approval': session.pending_approval})}\n\n"
                 approval_sent = True
 
             if session.status in ("complete", "cancelled"):
+                final_files = _scan_artifacts()
+                final_new = final_files - last_artifacts
+                if final_new:
+                    file_list = [_artifact_info(n) for n in sorted(final_new)]
+                    yield f"data: {json.dumps({'type': 'artifacts', 'message_id': message_id, 'files': file_list})}\n\n"
                 yield f"data: {json.dumps({'type': 'done', 'result': session.result, 'tools_used': session.tools_used, 'elapsed': round(session.finished_at - session.started_at, 1)})}\n\n"
                 return
             elif session.status == "error":

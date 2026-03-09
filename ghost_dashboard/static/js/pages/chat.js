@@ -8,10 +8,166 @@ let _lastMessageFromVoice = false;
 let _activeProjectId = null;
 let _reasoningMode = false;
 let _currentSessionId = 'default';
+let _artifactFiles = [];
+let _artifactMessageId = null;
+let _artifactsPanelExpanded = false;
 
 window.addEventListener('hashchange', () => {
   if (voicePollTimer) { clearInterval(voicePollTimer); voicePollTimer = null; }
 });
+
+const _ARTIFACT_ICONS = {
+  'image/': `<svg class="text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>`,
+  'application/pdf': `<svg class="text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>`,
+  'text/': `<svg class="text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>`,
+  'application/json': `<svg class="text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>`,
+  '_default': `<svg class="text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>`,
+};
+
+function _getArtifactIcon(mime) {
+  if (!mime) return _ARTIFACT_ICONS['_default'];
+  for (const [prefix, icon] of Object.entries(_ARTIFACT_ICONS)) {
+    if (prefix !== '_default' && mime.startsWith(prefix)) return icon;
+  }
+  return _ARTIFACT_ICONS['_default'];
+}
+
+function _formatFileSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function _renderArtifactsPanel(container) {
+  let panel = document.getElementById('artifacts-panel');
+  if (_artifactFiles.length === 0) {
+    if (panel) panel.style.display = 'none';
+    return;
+  }
+
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = 'artifacts-panel';
+    panel.className = 'artifacts-panel';
+    const inputArea = container.querySelector('.chat-input-area');
+    if (inputArea) {
+      inputArea.parentNode.insertBefore(panel, inputArea);
+    } else {
+      container.appendChild(panel);
+    }
+  }
+  panel.style.display = '';
+
+  const mid = _artifactMessageId;
+  const expanded = _artifactsPanelExpanded;
+
+  panel.innerHTML = `
+    <div class="artifacts-header" id="artifacts-toggle">
+      <div class="flex items-center gap-1.5">
+        <svg class="w-3 h-3 text-ghost-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
+        </svg>
+        <span class="text-xs font-medium text-zinc-400">${_artifactFiles.length} artifact${_artifactFiles.length !== 1 ? 's' : ''}</span>
+      </div>
+      <svg class="w-3 h-3 text-zinc-600 transition-transform ${expanded ? 'rotate-180' : ''}" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+      </svg>
+    </div>
+    ${expanded ? `
+    <div class="artifacts-grid">
+      ${_artifactFiles.map(f => {
+        const isImage = f.type && f.type.startsWith('image/');
+        const icon = _getArtifactIcon(f.type);
+        const url = `/api/chat/artifacts/${mid}/${encodeURIComponent(f.name)}`;
+        return `
+          <div class="artifact-card">
+            ${isImage
+              ? `<div class="artifact-thumb"><img src="${url}" alt="${f.name}" loading="lazy"/></div>`
+              : `<div class="artifact-icon">${icon}</div>`
+            }
+            <div class="artifact-info">
+              <div class="artifact-name" title="${f.name}">${f.name}</div>
+              <div class="artifact-size">${_formatFileSize(f.size)}</div>
+            </div>
+            <a href="${url}" download="${f.name}" class="artifact-download" title="Download">
+              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+              </svg>
+            </a>
+          </div>`;
+      }).join('')}
+    </div>
+    ` : ''}
+  `;
+
+  panel.querySelector('#artifacts-toggle')?.addEventListener('click', () => {
+    _artifactsPanelExpanded = !_artifactsPanelExpanded;
+    _renderArtifactsPanel(container);
+  });
+}
+
+function _addArtifacts(files, messageId, container) {
+  _artifactMessageId = messageId;
+  for (const f of files) {
+    if (!_artifactFiles.find(e => e.name === f.name)) {
+      _artifactFiles.push(f);
+    }
+  }
+  _artifactsPanelExpanded = true;
+  _renderArtifactsPanel(container);
+}
+
+function _clearArtifacts(container) {
+  _artifactFiles = [];
+  _artifactMessageId = null;
+  _artifactsPanelExpanded = false;
+  const panel = document.getElementById('artifacts-panel');
+  if (panel) panel.remove();
+}
+
+function _buildInlineArtifactsHTML(files, messageId) {
+  if (!files || files.length === 0) return '';
+  const cards = files.map(f => {
+    const isImage = f.type && f.type.startsWith('image/');
+    const icon = _getArtifactIcon(f.type);
+    const url = `/api/chat/artifacts/${messageId}/${encodeURIComponent(f.name)}`;
+    return `
+      <div class="artifact-card">
+        ${isImage
+          ? `<div class="artifact-thumb"><img src="${url}" alt="${f.name}" loading="lazy"/></div>`
+          : `<div class="artifact-icon">${icon}</div>`
+        }
+        <div class="artifact-info">
+          <div class="artifact-name" title="${f.name}">${f.name}</div>
+          <div class="artifact-size">${_formatFileSize(f.size)}</div>
+        </div>
+        <a href="${url}" download="${f.name}" class="artifact-download" title="Download">
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+          </svg>
+        </a>
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="artifacts-inline">
+      <div class="artifacts-inline-header">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
+        </svg>
+        <span>${files.length} artifact${files.length !== 1 ? 's' : ''}</span>
+      </div>
+      <div class="artifacts-grid">${cards}</div>
+    </div>`;
+}
+
+function _bakeArtifactsInline(messagesEl) {
+  if (_artifactFiles.length === 0) return;
+  const inline = document.createElement('div');
+  inline.className = 'chat-artifacts-row';
+  inline.innerHTML = _buildInlineArtifactsHTML(_artifactFiles, _artifactMessageId);
+  messagesEl.appendChild(inline);
+}
 
 function _getActiveMessage() {
   try {
@@ -296,6 +452,7 @@ export async function render(container) {
 
   newSessionBtn.addEventListener('click', async () => {
     try { await api.post('/api/chat/clear'); } catch {}
+    _clearArtifacts(container);
     messagesEl.innerHTML = `
       <div id="chat-empty" class="chat-empty">
         <div class="chat-empty-orb">
@@ -720,6 +877,7 @@ export async function render(container) {
 
       activeMessageId = resp.message_id;
       _setActiveMessage(resp.message_id, text);
+      _clearArtifacts(container);
       streamResponse(resp.message_id, thinkingEl, messagesEl, statusEl);
     } catch (err) {
       thinkingEl.remove();
@@ -798,6 +956,11 @@ export async function render(container) {
         statusEl.textContent = t('chat.streaming') || 'Streaming...';
       }
 
+      if (data.type === 'artifacts') {
+        _addArtifacts(data.files || [], data.message_id || messageId, container);
+        scrollToBottom(messagesEl);
+      }
+
       if (data.type === 'approval_needed') {
         statusEl.textContent = t('chat.waitingApproval');
         statusEl.className = 'text-xs text-amber-400';
@@ -818,6 +981,9 @@ export async function render(container) {
         }
 
         appendMessage(messagesEl, 'assistant', data.result || t('chat.noResponse'));
+
+        _bakeArtifactsInline(messagesEl);
+        _clearArtifacts(container);
 
         if (data.elapsed) {
           const meta = document.createElement('div');

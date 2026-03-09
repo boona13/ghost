@@ -28,6 +28,26 @@ PROJECT_DIR = Path(__file__).resolve().parent
 # ═════════════════════════════════════════════════════════════════════
 
 _caller_context = threading.local()
+_artifacts_dir_current: str | None = None
+_artifacts_dir_lock = threading.Lock()
+
+
+def set_artifacts_dir(path: str | None):
+    """Set the artifacts directory for the current chat message.
+
+    When set, tools that produce files (file_write, generate_image, etc.)
+    will auto-copy their output into this directory so the chat UI can
+    serve them as downloadable artifacts.
+    """
+    global _artifacts_dir_current
+    with _artifacts_dir_lock:
+        _artifacts_dir_current = path
+
+
+def get_artifacts_dir() -> str | None:
+    """Return the current artifacts directory, or None."""
+    with _artifacts_dir_lock:
+        return _artifacts_dir_current
 
 
 def set_shell_caller_context(ctx: str):
@@ -687,6 +707,18 @@ def make_file_write(cfg):
                     f.write(content)
             else:
                 p.write_text(content, encoding="utf-8")
+
+            try:
+                import shutil
+                art_dir = get_artifacts_dir()
+                if art_dir and p.is_file():
+                    art_path = Path(art_dir).expanduser()
+                    if not str(p).startswith(str(art_path)):
+                        art_path.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(str(p), str(art_path / p.name))
+            except Exception:
+                pass
+
             return f"OK: wrote {len(content)} chars to {path}"
         except Exception as e:
             return f"Write error: {e}"
@@ -961,6 +993,17 @@ def make_workspace_write(cfg):
                     f.write(content)
             else:
                 target.write_text(content, encoding="utf-8")
+
+            try:
+                import shutil
+                art_dir = get_artifacts_dir()
+                if art_dir and target.is_file():
+                    art_path = Path(art_dir).expanduser()
+                    art_path.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(str(target), str(art_path / target.name))
+            except Exception:
+                pass
+
             return f"OK: wrote {len(content)} chars to {target} (workspace: {ws})"
         except Exception as e:
             return f"Write error: {e}"

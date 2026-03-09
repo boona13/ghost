@@ -33,7 +33,13 @@ def _slugify(text, max_len=40):
 
 
 def _save_image(image_b64: str, prompt: str, filename: str | None = None) -> tuple[str, dict]:
-    """Save base64-encoded image data to disk. Returns (path, info_dict)."""
+    """Save base64-encoded image data to disk. Returns (path, info_dict).
+
+    Also copies to the current thread's artifacts directory if one is set,
+    so the chat UI can serve it directly.
+    """
+    import shutil
+
     ts = time.strftime("%Y%m%d_%H%M%S")
     if filename:
         out_name = filename if filename.endswith(".png") else f"{filename}.png"
@@ -42,8 +48,20 @@ def _save_image(image_b64: str, prompt: str, filename: str | None = None) -> tup
         out_name = f"{ts}-{slug}.png"
 
     out_path = IMAGES_DIR / out_name
-    out_path.write_bytes(base64.b64decode(image_b64))
+    raw = base64.b64decode(image_b64)
+    out_path.write_bytes(raw)
     size_kb = round(out_path.stat().st_size / 1024, 1)
+
+    try:
+        from ghost_tools import get_artifacts_dir
+        art_dir = get_artifacts_dir()
+        if art_dir:
+            art_path = Path(art_dir).expanduser()
+            art_path.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(out_path), str(art_path / out_name))
+    except Exception:
+        pass
+
     return str(out_path), {"size_kb": size_kb, "filename": out_name}
 
 
