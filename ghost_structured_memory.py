@@ -152,6 +152,77 @@ _UPLOAD_SENTENCE_RE = re.compile(
 )
 
 
+def _robust_json_parse(raw: str) -> dict | None:
+    """Parse JSON from an LLM response, tolerating common formatting issues.
+
+    Strategies (tried in order):
+      1. Direct json.loads
+      2. Strip markdown fences and retry
+      3. Extract the outermost {...} block
+      4. Fix trailing commas and retry
+      5. Try ast.literal_eval as last resort
+    Returns parsed dict or None.
+    """
+    text = raw.strip()
+
+    # Strategy 1: direct parse
+    try:
+        result = json.loads(text)
+        if isinstance(result, dict):
+            return result
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # Strategy 2: strip markdown code fences
+    if text.startswith("```"):
+        lines = text.split("\n")
+        end = len(lines)
+        for i in range(len(lines) - 1, 0, -1):
+            if lines[i].strip().startswith("```"):
+                end = i
+                break
+        text = "\n".join(lines[1:end]).strip()
+        try:
+            result = json.loads(text)
+            if isinstance(result, dict):
+                return result
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # Strategy 3: extract outermost { ... } block (handles preamble/postamble text)
+    first = text.find("{")
+    last = text.rfind("}")
+    if first != -1 and last > first:
+        candidate = text[first:last + 1]
+        try:
+            result = json.loads(candidate)
+            if isinstance(result, dict):
+                return result
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        # Strategy 4: fix trailing commas before } or ]
+        fixed = re.sub(r",\s*([}\]])", r"\1", candidate)
+        try:
+            result = json.loads(fixed)
+            if isinstance(result, dict):
+                return result
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        # Strategy 5: fix unescaped newlines inside string values
+        fixed2 = re.sub(r'(?<=": ")(.*?)(?=")', lambda m: m.group(0).replace("\n", "\\n"), fixed)
+        try:
+            result = json.loads(fixed2)
+            if isinstance(result, dict):
+                return result
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    log.debug("All JSON parse strategies failed for response (len=%d)", len(raw))
+    return None
+
+
 def _strip_upload_mentions(memory_data: dict[str, Any]) -> dict[str, Any]:
     """Remove sentences about file uploads from all memory summaries and facts."""
     for section in ("user", "history"):
@@ -451,22 +522,15 @@ class StructuredMemoryUpdater:
             if not response or not response.strip():
                 return False
 
-            response_text = response.strip()
-            if response_text.startswith("```"):
-                lines = response_text.split("\n")
-                response_text = "\n".join(
-                    lines[1:-1] if lines[-1].strip().startswith("```") else lines[1:]
-                )
+            update_data = _robust_json_parse(response)
+            if update_data is None:
+                log.warning("Failed to parse LLM memory update response after all strategies")
+                return False
 
-            update_data = json.loads(response_text)
             updated_memory = self._apply_updates(current_memory, update_data, session_id)
             updated_memory = _strip_upload_mentions(updated_memory)
 
             return _save_memory_to_file(updated_memory)
-
-        except json.JSONDecodeError as e:
-            log.warning("Failed to parse LLM memory update response: %s", e)
-            return False
         except Exception as e:
             log.error("Structured memory update failed: %s", e)
             return False
