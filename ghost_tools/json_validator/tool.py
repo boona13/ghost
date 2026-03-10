@@ -135,17 +135,17 @@ def register(api):
 
     api.register_tool({
         "name": "validate_json",
-        "description": "Validate JSON data against a JSON Schema. Returns {valid: bool, errors: [...]} with detailed validation errors.",
+        "description": "Validate JSON data against a JSON Schema. Returns {valid: bool, errors: [...]} with detailed validation errors. Accepts JSON strings, objects, or arrays.",
         "parameters": {
             "type": "object",
             "properties": {
                 "data": {
-                    "type": ["object", "array", "string"],
-                    "description": "The JSON data to validate (object, array, or JSON string)"
+                    "type": "string",
+                    "description": "The JSON data to validate (as a JSON string)"
                 },
                 "schema": {
-                    "type": ["object", "string"],
-                    "description": "The JSON Schema to validate against (object or JSON string)"
+                    "type": "string",
+                    "description": "The JSON Schema to validate against (as a JSON string)"
                 }
             },
             "required": ["data", "schema"]
@@ -160,8 +160,8 @@ def register(api):
             "type": "object",
             "properties": {
                 "sample_json": {
-                    "type": ["object", "array", "string"],
-                    "description": "A sample JSON object to generate schema from (object, array, or JSON string)"
+                    "type": "string",
+                    "description": "A sample JSON object to generate schema from (as a JSON string)"
                 }
             },
             "required": ["sample_json"]

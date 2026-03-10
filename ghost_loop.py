@@ -3167,6 +3167,31 @@ class ToolLoopResult:
         return f"[Used: {tools_used}]\n{self.text}"
 
 
+def _sanitize_tool_params(params: dict) -> dict:
+    """Fix common schema issues that cause API rejections.
+
+    OpenAI function-calling requires single-string ``type`` values
+    (e.g. ``"string"``), not JSON Schema union arrays (``["string", "object"]``).
+    Some tools define union types which are valid JSON Schema but rejected
+    by providers like OpenAI/Codex.  This normalises them to ``"string"``.
+    """
+    if not isinstance(params, dict):
+        return params
+    import copy
+    params = copy.deepcopy(params)
+    _sanitize_props_inplace(params)
+    return params
+
+
+def _sanitize_props_inplace(schema: dict) -> None:
+    """Walk a schema tree in-place, fixing array-type values at every level."""
+    for prop in schema.get("properties", {}).values():
+        if isinstance(prop.get("type"), list):
+            prop["type"] = "string"
+        if "properties" in prop:
+            _sanitize_props_inplace(prop)
+
+
 class ToolRegistry:
     """Registry of callable tools with OpenAI function-calling schema.
     
@@ -3271,12 +3296,14 @@ class ToolRegistry:
         """Convert all tools to OpenAI function-calling format."""
         schema = []
         for name, tool in self._tools.items():
+            params = tool.get("parameters", {"type": "object", "properties": {}})
+            params = _sanitize_tool_params(params)
             schema.append({
                 "type": "function",
                 "function": {
                     "name": name,
                     "description": tool.get("description", ""),
-                    "parameters": tool.get("parameters", {"type": "object", "properties": {}}),
+                    "parameters": params,
                 },
             })
         return schema
