@@ -2709,6 +2709,14 @@ class ToolLoopEngine:
                                 "then task_complete immediately. Do NOT attempt more fixes."
                             )
 
+                    if fn_name == "evolve_submit_pr" and "BLOCKED by reviewer" in tool_result:
+                        step_loop_warnings.append(
+                            "⛔ PR was BLOCKED by reviewer and the feature has been rejected. "
+                            "There is NOTHING more you can do for this feature. "
+                            "Do NOT investigate, do NOT retry, do NOT explore the codebase. "
+                            "Call task_complete(summary='Feature blocked by reviewer.') NOW."
+                        )
+
                     if on_step:
                         try:
                             on_step(step, fn_name, tool_result)

@@ -1623,9 +1623,14 @@ class EvolutionEngine:
                 pass
             pr_after = store.get_pr(pr["pr_id"]) or pr
             _log_reviewer_mistakes(pr_after, pr["pr_id"], title)
+            blocked_reason = pr_after.get("blocked_reason", "No reason provided")
             return False, (
                 f"PR {pr['pr_id']} BLOCKED by reviewer. "
-                f"Feature {feature_id} marked as rejected. Call task_complete."
+                f"Feature {feature_id} marked as rejected. "
+                f"Reason: {blocked_reason}\n\n"
+                "⛔ This feature is PERMANENTLY rejected. The branch has been deleted. "
+                "Do NOT investigate, do NOT retry, do NOT explore the codebase. "
+                "Call task_complete(summary='Feature blocked by reviewer.') IMMEDIATELY."
             )
 
         else:  # rejected — keep branch alive for fix-and-resubmit

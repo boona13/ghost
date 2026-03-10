@@ -1027,12 +1027,17 @@ class ReviewEngine:
         if not verdict:
             log.warning("Reviewer did not call submit_review — deriving verdict from comments")
             verdict = self._derive_verdict_from_pr(updated_pr)
+            summary = self._build_auto_derived_summary(updated_pr, verdict)
+            self.store.add_discussion(
+                pr_id, "reviewer", summary,
+                updated_pr.get("review_rounds", 1),
+            )
             if verdict == "approved":
                 self.store.set_verdict(pr_id, "approved")
             elif verdict == "blocked":
-                self.store.set_verdict(pr_id, "blocked", "Auto-derived: critical issues found")
+                self.store.set_verdict(pr_id, "blocked", summary[:500])
             else:
-                self.store.set_verdict(pr_id, "rejected", "Auto-derived from reviewer comments")
+                self.store.set_verdict(pr_id, "rejected", summary[:500])
 
         log.info("PR %s verdict: %s", pr_id, verdict)
 
@@ -1067,6 +1072,38 @@ class ReviewEngine:
             return "rejected"
 
         return "approved"
+
+    @staticmethod
+    def _build_auto_derived_summary(pr: dict, verdict: str) -> str:
+        """Build a human-readable summary from inline comments and suggestions
+        when the reviewer agent failed to call submit_review."""
+        parts = [f"[Auto-derived verdict: {verdict.upper()}]"]
+
+        comments = pr.get("inline_comments", [])
+        if comments:
+            parts.append(f"\nReviewer left {len(comments)} inline comment(s):")
+            for c in comments:
+                sev = c.get("severity", "info").upper()
+                parts.append(
+                    f"  [{sev}] {c.get('file', '?')}:{c.get('line', '?')} — "
+                    f"{c.get('message', '(no message)')}"
+                )
+
+        suggestions = pr.get("suggested_changes", [])
+        if suggestions:
+            parts.append(f"\n{len(suggestions)} suggested change(s):")
+            for s in suggestions:
+                parts.append(
+                    f"  {s.get('file', '?')} — {s.get('explanation', '(no explanation)')}"
+                )
+
+        if not comments and not suggestions:
+            parts.append(
+                "\nNo inline comments or suggestions were left. "
+                "The reviewer may have encountered an error or hit the step limit."
+            )
+
+        return "\n".join(parts)
 
 
 # ── Singleton ────────────────────────────────────────────────────────
