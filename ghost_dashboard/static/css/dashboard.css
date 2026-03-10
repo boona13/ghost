@@ -1496,6 +1496,82 @@ select.form-input option {
   color: #a78bfa;
 }
 
+/* Slash command autocomplete menu */
+.chat-input-area {
+  position: relative;
+}
+
+.slash-menu {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  max-height: 280px;
+  overflow-y: auto;
+  background: rgba(16, 16, 28, 0.97);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  border-radius: 0.75rem;
+  padding: 0.375rem;
+  margin-bottom: 0.375rem;
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.5);
+  z-index: 50;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(139, 92, 246, 0.3) transparent;
+}
+
+.slash-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.625rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  transition: background 100ms;
+}
+
+.slash-menu-item:hover,
+.slash-menu-item.active {
+  background: rgba(139, 92, 246, 0.1);
+}
+
+.slash-menu-item.active {
+  background: rgba(139, 92, 246, 0.15);
+}
+
+.slash-menu-name {
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #c4b5fd;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.slash-menu-desc {
+  font-size: 0.75rem;
+  color: #71717a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.slash-menu-item.active .slash-menu-name {
+  color: #ddd6fe;
+}
+
+.slash-menu-item.active .slash-menu-desc {
+  color: #a1a1aa;
+}
+
+[dir="rtl"] .slash-menu-name {
+  text-align: right;
+}
+
+[dir="rtl"] .slash-menu-desc {
+  text-align: right;
+}
+
 /* Input area */
 .chat-input-area {
   flex-shrink: 0;

@@ -1377,3 +1377,20 @@ def serve_artifact(message_id, filename):
     mime = _SAFE_SERVE_MIME.get(ext, "application/octet-stream")
 
     return send_from_directory(str(artifact_dir), filename, mimetype=mime)
+
+
+@bp.route("/api/chat/tools")
+def list_chat_tools():
+    """Return all registered tool names + descriptions for slash-command autocomplete."""
+    from ghost_dashboard import get_daemon
+    daemon = get_daemon()
+    if not daemon or not daemon.tool_registry:
+        return jsonify({"tools": []})
+    tools = []
+    for name, tool in daemon.tool_registry.get_all().items():
+        tools.append({
+            "name": name,
+            "description": (tool.get("description") or "")[:120],
+        })
+    tools.sort(key=lambda t: t["name"])
+    return jsonify({"tools": tools})

@@ -153,6 +153,7 @@ export async function render(container) {
       </div>
 
       <div class="chat-input-area chat-drop-zone" id="chat-drop-zone">
+        <div id="slash-command-menu" class="slash-menu" style="display:none"></div>
         <div id="chat-attachments" class="chat-attachments" style="display:none"></div>
         <div class="chat-input-wrapper">
           <button id="chat-new-session" class="chat-new-session-btn" title="${t('chat.newSessionBtn')}">
@@ -245,6 +246,7 @@ export async function render(container) {
   const dropZone = container.querySelector('#chat-drop-zone');
   const attachmentsEl = container.querySelector('#chat-attachments');
   const reasoningBtn = container.querySelector('#chat-reasoning-toggle');
+  const slashMenuEl = container.querySelector('#slash-command-menu');
   let processing = false;
   let activeMessageId = null;
   let attachments = [];
@@ -414,9 +416,114 @@ export async function render(container) {
   inputEl.addEventListener('input', () => {
     inputEl.style.height = 'auto';
     inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + 'px';
+    _handleSlashInput();
   });
 
+  // ── Slash command autocomplete ────────────────────────────────
+  let _slashToolsCache = null;
+  let _slashActive = false;
+  let _slashActiveIdx = 0;
+  let _slashFiltered = [];
+  let _slashStart = -1; // cursor position of the '/'
+
+  async function _fetchTools() {
+    if (_slashToolsCache) return _slashToolsCache;
+    try {
+      const resp = await api.get('/api/chat/tools');
+      _slashToolsCache = resp.tools || [];
+    } catch { _slashToolsCache = []; }
+    return _slashToolsCache;
+  }
+
+  function _getSlashToken() {
+    const pos = inputEl.selectionStart;
+    const text = inputEl.value;
+    let i = pos - 1;
+    while (i >= 0 && text[i] !== '/' && text[i] !== '\n') i--;
+    if (i < 0 || text[i] !== '/') return null;
+    if (i > 0 && text[i - 1] !== ' ' && text[i - 1] !== '\n') return null;
+    return { start: i, query: text.slice(i + 1, pos) };
+  }
+
+  async function _handleSlashInput() {
+    const token = _getSlashToken();
+    if (!token) { _closeSlashMenu(); return; }
+    const tools = await _fetchTools();
+    const q = token.query.toLowerCase();
+    _slashFiltered = q
+      ? tools.filter(t => t.name.toLowerCase().includes(q) || t.description.toLowerCase().includes(q))
+      : tools;
+    _slashStart = token.start;
+    if (_slashFiltered.length === 0) { _closeSlashMenu(); return; }
+    _slashActiveIdx = 0;
+    _slashActive = true;
+    _renderSlashMenu();
+  }
+
+  function _renderSlashMenu() {
+    slashMenuEl.innerHTML = _slashFiltered.map((tool, i) => `
+      <div class="slash-menu-item ${i === _slashActiveIdx ? 'active' : ''}" data-idx="${i}">
+        <span class="slash-menu-name">/${tool.name}</span>
+        <span class="slash-menu-desc">${tool.description}</span>
+      </div>
+    `).join('');
+    slashMenuEl.style.display = '';
+    slashMenuEl.querySelectorAll('.slash-menu-item').forEach(el => {
+      el.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        _selectSlashItem(parseInt(el.dataset.idx));
+      });
+    });
+    const activeItem = slashMenuEl.querySelector('.slash-menu-item.active');
+    if (activeItem) activeItem.scrollIntoView({ block: 'nearest' });
+  }
+
+  function _selectSlashItem(idx) {
+    const tool = _slashFiltered[idx];
+    if (!tool) return;
+    const before = inputEl.value.slice(0, _slashStart);
+    const after = inputEl.value.slice(inputEl.selectionStart);
+    const insertion = 'use "' + tool.name + '" ';
+    inputEl.value = before + insertion + after;
+    const newPos = before.length + insertion.length;
+    inputEl.selectionStart = inputEl.selectionEnd = newPos;
+    _closeSlashMenu();
+    inputEl.focus();
+    inputEl.dispatchEvent(new Event('input'));
+  }
+
+  function _closeSlashMenu() {
+    _slashActive = false;
+    _slashFiltered = [];
+    slashMenuEl.style.display = 'none';
+    slashMenuEl.innerHTML = '';
+  }
+
   inputEl.addEventListener('keydown', (e) => {
+    if (_slashActive) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        _slashActiveIdx = Math.min(_slashActiveIdx + 1, _slashFiltered.length - 1);
+        _renderSlashMenu();
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        _slashActiveIdx = Math.max(_slashActiveIdx - 1, 0);
+        _renderSlashMenu();
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        _selectSlashItem(_slashActiveIdx);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        _closeSlashMenu();
+        return;
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       if (!processing) sendMessage();
