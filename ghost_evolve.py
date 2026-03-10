@@ -1628,7 +1628,8 @@ class EvolutionEngine:
                 f"PR {pr['pr_id']} BLOCKED by reviewer. "
                 f"Feature {feature_id} marked as rejected. "
                 f"Reason: {blocked_reason}\n\n"
-                "⛔ This feature is PERMANENTLY rejected. The branch has been deleted. "
+                "⛔ This feature is PERMANENTLY rejected. The branch has been deleted.\n"
+                "⚠️ Do NOT call complete_future_feature — the feature FAILED.\n"
                 "Do NOT investigate, do NOT retry, do NOT explore the codebase. "
                 "Call task_complete(summary='Feature blocked by reviewer.') IMMEDIATELY."
             )
@@ -1692,9 +1693,23 @@ class EvolutionEngine:
                 )
             else:
                 retry_msg = "Feature retry status unknown."
+            is_terminal = retry_status == "deferred" or review_round >= MAX_REVIEW_ROUNDS
+            if is_terminal:
+                end_instruction = (
+                    "The feature has been DEFERRED — it was NOT successfully implemented.\n"
+                    "⚠️ Do NOT call complete_future_feature — the feature FAILED.\n"
+                    "Call fail_future_feature(feature_id, reason='PR rejected: <1-line summary>') "
+                    "then task_complete NOW."
+                )
+            else:
+                end_instruction = (
+                    "The feature has been re-queued for a future attempt with reviewer feedback.\n"
+                    "⚠️ Do NOT call complete_future_feature — the feature was NOT completed.\n"
+                    "Call task_complete NOW."
+                )
             return False, (
                 f"PR {pr['pr_id']} REJECTED (round {review_round}/{MAX_REVIEW_ROUNDS}). {retry_msg}\n"
-                f"{'You MUST call task_complete NOW — do NOT retry in this session.' if retry_status == 'deferred' or review_round >= MAX_REVIEW_ROUNDS else 'Call task_complete NOW. The feature has been re-queued and will be attempted in a FUTURE run with all rejection feedback accumulated.'}"
+                f"{end_instruction}"
             )
 
     def deploy(self, evolution_id, feature_id=""):
