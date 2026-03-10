@@ -408,6 +408,7 @@ class ToolScopeMiddleware(Middleware):
         "tools_list", "tools_create", "tools_install_github",
         "tools_uninstall", "tools_validate",
         "tools_enable", "tools_disable",
+        "tools_reload", "tools_reload_all",
         "task_complete",
     ]
 

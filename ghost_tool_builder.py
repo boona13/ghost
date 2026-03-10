@@ -193,7 +193,7 @@ class ToolManifest:
             description=data.get("description", ""),
             author=data.get("author", "ghost"),
             category=data.get("category", "utility"),
-            deps=data.get("deps", []),
+            deps=data.get("deps") or data.get("dependencies", []),
             tools=data.get("tools", []),
             hooks=data.get("hooks", []),
             settings=data.get("settings", []),
@@ -435,6 +435,7 @@ class ToolManager:
         """Load and register all enabled tools. Returns (count, tool_names)."""
         tool_names = []
         loaded = 0
+        failed = []
 
         for name, info in list(self.tools.items()):
             if not info.enabled:
@@ -443,7 +444,80 @@ class ToolManager:
             if ok:
                 loaded += 1
                 tool_names.extend(names)
+            elif info.error:
+                failed.append((name, info.error))
+
+        if failed:
+            for fname, ferr in failed:
+                log.error(
+                    "TOOL LOAD FAILED: '%s' — %s", fname,
+                    ferr.split("\n")[0] if ferr else "unknown error",
+                )
+
         return loaded, tool_names
+
+    def _discover_and_load_one(self, name: str, tool_dir: Path) -> dict:
+        """Discover and load a single tool by name. Used for hot-reload after creation."""
+        manifest_path = tool_dir / "TOOL.yaml"
+        entry_path = tool_dir / "tool.py"
+
+        if not manifest_path.exists() and not entry_path.exists():
+            return {"loaded": False, "error": "No TOOL.yaml or tool.py found"}
+
+        try:
+            manifest = (
+                ToolManifest.from_yaml(manifest_path)
+                if manifest_path.exists()
+                else ToolManifest(name=name)
+            )
+        except Exception as e:
+            err = f"Manifest parse error: {e}"
+            self.tools[name] = ToolInfo(name=name, path=str(tool_dir), error=err)
+            return {"loaded": False, "error": err}
+
+        info = ToolInfo(
+            name=manifest.name,
+            path=str(tool_dir),
+            manifest=manifest,
+            enabled=manifest.name not in self._disabled,
+        )
+        self.tools[manifest.name] = info
+
+        if not info.enabled:
+            return {"loaded": False, "error": "Tool is disabled"}
+
+        ok, names = self._load_tool(info)
+        if ok:
+            log.info("Hot-loaded tool '%s' → registered tools: %s", name, names)
+            return {"loaded": True, "tools": names}
+        return {"loaded": False, "error": info.error, "tools": []}
+
+    def reload_tool(self, name: str) -> dict:
+        """Hot-reload a tool at runtime (re-discover + re-load without restart).
+
+        Unregisters old tool definitions first, then re-imports and re-registers.
+        """
+        info = self.tools.get(name)
+        if info:
+            for tool_name in info.tools:
+                try:
+                    self.tool_registry.unregister(tool_name)
+                except Exception:
+                    pass
+            # Remove cached module so importlib re-reads the file
+            mod_name = f"ghost_tool_{name}"
+            import sys as _sys
+            _sys.modules.pop(mod_name, None)
+
+        tool_dir = TOOLS_DIR / name
+        if not tool_dir.is_dir():
+            return {"status": "error", "error": f"Tool directory not found: {tool_dir}"}
+
+        result = self._discover_and_load_one(name, tool_dir)
+        if result.get("loaded"):
+            return {"status": "ok", "tools": result.get("tools", []),
+                    "message": f"Tool '{name}' reloaded successfully"}
+        return {"status": "error", "error": result.get("error", "Unknown error")}
 
     def _load_tool(self, info: ToolInfo) -> tuple[bool, list[str]]:
         """Import and call register(api) for a single tool."""
@@ -502,7 +576,7 @@ class ToolManager:
                     hooks: list[str] | None = None,
                     deps: list[str] | None = None,
                     overwrite: bool = False) -> dict:
-        """Create a new tool folder with TOOL.yaml and tool.py."""
+        """Create a new tool folder with TOOL.yaml and tool.py, then auto-load it."""
         import re
         if not re.match(r"^[a-z][a-z0-9_]{1,48}$", name):
             return {"status": "error", "error": "Invalid tool name. Use lowercase, underscores, 2-50 chars."}
@@ -512,7 +586,7 @@ class ToolManager:
             return {"status": "error", "error": f"Tool '{name}' already exists. Set overwrite=true to replace it."}
 
         try:
-            tool_dir.mkdir(parents=True)
+            tool_dir.mkdir(parents=True, exist_ok=True)
 
             manifest = {
                 "name": name,
@@ -544,10 +618,16 @@ class ToolManager:
             (tool_dir / "tool.py").write_text(code, encoding="utf-8")
             (tool_dir / "data").mkdir(exist_ok=True)
 
+            # Auto-discover and load the new tool immediately
+            load_result = self._discover_and_load_one(name, tool_dir)
+
             return {
                 "status": "ok",
                 "path": str(tool_dir),
                 "message": f"Tool '{name}' created at {tool_dir}",
+                "loaded": load_result.get("loaded", False),
+                "registered_tools": load_result.get("tools", []),
+                "load_error": load_result.get("error"),
             }
 
         except Exception as e:
@@ -817,6 +897,20 @@ def build_tool_manager_tools(manager: ToolManager) -> list[dict]:
             return json.dumps({"status": "error", "error": "name required"})
         return json.dumps(manager.disable_tool(name), default=str)
 
+    def execute_reload(name: str = "", **_kw):
+        if not name:
+            return json.dumps({"status": "error", "error": "name required"})
+        return json.dumps(manager.reload_tool(name), default=str)
+
+    def execute_reload_all(**_kw):
+        manager.discover_all()
+        count, names = manager.load_all()
+        return json.dumps({
+            "status": "ok",
+            "loaded_count": count,
+            "tool_names": names,
+        }, default=str)
+
     return [
         {
             "name": "tools_list",
@@ -905,5 +999,26 @@ def build_tool_manager_tools(manager: ToolManager) -> list[dict]:
                 "required": ["name"],
             },
             "execute": execute_disable,
+        },
+        {
+            "name": "tools_reload",
+            "description": "Hot-reload a single ghost tool at runtime (re-reads tool.py from disk and re-registers). Use after editing a tool or to fix a failed load.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Tool name to reload"},
+                },
+                "required": ["name"],
+            },
+            "execute": execute_reload,
+        },
+        {
+            "name": "tools_reload_all",
+            "description": "Re-discover and re-load ALL ghost tools from ghost_tools/. Picks up newly created tools without requiring a restart.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
+            "execute": execute_reload_all,
         },
     ]

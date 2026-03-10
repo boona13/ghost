@@ -1494,9 +1494,21 @@ class GhostDaemon:
                             payload={"type": "ghost_tool_cron", "callback": cron_def["callback"]},
                             description=f"Ghost tool cron: {cron_def['name']}",
                         )
-            if tool_count:
-                log.info("Ghost Tools loaded: %d tools providing %d LLM tools",
-                         tool_count, len(tool_names))
+            # Report load results prominently
+            discovered = len(self.tool_manager.tools)
+            failed_tools = [
+                (n, i.error) for n, i in self.tool_manager.tools.items()
+                if i.enabled and not i.loaded and i.error
+            ]
+            if failed_tools:
+                log.error(
+                    "Ghost Tools: %d/%d loaded, %d FAILED: %s",
+                    tool_count, discovered, len(failed_tools),
+                    "; ".join(f"{n}: {e.split(chr(10))[0]}" for n, e in failed_tools),
+                )
+            elif tool_count:
+                log.info("Ghost Tools loaded: %d/%d tools providing %d LLM tools",
+                         tool_count, discovered, len(tool_names))
         except Exception as e:
             log.warning("ToolManager init error (non-fatal): %s", e, exc_info=True)
 
@@ -2463,6 +2475,16 @@ class GhostDaemon:
             "### AFTER SUCCESS — submit as permanent tool:\n"
             "  `add_future_feature(title='Add <name> tool', description='<working code + deps>', "
             "priority='P1', source='user_request')`\n\n"
+            "### BUG FIX ESCALATION (MANDATORY):\n"
+            "If you discover a bug in Ghost's own code (tool not registered, import error, "
+            "broken wiring, missing feature integration, etc.) and the user asks you to fix it:\n"
+            "1. ALWAYS submit a bug fix via `add_future_feature`:\n"
+            "   `add_future_feature(title='Bug fix: <description>', "
+            "description='<root cause analysis, affected files, exact fix needed>', "
+            "priority='P0', source='user_request', category='bugfix')`\n"
+            "2. Tell the user the fix has been queued.\n"
+            "3. If you can work around the bug NOW, do that too — "
+            "but ALWAYS queue the permanent fix.\n\n"
             "## AVAILABLE TOOLS\n" + ", ".join(tool_names) + "\n\n"
             "## TOOL GUIDE\n"
             "**Delegation (task)**: Delegate sub-tasks to specialized subagents with fresh context windows. "
@@ -2938,6 +2960,16 @@ class GhostDaemon:
                 "### AFTER SUCCESS — submit as permanent tool:\n"
                 "  `add_future_feature(title='Add <name> tool', description='<working code + deps>', "
                 "priority='P1', source='user_request')`\n\n"
+                "### BUG FIX ESCALATION (MANDATORY):\n"
+                "If you discover a bug in Ghost's own code (tool not registered, import error, "
+                "broken wiring, missing feature integration, etc.) and the user asks you to fix it:\n"
+                "1. ALWAYS submit a bug fix via `add_future_feature`:\n"
+                "   `add_future_feature(title='Bug fix: <description>', "
+                "description='<root cause analysis, affected files, exact fix needed>', "
+                "priority='P0', source='user_request', category='bugfix')`\n"
+                "2. Tell the user the fix has been queued.\n"
+                "3. If you can work around the bug NOW, do that too — "
+                "but ALWAYS queue the permanent fix.\n\n"
                 "## AVAILABLE TOOLS\n" + ", ".join(tool_names) + "\n\n"
                 "## CODING BEST PRACTICES\n"
                 "- Use `grep` for searching file CONTENTS with regex. Use `glob` for finding files by NAME patterns.\n"
