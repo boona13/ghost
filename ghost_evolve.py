@@ -2415,8 +2415,8 @@ def build_evolve_tools(cfg):
         return "\n".join(lines)
 
     _feature_cooldowns = {}
-    _RETRY_COOLDOWN_S = 900  # 15 min between submit attempts for same feature
-    _COOLDOWN_WAIT_THRESHOLD_S = 300  # wait up to 5 min if cooldown is almost expired
+    _RETRY_COOLDOWN_S = 180  # 3 min between submit attempts for same feature
+    _COOLDOWN_WAIT_THRESHOLD_S = 180  # always wait out the cooldown in the same session
 
     def _preserve_evolution_on_cooldown(evolution_id, title, feature_id):
         """Commit work on branch and preserve for next cycle when cooldown blocks submit."""
