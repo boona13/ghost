@@ -1020,17 +1020,50 @@ export async function render(container) {
     eventSource.onerror = () => {
       eventSource.close();
       eventSource = null;
-      stopArtifactPolling();
-      try { thinkingEl.remove(); } catch {}
-      try { stepsContainer.remove(); } catch {}
 
-      stopBtn.style.display = 'none';
-      sendBtn.style.display = 'none';
-      statusEl.textContent = t('chat.connectionLost');
-      statusEl.className = 'text-xs text-amber-400 ghost-restart-pulse';
+      (async () => {
+        await sleep(1000);
+        try {
+          const check = await api.get(`/api/chat/status/${messageId}`);
+          if (check.status === 'complete' || check.status === 'cancelled') {
+            stopArtifactPolling();
+            if (streamingEl) { streamingEl.remove(); streamingEl = null; }
+            try { thinkingEl.remove(); } catch {}
+            if (stepCount > 0) { collapseSteps(stepsContainer, stepCount); }
+            else { try { stepsContainer.remove(); } catch {} }
+            appendMessage(messagesEl, 'assistant', check.result || t('chat.noResponse'));
+            if (check.elapsed) {
+              const meta = document.createElement('div');
+              meta.className = 'chat-meta';
+              meta.textContent = t('chat.metaInfo', {tools: check.tools_used?.length || 0, elapsed: check.elapsed});
+              messagesEl.appendChild(meta);
+            }
+            pollArtifacts(messageId);
+            scrollToBottom(messagesEl);
+            resetInput();
+            return;
+          }
+          if (check.status === 'error') {
+            stopArtifactPolling();
+            try { thinkingEl.remove(); } catch {}
+            try { stepsContainer.remove(); } catch {}
+            appendMessage(messagesEl, 'error', check.error);
+            scrollToBottom(messagesEl);
+            resetInput();
+            return;
+          }
+        } catch { /* server unreachable — fall through to fallback */ }
 
-      _showRestartBanner(messagesEl);
-      fallbackPoll(messageId, messagesEl, statusEl);
+        stopArtifactPolling();
+        try { thinkingEl.remove(); } catch {}
+        try { stepsContainer.remove(); } catch {}
+        stopBtn.style.display = 'none';
+        sendBtn.style.display = 'none';
+        statusEl.textContent = t('chat.connectionLost');
+        statusEl.className = 'text-xs text-amber-400 ghost-restart-pulse';
+        _showRestartBanner(messagesEl);
+        fallbackPoll(messageId, messagesEl, statusEl);
+      })();
     };
   }
 
@@ -1061,14 +1094,20 @@ export async function render(container) {
 
   async function fallbackPoll(messageId, messagesEl, statusEl) {
     let consecutiveFailures = 0;
+    const MAX_MINUTES = 15;
+    const MAX_ATTEMPTS = Math.ceil((MAX_MINUTES * 60) / 2);
+    let lastStepCount = 0;
 
-    for (let attempt = 0; attempt < 60; attempt++) {
-      await sleep(1500);
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      await sleep(2000);
       try {
         const data = await api.get(`/api/chat/status/${messageId}`);
         consecutiveFailures = 0;
         _removeRestartBanner();
-        statusEl.textContent = t('chat.processingSteps', {n: data.steps?.length || 0});
+        const stepCount = data.steps?.length || 0;
+        if (stepCount > lastStepCount) lastStepCount = stepCount;
+        const elapsed = data.elapsed ? ` (${data.elapsed}s)` : '';
+        statusEl.textContent = t('chat.processingSteps', {n: stepCount}) + elapsed;
         statusEl.className = 'text-xs text-amber-400 animate-pulse';
 
         if (data.status === 'complete') {
@@ -1083,14 +1122,21 @@ export async function render(container) {
           resetInput();
           return;
         }
+        if (data.status === 'cancelled') {
+          appendMessage(messagesEl, 'assistant', data.result || t('chat.cancelled'));
+          scrollToBottom(messagesEl);
+          resetInput();
+          return;
+        }
       } catch {
         consecutiveFailures++;
         statusEl.textContent = t('chat.systemRestarting');
         statusEl.className = 'text-xs text-amber-400 ghost-restart-pulse';
 
-        if (consecutiveFailures >= 2) {
+        if (consecutiveFailures >= 3) {
           const recovered = await _waitForRestart(messageId, messagesEl, statusEl);
           if (recovered) return;
+          consecutiveFailures = 0;
         }
       }
     }

@@ -1089,11 +1089,15 @@ def message_status(message_id):
 @bp.route("/api/chat/stream/<message_id>")
 def stream_status(message_id):
     """SSE endpoint for real-time step and token-level updates."""
+    _HEARTBEAT_INTERVAL = 15
+
     def generate():
         last_step_count = 0
         last_progress_count = 0
         last_token_count = 0
         approval_sent = False
+        last_heartbeat = time.monotonic()
+
         while True:
             with _chat_lock:
                 session = _chat_sessions.get(message_id)
@@ -1101,11 +1105,14 @@ def stream_status(message_id):
                 yield f"data: {json.dumps({'done': True, 'error': 'not found'})}\n\n"
                 return
 
+            sent_data = False
+
             new_progress = session.progress[last_progress_count:]
             if new_progress:
                 for p in new_progress:
                     yield f"data: {json.dumps({'type': 'progress', 'progress': p})}\n\n"
                 last_progress_count = len(session.progress)
+                sent_data = True
 
             new_steps = session.steps[last_step_count:]
             if new_steps:
@@ -1113,16 +1120,19 @@ def stream_status(message_id):
                     yield f"data: {json.dumps({'type': 'step', 'step': step})}\n\n"
                 last_step_count = len(session.steps)
                 last_token_count = len(session.token_chunks)
+                sent_data = True
 
             cur_token_count = len(session.token_chunks)
             if cur_token_count > last_token_count:
                 batch = "".join(session.token_chunks[last_token_count:cur_token_count])
                 yield f"data: {json.dumps({'type': 'token', 'text': batch})}\n\n"
                 last_token_count = cur_token_count
+                sent_data = True
 
             if session.pending_approval and not approval_sent:
                 yield f"data: {json.dumps({'type': 'approval_needed', 'approval': session.pending_approval})}\n\n"
                 approval_sent = True
+                sent_data = True
 
             if session.status in ("complete", "cancelled"):
                 yield f"data: {json.dumps({'type': 'done', 'result': session.result, 'tools_used': session.tools_used, 'elapsed': round(session.finished_at - session.started_at, 1)})}\n\n"
@@ -1131,10 +1141,19 @@ def stream_status(message_id):
                 yield f"data: {json.dumps({'type': 'error', 'error': session.error})}\n\n"
                 return
 
+            now = time.monotonic()
+            if not sent_data and (now - last_heartbeat) >= _HEARTBEAT_INTERVAL:
+                elapsed = round(time.time() - session.started_at, 1)
+                yield f": heartbeat {elapsed}s\n\n"
+                last_heartbeat = now
+            if sent_data:
+                last_heartbeat = now
+
             time.sleep(0.1)
 
     return Response(generate(), content_type="text/event-stream; charset=utf-8",
-                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no",
+                             "Connection": "keep-alive"})
 
 
 def _get_session_boundary():
