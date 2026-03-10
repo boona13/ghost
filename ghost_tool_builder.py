@@ -41,6 +41,7 @@ VALID_HOOK_EVENTS = frozenset({
     "on_chat_message", "on_tool_call",
     "on_tool_loop_complete", "on_tool_loop_error",
     "on_media_generated", "on_evolve_complete",
+    "on_subagent_started", "on_subagent_completed", "on_subagent_failed",
 })
 
 

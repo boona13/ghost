@@ -247,25 +247,29 @@ def filter_tool_names(
 _background_tasks: dict[str, SubagentResult] = {}
 _background_tasks_lock = threading.Lock()
 
-_scheduler_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="ghost-subagent-sched-")
-_execution_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="ghost-subagent-exec-")
+_execution_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="ghost-subagent-")
 
 MAX_CONCURRENT_SUBAGENTS = 3
 
 
 def _run_subagent_sync(
     config: SubagentConfig,
-    task: str,
+    task_text: str,
     tool_registry,
     cfg: dict,
     auth_store=None,
     provider_chain=None,
+    event_bus=None,
+    task_id: str | None = None,
+    trace_id: str | None = None,
 ) -> SubagentResult:
     """Execute a subagent synchronously using Ghost's ToolLoopEngine."""
     from ghost_loop import ToolLoopEngine
 
-    trace_id = uuid.uuid4().hex[:8]
-    task_id = uuid.uuid4().hex[:8]
+    if trace_id is None:
+        trace_id = uuid.uuid4().hex[:8]
+    if task_id is None:
+        task_id = uuid.uuid4().hex[:8]
     result = SubagentResult(
         task_id=task_id,
         trace_id=trace_id,
@@ -274,11 +278,11 @@ def _run_subagent_sync(
         started_at=datetime.now(),
     )
 
-    available_names = tool_registry.names() if hasattr(tool_registry, 'names') else []
+    available_names = tool_registry.names() if hasattr(tool_registry, "names") else []
     filtered_names = filter_tool_names(available_names, config.tools, config.disallowed_tools)
     filtered_registry = tool_registry.subset(
         [n for n in filtered_names if n in available_names]
-    ) if hasattr(tool_registry, 'subset') else tool_registry
+    ) if hasattr(tool_registry, "subset") else tool_registry
 
     api_key = None
     if auth_store:
@@ -305,12 +309,22 @@ def _run_subagent_sync(
         provider_chain=provider_chain,
     )
 
-    log.info("[trace=%s] Subagent %s starting: %s...", trace_id, config.name, task[:80])
+    log.info("[trace=%s] Subagent %s starting: %s...", trace_id, config.name, task_text[:80])
+
+    if event_bus:
+        try:
+            event_bus.emit(
+                "on_subagent_started",
+                task_id=task_id, trace_id=trace_id,
+                subagent_type=config.name, prompt=task_text[:200],
+            )
+        except Exception:
+            pass
 
     try:
         loop_result = engine.run(
             system_prompt=config.system_prompt,
-            user_message=task.strip(),
+            user_message=task_text.strip(),
             tool_registry=filtered_registry,
             max_steps=config.max_steps,
             temperature=0.2,
@@ -330,83 +344,78 @@ def _run_subagent_sync(
         log.info("[trace=%s] Subagent %s completed in %dms (%d steps)",
                  trace_id, config.name, result.duration_ms, result.steps_used)
 
+        if event_bus:
+            try:
+                event_bus.emit(
+                    "on_subagent_completed",
+                    task_id=task_id, trace_id=trace_id,
+                    subagent_type=config.name,
+                    steps=result.steps_used, duration_ms=result.duration_ms,
+                )
+            except Exception:
+                pass
+
     except Exception as exc:
         result.status = SubagentStatus.FAILED
         result.error = f"{type(exc).__name__}: {exc}"
         result.completed_at = datetime.now()
         log.warning("[trace=%s] Subagent %s failed: %s", trace_id, config.name, exc)
 
+        if event_bus:
+            try:
+                event_bus.emit(
+                    "on_subagent_failed",
+                    task_id=task_id, trace_id=trace_id,
+                    subagent_type=config.name, error=str(exc)[:200],
+                )
+            except Exception:
+                pass
+
     return result
 
 
 def execute_subagent_async(
     config: SubagentConfig,
-    task: str,
+    task_text: str,
     tool_registry,
     cfg: dict,
     auth_store=None,
     provider_chain=None,
-) -> str:
-    """Start a subagent in the background with timeout enforcement.
+    event_bus=None,
+) -> tuple[str, Future]:
+    """Submit a subagent for background execution with timeout.
 
-    Uses the two-pool architecture from DeerFlow:
-    - Scheduler pool submits work to execution pool
-    - Scheduler enforces timeout via future.result(timeout=N)
-
-    Returns task_id for status polling.
+    Returns (task_id, future) — the future resolves to a SubagentResult.
+    The engine uses the future for auto-collect; callers can also poll
+    via get_background_task_result(task_id).
     """
     task_id = uuid.uuid4().hex[:8]
     trace_id = uuid.uuid4().hex[:8]
 
-    result = SubagentResult(
+    placeholder = SubagentResult(
         task_id=task_id,
         trace_id=trace_id,
         subagent_type=config.name,
-        status=SubagentStatus.PENDING,
+        status=SubagentStatus.RUNNING,
+        started_at=datetime.now(),
     )
 
     with _background_tasks_lock:
-        _background_tasks[task_id] = result
+        _background_tasks[task_id] = placeholder
         _cleanup_background_tasks()
 
-    def run_task():
+    def _run_and_track():
+        sr = _run_subagent_sync(
+            config, task_text, tool_registry, cfg,
+            auth_store, provider_chain, event_bus,
+            task_id=task_id, trace_id=trace_id,
+        )
         with _background_tasks_lock:
-            _background_tasks[task_id].status = SubagentStatus.RUNNING
-            _background_tasks[task_id].started_at = datetime.now()
+            _background_tasks[task_id] = sr
+        return sr
 
-        try:
-            execution_future: Future = _execution_pool.submit(
-                _run_subagent_sync, config, task, tool_registry, cfg,
-                auth_store, provider_chain
-            )
-            try:
-                exec_result = execution_future.result(timeout=config.timeout_seconds)
-                with _background_tasks_lock:
-                    _background_tasks[task_id].status = exec_result.status
-                    _background_tasks[task_id].result = exec_result.result
-                    _background_tasks[task_id].error = exec_result.error
-                    _background_tasks[task_id].completed_at = datetime.now()
-                    _background_tasks[task_id].steps_used = exec_result.steps_used
-                    _background_tasks[task_id].tokens_used = exec_result.tokens_used
-            except FuturesTimeoutError:
-                log.error("[trace=%s] Subagent %s timed out after %ds",
-                         trace_id, config.name, config.timeout_seconds)
-                with _background_tasks_lock:
-                    _background_tasks[task_id].status = SubagentStatus.TIMED_OUT
-                    _background_tasks[task_id].error = (
-                        f"Execution timed out after {config.timeout_seconds} seconds"
-                    )
-                    _background_tasks[task_id].completed_at = datetime.now()
-                execution_future.cancel()
-        except Exception as e:
-            log.error("[trace=%s] Subagent %s scheduler error: %s", trace_id, config.name, e)
-            with _background_tasks_lock:
-                _background_tasks[task_id].status = SubagentStatus.FAILED
-                _background_tasks[task_id].error = str(e)
-                _background_tasks[task_id].completed_at = datetime.now()
-
-    _scheduler_pool.submit(run_task)
-    return task_id
+    future = _execution_pool.submit(_run_and_track)
+    return task_id, future
 
 
 _MAX_BACKGROUND_TASKS = 50
@@ -436,6 +445,49 @@ def list_background_tasks() -> list[SubagentResult]:
         return list(_background_tasks.values())
 
 
+def wait_for_tasks(task_ids: list[str], timeout: float = 900) -> dict[str, dict]:
+    """Block until all specified tasks reach a terminal state, then return results.
+
+    This is the "Auto-Collect" half of Ghost's Fire-and-Auto-Collect pattern.
+    Returns a dict mapping task_id -> result dict.
+    """
+    deadline = time.time() + timeout
+    results = {}
+
+    for tid in task_ids:
+        remaining = max(0.1, deadline - time.time())
+        while remaining > 0:
+            sr = get_background_task_result(tid)
+            if sr is None:
+                results[tid] = {"error": f"Unknown task_id: {tid}"}
+                break
+            if sr.status in (SubagentStatus.COMPLETED, SubagentStatus.FAILED, SubagentStatus.TIMED_OUT):
+                results[tid] = _format_subagent_result(sr)
+                break
+            time.sleep(min(0.5, remaining))
+            remaining = deadline - time.time()
+        else:
+            results[tid] = {"error": f"Timed out waiting for task {tid}"}
+
+    return results
+
+
+def _format_subagent_result(sr: SubagentResult) -> dict:
+    """Convert a SubagentResult to a dict suitable for tool output."""
+    if sr.status == SubagentStatus.COMPLETED:
+        return {
+            "success": True,
+            "result": sr.result,
+            "subagent_type": sr.subagent_type,
+            "steps_used": sr.steps_used,
+            "duration_ms": sr.duration_ms,
+        }
+    elif sr.status == SubagentStatus.TIMED_OUT:
+        return {"error": f"Subagent timed out", "subagent_type": sr.subagent_type}
+    else:
+        return {"error": sr.error or "Unknown error", "subagent_type": sr.subagent_type}
+
+
 # ═══════════════════════════════════════════════════════════════════
 #  TOOL BUILDER  (for Ghost's tool registry)
 # ═══════════════════════════════════════════════════════════════════
@@ -445,11 +497,17 @@ def build_typed_subagent_tools(
     tool_registry,
     auth_store=None,
     provider_chain=None,
+    event_bus=None,
 ) -> list[dict]:
-    """Build the task tool that supports typed subagent delegation.
+    """Build task + check_task + wait_tasks tools for typed subagent delegation.
 
-    The LLM picks a subagent_type from the available types, and the
-    tool dispatches to the correct config + executor with timeout.
+    Ghost's "Fire and Auto-Collect" pattern:
+      1. LLM calls task() one or more times — each submits to thread pool
+      2. Engine auto-detects pending tasks after the tool-call batch
+      3. Engine waits for all parallel tasks and injects results
+      4. LLM sees all results in the next turn — zero polling needed
+
+    check_task / wait_tasks exist for explicit async control when needed.
     """
     available_types = list_subagent_types()
     type_descriptions = "\n".join(
@@ -459,15 +517,13 @@ def build_typed_subagent_tools(
 
     def task(prompt: str, subagent_type: str = "researcher", max_steps: int = None):
         """
-        Delegate a task to a specialized subagent for parallel or isolated execution.
+        Delegate a task to a specialized subagent. Multiple task() calls in the
+        same turn run in PARALLEL automatically — results are collected when all finish.
 
         Args:
-            prompt: Clear description of the task to complete.
+            prompt: Clear description of the task. Be specific.
             subagent_type: Type of subagent (researcher, coder, bash, reviewer).
             max_steps: Override max tool-loop steps (optional).
-
-        Returns:
-            Result from the subagent.
         """
         config = get_subagent_config(subagent_type)
         if config is None:
@@ -484,65 +540,146 @@ def build_typed_subagent_tools(
                 max_steps = config.max_steps
             config = replace(config, max_steps=min(max(1, max_steps), config.max_steps))
 
-        result = _run_subagent_sync(
+        # Submit to thread pool — runs in background immediately
+        task_id, _future = execute_subagent_async(
             config=config,
-            task=prompt,
+            task_text=prompt,
             tool_registry=tool_registry,
             cfg=cfg,
             auth_store=auth_store,
             provider_chain=provider_chain,
+            event_bus=event_bus,
         )
 
-        if result.status == SubagentStatus.COMPLETED:
-            return {
-                "success": True,
-                "result": result.result,
-                "subagent_type": result.subagent_type,
-                "steps_used": result.steps_used,
-                "duration_ms": result.duration_ms,
-            }
-        elif result.status == SubagentStatus.TIMED_OUT:
-            return {
-                "error": f"Subagent timed out after {config.timeout_seconds}s",
-                "subagent_type": result.subagent_type,
-            }
-        else:
-            return {
-                "error": result.error or "Unknown error",
-                "subagent_type": result.subagent_type,
-            }
+        return {
+            "submitted": True,
+            "task_id": task_id,
+            "subagent_type": config.name,
+            "message": (
+                f"Subagent '{config.name}' started (task_id={task_id}). "
+                "Results will be auto-collected when all parallel tasks finish."
+            ),
+        }
 
-    return [{
-        "name": "task",
-        "description": (
-            "Delegate a task to a specialized subagent for isolated execution with "
-            "a fresh context window. Choose the right subagent type:\n"
-            f"{type_descriptions}\n\n"
-            "Use this when you need accurate information from files that may have "
-            "been lost to context truncation, or for parallel sub-tasks."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "prompt": {
-                    "type": "string",
-                    "description": (
-                        "Clear description of the task. Be specific: include file paths, "
-                        "class names, and what to accomplish."
-                    ),
+    def check_task(task_id: str):
+        """
+        Check the status of a background subagent task.
+
+        Args:
+            task_id: The task_id returned by a previous task() call.
+        """
+        if not task_id:
+            return {"error": "task_id is required."}
+        sr = get_background_task_result(task_id)
+        if sr is None:
+            return {"error": f"Unknown task_id: {task_id}"}
+        result = {
+            "task_id": sr.task_id,
+            "subagent_type": sr.subagent_type,
+            "status": sr.status.value,
+        }
+        if sr.status == SubagentStatus.COMPLETED:
+            result["result"] = sr.result
+            result["steps_used"] = sr.steps_used
+            result["duration_ms"] = sr.duration_ms
+        elif sr.status in (SubagentStatus.FAILED, SubagentStatus.TIMED_OUT):
+            result["error"] = sr.error
+        elif sr.started_at:
+            result["running_for_ms"] = int((datetime.now() - sr.started_at).total_seconds() * 1000)
+        return result
+
+    def wait_tasks_tool(task_ids: list, timeout: int = 900):
+        """
+        Wait for one or more background subagent tasks to complete and return results.
+
+        Args:
+            task_ids: List of task_id strings to wait for.
+            timeout: Maximum seconds to wait (default 900).
+        """
+        if not task_ids:
+            return {"error": "task_ids list is required."}
+        if not isinstance(task_ids, list):
+            task_ids = [str(task_ids)]
+        return wait_for_tasks(task_ids, timeout=min(timeout, 900))
+
+    return [
+        {
+            "name": "task",
+            "description": (
+                "Delegate a task to a specialized subagent for isolated execution with "
+                "a fresh context window. Multiple task() calls in the SAME turn run in "
+                "PARALLEL — results are auto-collected. Choose the right subagent type:\n"
+                f"{type_descriptions}\n\n"
+                "Use for: research that needs fresh context, parallel sub-tasks, "
+                "isolated code changes, or verbose operations that would clutter context."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "type": "string",
+                        "description": (
+                            "Clear description of the task. Be specific: include file paths, "
+                            "class names, and what to accomplish."
+                        ),
+                    },
+                    "subagent_type": {
+                        "type": "string",
+                        "enum": available_types,
+                        "description": f"Type of subagent: {', '.join(available_types)}",
+                        "default": "researcher",
+                    },
+                    "max_steps": {
+                        "type": "integer",
+                        "description": "Override max tool-loop steps (optional).",
+                    },
                 },
-                "subagent_type": {
-                    "type": "string",
-                    "enum": available_types,
-                    "description": f"Type of subagent: {', '.join(available_types)}",
-                    "default": "researcher",
-                },
-                "max_steps": {
-                    "type": "integer",
-                    "description": "Override max tool-loop steps (optional).",
-                },
+                "required": ["prompt"],
             },
-            "required": ["prompt"],
+            "execute": task,
         },
-        "execute": task,
-    }]
+        {
+            "name": "check_task",
+            "description": (
+                "Check the status of a background subagent task. "
+                "Usually not needed — results are auto-collected. Use only if you "
+                "need to check progress before the batch completes."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {
+                        "type": "string",
+                        "description": "The task_id returned by task().",
+                    },
+                },
+                "required": ["task_id"],
+            },
+            "execute": check_task,
+        },
+        {
+            "name": "wait_tasks",
+            "description": (
+                "Wait for multiple background tasks to complete and return all results. "
+                "Usually not needed — the engine auto-collects. Use only for explicit "
+                "async workflows where you fired tasks in a previous turn."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of task_id strings to wait for.",
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Max seconds to wait (default 900).",
+                        "default": 900,
+                    },
+                },
+                "required": ["task_ids"],
+            },
+            "execute": wait_tasks_tool,
+        },
+    ]

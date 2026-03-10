@@ -687,14 +687,15 @@ class DanglingToolCallRepairMiddleware(Middleware):
 
 
 class SubagentLimitMiddleware(Middleware):
-    """Truncate excess parallel subagent (delegate_task) calls.
+    """Truncate excess parallel subagent calls (task + delegate_task).
 
-    When the LLM generates more delegate_task tool calls than allowed in
+    When the LLM generates more subagent tool calls than allowed in
     a single response, this middleware keeps only the first N and removes
     the rest.  Enforced at the model-response level, more reliable than
     prompt-based limits.
     """
 
+    _SUBAGENT_TOOL_NAMES = frozenset({"task", "delegate_task"})
     MIN_LIMIT = 2
     MAX_LIMIT = 5
 
@@ -706,17 +707,17 @@ class SubagentLimitMiddleware(Middleware):
         if not tool_calls:
             return None
 
-        delegate_indices = [
+        subagent_indices = [
             i for i, tc in enumerate(tool_calls)
-            if tc.get("function", {}).get("name") == "delegate_task"
+            if tc.get("function", {}).get("name") in self._SUBAGENT_TOOL_NAMES
         ]
-        if len(delegate_indices) <= self._max:
+        if len(subagent_indices) <= self._max:
             return None
 
-        drop = set(delegate_indices[self._max:])
+        drop = set(subagent_indices[self._max:])
         truncated = [tc for i, tc in enumerate(tool_calls) if i not in drop]
         dropped = len(drop)
-        log.warning("SubagentLimit: truncated %d excess delegate_task call(s) at step %d",
+        log.warning("SubagentLimit: truncated %d excess subagent call(s) at step %d",
                     dropped, step)
 
         updated = dict(response_msg)

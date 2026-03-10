@@ -811,7 +811,7 @@ class EvolveContextLogger:
 
 _ctx_logger = EvolveContextLogger.get()
 
-KNOWN_POLL_TOOLS = {"shell_exec", "browser"}
+KNOWN_POLL_TOOLS = {"shell_exec", "browser", "check_task"}
 KNOWN_POLL_ACTIONS = {"snapshot", "content", "screenshot", "poll", "log", "status"}
 WARNING_BUCKET_SIZE = 10
 
@@ -2716,6 +2716,54 @@ class ToolLoopEngine:
                         final_text = "(Stopped by user)"
                     exit_reason = "cancelled"
                     break
+
+                # --- Auto-collect parallel subagent results ---
+                # Scan this step's tool results for task() submissions.
+                # task() returns {"submitted": true, "task_id": "xxx"}.
+                # We extract all task_ids and wait for them in parallel.
+                try:
+                    _step_task_ids = []
+                    for _tc_entry in tool_calls_log:
+                        if (_tc_entry.get("step") == step
+                                and _tc_entry.get("tool") == "task"):
+                            _raw = _tc_entry.get("result", "")
+                            if "task_id" in _raw:
+                                import re as _tid_re
+                                _m = _tid_re.search(r'"task_id":\s*"([a-f0-9]+)"', _raw)
+                                if _m:
+                                    _step_task_ids.append(_m.group(1))
+
+                    if _step_task_ids:
+                        from ghost_subagent_config import wait_for_tasks
+                        log.info("Auto-collecting %d parallel subagent task(s): %s",
+                                 len(_step_task_ids), _step_task_ids)
+                        _collected = wait_for_tasks(_step_task_ids, timeout=900)
+                        _parts = []
+                        for _tid in _step_task_ids:
+                            _r = _collected.get(_tid, {"error": "No result"})
+                            if _r.get("success"):
+                                _parts.append(
+                                    f"[task_id={_tid}, type={_r.get('subagent_type', '?')}, "
+                                    f"steps={_r.get('steps_used', 0)}, "
+                                    f"time={_r.get('duration_ms', 0)}ms]\n{_r['result']}"
+                                )
+                            else:
+                                _parts.append(
+                                    f"[task_id={_tid}, FAILED] "
+                                    f"{_r.get('error', 'Unknown error')}"
+                                )
+                        messages.append({
+                            "role": "user",
+                            "content": (
+                                f"[Subagent Results — {len(_step_task_ids)} "
+                                f"task(s) completed]\n\n"
+                                + "\n\n---\n\n".join(_parts)
+                            ),
+                        })
+                except ImportError:
+                    pass
+                except Exception as _ac_err:
+                    log.warning("Subagent auto-collect error: %s", _ac_err)
 
                 needs_compact = (
                     len(messages) > 30

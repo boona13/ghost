@@ -1600,13 +1600,14 @@ class GhostDaemon:
             except Exception as e:
                 print(f"  [delegate] Failed to initialize: {e}")
 
-        # Typed Subagent System (mirrored from DeerFlow)
+        # Typed Subagent System (mirrored from DeerFlow, with parallel auto-collect)
         try:
             for tool_def in build_typed_subagent_tools(
                 cfg=cfg,
                 tool_registry=self.tool_registry,
                 auth_store=self.auth_store,
                 provider_chain=self.provider_chain,
+                event_bus=self.tool_event_bus,
             ):
                 self.tool_registry.register(tool_def)
             print("  [task] Initialized typed subagent tools (researcher, coder, bash, reviewer)")
