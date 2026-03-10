@@ -6,3 +6,4 @@ author: ghost
 category: utility
 deps:
 - yt-dlp
+- ffmpeg
