@@ -383,6 +383,12 @@ _FEATURE_MUTATE_TOOL_NAMES = frozenset({
 _FEATURE_IMPLEMENTER_JOB = "_ghost_growth_feature_implementer"
 _IMPLEMENTATION_AUDITOR_JOB = "_ghost_growth_implementation_auditor"
 
+_CRON_JOB_TIMEOUTS: dict[str, int] = {
+    _FEATURE_IMPLEMENTER_JOB: 900,
+    _IMPLEMENTATION_AUDITOR_JOB: 600,
+}
+_CRON_DEFAULT_TIMEOUT = 300
+
 # ═════════════════════════════════════════════════════════════════════
 #  CONFIG
 # ═════════════════════════════════════════════════════════════════════
@@ -495,6 +501,14 @@ DEFAULT_CONFIG = {
         "vision": "openrouter/anthropic/claude-sonnet-4-6",
         "code": "openrouter/openai/gpt-5.3-codex",
     },
+    # Model dispatcher — budget-aware coding model selection for evolution/bug hunting
+    "coding_model_override": None,
+    "coding_model_budget": "auto",
+    "min_swe_bench_score": 78.0,
+    "coding_jobs": [
+        "_ghost_growth_feature_implementer",
+        "_ghost_growth_bug_hunter",
+    ],
     # Provider fallback chains — user-reorderable priority for each capability
     "provider_chains": {
         "web_search": ["perplexity_openrouter", "perplexity_direct", "grok", "openai", "brave", "gemini"],
@@ -2006,6 +2020,46 @@ class GhostDaemon:
             )
             if self.cfg.get("enable_tool_loop", True) and self.tool_registry.get_all():
                 from ghost_middleware import InvocationContext
+                timeout_s = self.cfg.get(
+                    "cron_job_timeout",
+                    _CRON_JOB_TIMEOUTS.get(job_name, _CRON_DEFAULT_TIMEOUT),
+                )
+                deadline = time.time() + timeout_s
+                _timed_out = False
+
+                def _cron_cancel_check():
+                    nonlocal _timed_out
+                    if time.time() >= deadline:
+                        _timed_out = True
+                        return True
+                    return False
+
+                coding_model = None
+                coding_jobs = self.cfg.get("coding_jobs", [
+                    _FEATURE_IMPLEMENTER_JOB, "_ghost_growth_bug_hunter",
+                ])
+                if job_name in coding_jobs:
+                    budget = self.cfg.get("coding_model_budget", "auto")
+                    if str(budget).strip().lower() == "free":
+                        log.info(
+                            "Skipping coding job %s — budget is 'free', "
+                            "self-evolution disabled to avoid low-quality output",
+                            job_name,
+                        )
+                        console_bus.emit(
+                            "info", "cron", job_name,
+                            "Skipped: coding budget is 'free' — set budget to "
+                            "'low' or higher to enable self-evolution",
+                        )
+                        return
+                    try:
+                        from ghost_model_dispatch import get_dispatcher
+                        coding_model = get_dispatcher(
+                            self.cfg, self.auth_store
+                        ).select("coding")
+                    except Exception as _dispatch_err:
+                        log.warning("Model dispatch failed: %s", _dispatch_err)
+
                 inv = InvocationContext(
                     source="cron",
                     user_message=prompt,
@@ -2016,12 +2070,20 @@ class GhostDaemon:
                     config=self.cfg,
                     max_steps=self.cfg.get("tool_loop_max_steps", 200),
                     on_step=terminal_step,
+                    cancel_check=_cron_cancel_check,
+                    model_override=coding_model,
                     meta={
                         "is_evolution_runner": is_evolution_runner,
                         "job_name": job_name,
                     },
                 )
                 self.middleware_chain.invoke(inv)
+
+                if _timed_out:
+                    console_bus.emit(
+                        "warning", "cron", job_name,
+                        f"Session killed after {timeout_s}s timeout",
+                    )
 
                 result = inv.result_text
                 tools_used = inv.tools_used

@@ -35,6 +35,7 @@ DEFAULT_GROWTH_SCHEDULES = {
     "content_health":      "0 4 * * 0",
     "security_patrol":     "0 5 * * *",
     "visual_monitor":      "0 */8 * * *",
+    "model_benchmarks":    "0 3 * * 0",
 }
 
 GROWTH_JOB_PREFIX = "_ghost_growth_"
@@ -1164,6 +1165,35 @@ GROWTH_ROUTINES = [
             "6. Use memory_save to log results with tag 'content_health'.\n"
             "7. Use log_growth_activity to summarize the health check.\n"
             "Be concise. Focus on whether extraction is working, not on the content itself."
+        ),
+    },
+    {
+        "id": "model_benchmarks",
+        "name": "Model Benchmark Updater",
+        "description": "Refresh coding model benchmark data for the model dispatcher",
+        "prompt": (
+            "You are Ghost running a MODEL BENCHMARK UPDATE routine. Your goal:\n"
+            "1. Use web_search to look up 'SWE-bench verified leaderboard 2026'.\n"
+            "2. Also search 'best coding LLM benchmark 2026' for additional data.\n"
+            "3. Parse the top 15 models and their SWE-bench verified scores.\n"
+            "4. Use file_read to load the current benchmarks:\n"
+            "   file_read(path='~/.ghost/coding_benchmarks.json')\n"
+            "5. Update the JSON with new scores. For each model, preserve the existing\n"
+            "   'routes' section (provider IDs and pricing). Only update 'swe_bench' scores\n"
+            "   and add new models you discover. Format:\n"
+            '   {"source": "swe-bench-verified", "updated": "<today>", "models": {\n'
+            '     "<model-name>": {"swe_bench": <score>, "routes": {<provider>: {"id": "<id>", "input": <$/MTok>, "output": <$/MTok>}}}\n'
+            "   }}\n"
+            "6. For NEW models not already in the file, add routes based on what you find.\n"
+            "   Common providers: openrouter, anthropic, openai, google, deepseek, xai.\n"
+            "   Use the model's API pricing from their official docs or OpenRouter.\n"
+            "7. Write the updated JSON back:\n"
+            "   file_write(path='~/.ghost/coding_benchmarks.json', content=<updated JSON>)\n"
+            "8. Use memory_save to log which models were updated, with tag 'model_benchmarks'.\n"
+            "9. Use log_growth_activity to summarize what changed.\n"
+            "10. Delete the dispatch cache so the next coding job picks up new data:\n"
+            "    shell_exec(command='rm -f ~/.ghost/model_dispatch_cache.json')\n"
+            "Be precise with scores — only use verified benchmark numbers, not estimates."
         ),
     },
 ]

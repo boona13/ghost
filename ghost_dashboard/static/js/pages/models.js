@@ -13,12 +13,13 @@ let modelsVisibleCount = MODELS_PAGE_SIZE;
 export async function render(container) {
   const { GhostAPI: api, GhostUtils: u } = window;
 
-  const [modelsResp, providersResp, chainResp, primaryResp, configResp] = await Promise.all([
+  const [modelsResp, providersResp, chainResp, primaryResp, configResp, dispatchResp] = await Promise.all([
     api.get('/api/models'),
     api.get('/api/providers').catch(() => ({ providers: [] })),
     api.get('/api/fallback-chain').catch(() => ({ chain: [], active: '' })),
     api.get('/api/primary-provider').catch(() => ({ primary_provider: 'openrouter' })),
     api.get('/api/config').catch(() => ({ config: {} })),
+    api.get('/api/coding-model-dispatch').catch(() => ({})),
   ]);
   primaryProvider = primaryResp.primary_provider || 'openrouter';
   const cfg = configResp.config || configResp || {};
@@ -57,6 +58,20 @@ export async function render(container) {
       <div class="models-status-item">
         <span class="text-xs text-zinc-500">${t('models.apiKey')}</span>
         <span class="text-sm ${modelsResp.has_api_key ? 'text-emerald-400' : 'text-red-400'}">${modelsResp.has_api_key ? t('models.connectedDot') : t('models.notSet')}</span>
+      </div>
+    </div>
+
+    <!-- Coding Model Dispatcher -->
+    <div class="collapsible-section mb-4 open">
+      <button class="collapsible-header" data-collapse-target="section-coding-dispatch">
+        <svg class="collapsible-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+        <div class="collapsible-header-text">
+          <span class="collapsible-title">${t('models.codingDispatcher')}</span>
+          <span class="collapsible-desc">${t('models.codingDispatcherDesc')}</span>
+        </div>
+      </button>
+      <div class="collapsible-body" id="section-coding-dispatch" style="max-height:2000px">
+        ${_renderCodingDispatch(dispatchResp, u)}
       </div>
     </div>
 
@@ -224,6 +239,9 @@ export async function render(container) {
       body.style.maxHeight = isOpen ? body.scrollHeight + 'px' : '0';
     });
   });
+
+  // Coding model dispatcher events
+  _bindDispatchEvents(container, api, u);
 
   // Provider tabs
   container.querySelectorAll('.provider-tab:not(.add-provider-tab)').forEach(tab => {
@@ -710,5 +728,134 @@ function _renderModelPage(models, current, container, u, api) {
       u.toast(t('models.modelSetTo', { model: id, provider }));
       render(container);
     });
+  });
+}
+
+// ── Coding Model Dispatcher UI ─────────────────────────────────
+
+function _renderCodingDispatch(d, u) {
+  const selected = d.selected_model || '—';
+  const budget = d.budget ?? 'auto';
+  const override = d.override || '';
+  const minScore = d.min_swe_bench_score ?? 78.0;
+  const benchmarks = d.benchmarks || [];
+  const availProv = d.available_providers || [];
+  const resolved = d.budget_resolved || {};
+  const strategy = resolved.strategy || 'best_value';
+  const maxCost = resolved.max_cost ?? '∞';
+
+  const budgetOptions = ['auto', 'free', 'low', 'medium', 'high'];
+  const budgetLabels = {
+    auto: t('models.budgetAuto'),
+    free: t('models.budgetFree'),
+    low: t('models.budgetLow'),
+    medium: t('models.budgetMedium'),
+    high: t('models.budgetHigh'),
+  };
+
+  return `
+    <div class="stat-card mb-4">
+      <div class="flex items-center justify-between flex-wrap gap-3 mb-4">
+        <div>
+          <div class="text-xs text-zinc-500 mb-1">${t('models.dispatchSelected')}</div>
+          <div class="text-sm font-semibold text-white font-mono">${u.escapeHtml(selected)}</div>
+          <div class="text-[10px] text-zinc-500 mt-0.5">${t('models.dispatchStrategy')}: ${strategy === 'best_value' ? t('models.strategyValue') : t('models.strategyQuality')} · ${t('models.dispatchMaxCost')}: $${maxCost}/MTok</div>
+        </div>
+        <button class="btn btn-ghost btn-sm" id="btn-dispatch-refresh">${t('models.dispatchRefresh')}</button>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+        <div>
+          <label class="form-label">${t('models.dispatchBudget')}</label>
+          <select id="dispatch-budget" class="form-input w-full">
+            ${budgetOptions.map(b => `<option value="${b}" ${String(budget) === b ? 'selected' : ''}>${budgetLabels[b] || b}</option>`).join('')}
+            ${!budgetOptions.includes(String(budget)) ? `<option value="${budget}" selected>$${budget}/MTok</option>` : ''}
+          </select>
+        </div>
+        <div>
+          <label class="form-label">${t('models.dispatchOverride')}</label>
+          <input id="dispatch-override" type="text" class="form-input w-full font-mono" placeholder="${t('models.dispatchOverridePlaceholder')}" value="${u.escapeHtml(override)}">
+        </div>
+        <div>
+          <label class="form-label">${t('models.dispatchMinScore')}</label>
+          <input id="dispatch-min-score" type="number" class="form-input w-full" min="0" max="100" step="0.5" value="${minScore}">
+        </div>
+      </div>
+
+      <div class="flex gap-2 mb-4">
+        <button class="btn btn-primary btn-sm" id="btn-dispatch-save">${t('common.save')}</button>
+      </div>
+
+      <div class="text-xs text-zinc-500 mb-2">
+        ${t('models.dispatchProviders')}: ${availProv.length > 0 ? availProv.map(p => `<span class="badge badge-zinc text-[9px]">${u.escapeHtml(p)}</span>`).join(' ') : `<span class="text-red-400">${t('models.dispatchNoProviders')}</span>`}
+      </div>
+    </div>
+
+    <div class="text-xs font-semibold text-zinc-400 mb-2 uppercase tracking-wider">${t('models.dispatchBenchmarks')}</div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-xs">
+        <thead>
+          <tr class="text-zinc-500 border-b border-zinc-800">
+            <th class="text-left py-2 px-2">${t('models.benchModel')}</th>
+            <th class="text-right py-2 px-2">${t('models.benchScore')}</th>
+            <th class="text-right py-2 px-2">${t('models.benchCost')}</th>
+            <th class="text-left py-2 px-2">${t('models.benchProvider')}</th>
+            <th class="text-center py-2 px-2">${t('models.benchStatus')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${benchmarks.map(m => {
+            const isSelected = selected && selected.includes(m.name.replace(/\s/g, ''));
+            return `<tr class="border-b border-zinc-800/50 ${isSelected ? 'bg-ghost-500/10' : ''} hover:bg-zinc-800/30">
+              <td class="py-1.5 px-2 font-mono text-white">${u.escapeHtml(m.name)}${isSelected ? ' <span class="text-ghost-400 text-[9px]">●</span>' : ''}</td>
+              <td class="py-1.5 px-2 text-right ${m.swe_bench >= 80 ? 'text-emerald-400' : m.swe_bench >= 78 ? 'text-yellow-400' : 'text-zinc-400'}">${m.swe_bench}%</td>
+              <td class="py-1.5 px-2 text-right font-mono ${m.available ? 'text-zinc-300' : 'text-zinc-600'}">${m.cheapest_cost !== null ? '$' + m.cheapest_cost.toFixed(2) : '—'}</td>
+              <td class="py-1.5 px-2 text-zinc-500">${m.cheapest_provider ? u.escapeHtml(m.cheapest_provider) : '—'}</td>
+              <td class="py-1.5 px-2 text-center">${m.available ? '<span class="text-emerald-400">●</span>' : '<span class="text-zinc-600">○</span>'}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function _bindDispatchEvents(container, api, u) {
+  document.getElementById('btn-dispatch-save')?.addEventListener('click', async () => {
+    const btn = document.getElementById('btn-dispatch-save');
+    const budget = document.getElementById('dispatch-budget')?.value || 'auto';
+    const override = document.getElementById('dispatch-override')?.value?.trim() || null;
+    const minScore = parseFloat(document.getElementById('dispatch-min-score')?.value) || 78.0;
+
+    btn.disabled = true;
+    btn.textContent = t('common.saving');
+    try {
+      await api.put('/api/coding-model-dispatch', {
+        coding_model_budget: budget,
+        coding_model_override: override,
+        min_swe_bench_score: minScore,
+      });
+      u.toast(t('models.dispatchSaved'));
+      render(container);
+    } catch (e) {
+      u.toast(t('common.failedWithError', { error: e.message }), 'error');
+      btn.disabled = false;
+      btn.textContent = t('common.save');
+    }
+  });
+
+  document.getElementById('btn-dispatch-refresh')?.addEventListener('click', async () => {
+    const btn = document.getElementById('btn-dispatch-refresh');
+    btn.disabled = true;
+    btn.textContent = t('models.dispatchRefreshing');
+    try {
+      await api.post('/api/coding-model-dispatch/refresh');
+      u.toast(t('models.dispatchRefreshed'));
+      render(container);
+    } catch (e) {
+      u.toast(t('common.failedWithError', { error: e.message }), 'error');
+      btn.disabled = false;
+      btn.textContent = t('models.dispatchRefresh');
+    }
   });
 }

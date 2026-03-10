@@ -342,6 +342,129 @@ def get_primary_provider():
     })
 
 
+# ═════════════════════════════════════════════════════════════════
+#  Coding Model Dispatcher endpoints
+# ═════════════════════════════════════════════════════════════════
+
+@bp.route("/api/coding-model-dispatch")
+def get_coding_dispatch():
+    """Return dispatcher status: selected model, benchmarks, budget, cache."""
+    from ghost_dashboard import get_daemon
+    daemon = get_daemon()
+    cfg = daemon.cfg if daemon else load_config()
+    auth_store = getattr(daemon, "auth_store", None)
+
+    benchmarks = {}
+    selected = None
+    available_providers = []
+    try:
+        from ghost_model_dispatch import (
+            ModelDispatcher, _get_available_providers, _resolve_budget,
+            _seed_benchmarks_if_missing, BENCHMARKS_FILE,
+        )
+        _seed_benchmarks_if_missing()
+        if BENCHMARKS_FILE.exists():
+            benchmarks = json.loads(BENCHMARKS_FILE.read_text("utf-8")).get("models", {})
+
+        avail = _get_available_providers(cfg, auth_store)
+        available_providers = sorted(avail)
+
+        dispatcher = ModelDispatcher(cfg, auth_store)
+        selected = dispatcher._compute_selection("coding")
+
+        max_cost, strategy = _resolve_budget(cfg)
+    except Exception:
+        log.warning("Failed to load coding model dispatch", exc_info=True)
+        max_cost, strategy = 100.0, "best_value"
+
+    budget_val = cfg.get("coding_model_budget", "auto")
+    override = cfg.get("coding_model_override") or None
+
+    models_list = []
+    for name, info in benchmarks.items():
+        routes = info.get("routes", {})
+        cheapest_cost = None
+        cheapest_provider = None
+        for pid, route in routes.items():
+            if pid in available_providers:
+                cost = route.get("input", 999)
+                if cheapest_cost is None or cost < cheapest_cost:
+                    cheapest_cost = cost
+                    cheapest_provider = pid
+        models_list.append({
+            "name": name,
+            "swe_bench": info.get("swe_bench", 0),
+            "cheapest_cost": cheapest_cost,
+            "cheapest_provider": cheapest_provider,
+            "available": cheapest_provider is not None,
+            "routes": {pid: r for pid, r in routes.items()},
+        })
+    models_list.sort(key=lambda m: m["swe_bench"], reverse=True)
+
+    return jsonify({
+        "selected_model": selected,
+        "budget": budget_val,
+        "budget_resolved": {"max_cost": max_cost, "strategy": strategy},
+        "override": override,
+        "min_swe_bench_score": cfg.get("min_swe_bench_score", 78.0),
+        "coding_jobs": cfg.get("coding_jobs", []),
+        "available_providers": available_providers,
+        "benchmarks": models_list,
+    })
+
+
+@bp.route("/api/coding-model-dispatch", methods=["PUT"])
+def update_coding_dispatch():
+    """Update coding model dispatch config (budget, override, min_score)."""
+    data = request.get_json(silent=True) or {}
+    cfg = load_config()
+
+    if "coding_model_budget" in data:
+        val = data["coding_model_budget"]
+        if isinstance(val, str) and val.replace(".", "", 1).isdigit():
+            val = float(val)
+        cfg["coding_model_budget"] = val
+    if "coding_model_override" in data:
+        cfg["coding_model_override"] = data["coding_model_override"] or None
+    if "min_swe_bench_score" in data:
+        try:
+            cfg["min_swe_bench_score"] = float(data["min_swe_bench_score"])
+        except (ValueError, TypeError):
+            pass
+    if "coding_jobs" in data and isinstance(data["coding_jobs"], list):
+        cfg["coding_jobs"] = data["coding_jobs"]
+
+    save_config(cfg)
+
+    from ghost_dashboard import get_daemon
+    daemon = get_daemon()
+    if daemon:
+        daemon.cfg.update(cfg)
+
+    try:
+        from ghost_model_dispatch import reset_dispatcher, CACHE_FILE
+        reset_dispatcher()
+        if CACHE_FILE.exists():
+            CACHE_FILE.unlink()
+    except Exception:
+        pass
+
+    return jsonify({"ok": True})
+
+
+@bp.route("/api/coding-model-dispatch/refresh", methods=["POST"])
+def refresh_coding_dispatch():
+    """Force re-select the coding model (clear cache)."""
+    try:
+        from ghost_model_dispatch import reset_dispatcher, CACHE_FILE
+        reset_dispatcher()
+        if CACHE_FILE.exists():
+            CACHE_FILE.unlink()
+    except Exception:
+        pass
+    return jsonify({"ok": True})
+
+
 def _get_ollama_models():
     """Fetch models from local Ollama instance."""
     try:
