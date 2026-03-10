@@ -11,6 +11,7 @@ import logging
 import os
 import random
 import re as _re
+import threading
 import time
 import hashlib
 import uuid
@@ -319,9 +320,24 @@ class ToolLoopDebugLogger:
     """Persistent JSONL logger for every tool loop session and step."""
 
     def __init__(self):
-        self._session_id = None
-        self._session_start = None
+        self._local = threading.local()
         self._ensure_dir()
+
+    @property
+    def _session_id(self):
+        return getattr(self._local, "session_id", None)
+
+    @_session_id.setter
+    def _session_id(self, value):
+        self._local.session_id = value
+
+    @property
+    def _session_start(self):
+        return getattr(self._local, "session_start", None)
+
+    @_session_start.setter
+    def _session_start(self, value):
+        self._local.session_start = value
 
     def _ensure_dir(self):
         try:
@@ -455,14 +471,51 @@ class EvolveContextLogger:
     _instance = None
 
     def __init__(self):
-        self._feature_id: str = ""
-        self._feature_title: str = ""
-        self._session_id: str = ""
-        self._caller: str = ""
+        self._local = threading.local()
         try:
             DEBUG_LOG_DIR.mkdir(parents=True, exist_ok=True)
         except Exception:
             pass
+
+    @property
+    def _feature_id(self) -> str:
+        return getattr(self._local, "feature_id", "")
+
+    @_feature_id.setter
+    def _feature_id(self, value: str):
+        self._local.feature_id = value
+
+    @property
+    def _feature_title(self) -> str:
+        return getattr(self._local, "feature_title", "")
+
+    @_feature_title.setter
+    def _feature_title(self, value: str):
+        self._local.feature_title = value
+
+    @property
+    def _session_id(self) -> str:
+        return getattr(self._local, "session_id", "")
+
+    @_session_id.setter
+    def _session_id(self, value: str):
+        self._local.session_id = value
+
+    @property
+    def _caller(self) -> str:
+        return getattr(self._local, "caller", "")
+
+    @_caller.setter
+    def _caller(self, value: str):
+        self._local.caller = value
+
+    @property
+    def _warning_count(self) -> int:
+        return getattr(self._local, "warning_count", 0)
+
+    @_warning_count.setter
+    def _warning_count(self, value: int):
+        self._local.warning_count = value
 
     @classmethod
     def get(cls) -> "EvolveContextLogger":
@@ -1634,7 +1687,8 @@ class ToolLoopEngine:
             sanitized.append(m)
         return sanitized
 
-    def _compact_messages(self, messages: list, step: int = -1) -> list:
+    def _compact_messages(self, messages: list, step: int = -1,
+                          compaction_count: int = 0) -> tuple[list, int]:
         """Two-phase context compaction.
 
         Phase 1 (always): Build a deterministic structured summary from old
@@ -1669,7 +1723,7 @@ class ToolLoopEngine:
         if user_msg_idx >= recent_start:
             old = [m for j, m in enumerate(messages) if 0 < j < recent_start]
             if not old:
-                return messages
+                return messages, compaction_count
             det_summary = _build_deterministic_summary(old)
             preserved = [system_msg]
         else:
@@ -1677,7 +1731,7 @@ class ToolLoopEngine:
             old = [m for j, m in enumerate(messages)
                    if j != 0 and j != user_msg_idx and j < recent_start]
             if not old:
-                return messages
+                return messages, compaction_count
             det_summary = _build_deterministic_summary(old)
             preserved = [system_msg, user_msg]
 
@@ -1694,8 +1748,8 @@ class ToolLoopEngine:
             # 1. First compaction (no prior summary) with enough content
             # 2. Every 5th compaction — deterministic summaries degrade over
             #    repeated re-summarization; periodic LLM refresh keeps quality
-            self._compaction_count = getattr(self, "_compaction_count", 0) + 1
-            periodic_refresh = (self._compaction_count % 5 == 0)
+            compaction_count += 1
+            periodic_refresh = (compaction_count % 5 == 0)
             worth_llm = (
                 condensed
                 and len(condensed) > 3000
@@ -1756,9 +1810,10 @@ class ToolLoopEngine:
             tokens_before=tokens_before, tokens_after=tokens_after,
             method="normal", llm_summary_used=(summary != det_summary),
         )
-        return result
+        return result, compaction_count
 
-    def _emergency_compact(self, messages: list, attempt: int, step: int = -1) -> list:
+    def _emergency_compact(self, messages: list, attempt: int, step: int = -1,
+                           compaction_count: int = 0) -> tuple[list, int]:
         """Aggressive compaction for context overflow recovery.
 
         Called when the API rejects our request as too large.  Each attempt
@@ -1772,7 +1827,8 @@ class ToolLoopEngine:
         msgs_before = len(messages)
 
         if attempt <= 1:
-            return self._compact_messages(messages, step=step)
+            return self._compact_messages(messages, step=step,
+                                          compaction_count=compaction_count)
 
         system_msg = messages[0]
 
@@ -1795,7 +1851,7 @@ class ToolLoopEngine:
             tokens_before=tokens_before, tokens_after=tokens_after,
             method=f"emergency_{attempt}", llm_summary_used=False,
         )
-        return result
+        return result, compaction_count
 
     def _resolve_provider_call(self, provider_id: str, model: str, payload: dict):
         """Resolve base_url, headers, and adapted payload for a provider."""
@@ -2144,9 +2200,9 @@ class ToolLoopEngine:
         final_text = ""
         consecutive_errors = 0
         loop_detector = LoopDetector()
-        critical_blocks = 0
         MAX_CRITICAL_BLOCKS = 3
         exit_reason = "max_steps"
+        rctx = RunContext()
 
         # Use model_override if provided, otherwise fall back to default model
         effective_model = model_override if model_override else self.model
@@ -2158,6 +2214,7 @@ class ToolLoopEngine:
             max_steps=max_steps,
             caller=caller_name,
         )
+        rctx.session_id = _debug_logger._session_id or ""
 
         # Save parent session state before overwriting (nested run() inside
         # evolve_submit_pr would clobber the implementer's session otherwise)
@@ -2287,7 +2344,9 @@ class ToolLoopEngine:
                             "Context overflow at step %d (attempt %d/%d) — compacting and retrying",
                             step, consecutive_errors, _MAX_OVERFLOW_RECOVERY_ATTEMPTS,
                         )
-                        messages = self._emergency_compact(messages, consecutive_errors, step=step)
+                        messages, rctx.compaction_count = self._emergency_compact(
+                            messages, consecutive_errors, step=step,
+                            compaction_count=rctx.compaction_count)
                         continue
                     log.error("Context overflow persists after %d compaction attempts", consecutive_errors)
                     final_text = f"Context overflow — could not reduce context after {consecutive_errors} attempts"
@@ -2354,7 +2413,7 @@ class ToolLoopEngine:
                 if not msg["tool_calls"]:
                     del msg["tool_calls"]
             if msg.get("tool_calls") and tool_registry:
-                self._consecutive_text_only = 0
+                rctx.consecutive_text_only = 0
                 for tc in msg["tool_calls"]:
                     # If a deploy was triggered by a prior tool in this batch,
                     # skip remaining calls — Ghost is about to restart.
@@ -2427,18 +2486,18 @@ class ToolLoopEngine:
                     tool_duration_ms = 0
 
                     if detection.stuck and detection.level == "critical":
-                        critical_blocks += 1
+                        rctx.critical_blocks += 1
                         tool_result = detection.message
                         loop_detector.record_result(call_id, tool_result)
                         loop_hint = f"BLOCKED:{detection.detector}"
-                        if critical_blocks >= MAX_CRITICAL_BLOCKS:
+                        if rctx.critical_blocks >= MAX_CRITICAL_BLOCKS:
                             final_text = (
-                                f"(Loop terminated: {critical_blocks} critical blocks hit. "
+                                f"(Loop terminated: {rctx.critical_blocks} critical blocks hit. "
                                 "The model was stuck repeating the same tool calls.)"
                             )
                             exit_reason = "critical_loop_break"
                             _debug_logger.step_error(step,
-                                f"Force-exit: {critical_blocks} critical blocks reached")
+                                f"Force-exit: {rctx.critical_blocks} critical blocks reached")
                             break
                     else:
                         warning_text = ""
@@ -2625,13 +2684,11 @@ class ToolLoopEngine:
                     })
 
                     if "__parse_error" in fn_args and fn_name == "evolve_apply":
-                        _malformed_json_count = getattr(
-                            self, "_malformed_json_count", 0) + 1
-                        self._malformed_json_count = _malformed_json_count
+                        rctx.malformed_json_count += 1
                         messages.append({
                             "role": "user",
                             "content": (
-                                f"⛔ MALFORMED JSON (attempt {_malformed_json_count}/3). "
+                                f"⛔ MALFORMED JSON (attempt {rctx.malformed_json_count}/3). "
                                 "Your output was truncated because the file content exceeded "
                                 "your output token limit. You MUST use CHUNKED WRITES:\n"
                                 "  1. evolve_apply(evo_id, file_path, content='<first ~80 lines>')\n"
@@ -2640,7 +2697,7 @@ class ToolLoopEngine:
                                 "Keep each chunk under 80 lines. Do NOT retry with full content."
                             ),
                         })
-                        if _malformed_json_count >= 3:
+                        if rctx.malformed_json_count >= 3:
                             messages.append({
                                 "role": "user",
                                 "content": (
@@ -2665,7 +2722,8 @@ class ToolLoopEngine:
                     or _estimate_context_tokens(messages) > _COMPACT_TOKEN_THRESHOLD
                 )
                 if needs_compact and len(messages) > 22:
-                    messages = self._compact_messages(messages, step=step)
+                    messages, rctx.compaction_count = self._compact_messages(
+                        messages, step=step, compaction_count=rctx.compaction_count)
             else:
                 text_content = (msg.get("content") or "").strip()
                 if not tool_calls_log:
@@ -2690,27 +2748,26 @@ class ToolLoopEngine:
 
                 if tools_schema and step < max_steps - 2:
                     if not text_content:
-                        consecutive_empty = getattr(self, "_consecutive_empty", 0) + 1
-                        self._consecutive_empty = consecutive_empty
-                        if consecutive_empty >= 10:
+                        rctx.consecutive_empty += 1
+                        if rctx.consecutive_empty >= 10:
                             _debug_logger.step_text_response(
-                                step, "", f"break_empty_loop_{consecutive_empty}")
+                                step, "", f"break_empty_loop_{rctx.consecutive_empty}")
                             final_text = (
                                 "(Session terminated: model produced "
-                                f"{consecutive_empty} consecutive empty responses.)"
+                                f"{rctx.consecutive_empty} consecutive empty responses.)"
                             )
                             exit_reason = "empty_response_loop"
                             break
                     else:
-                        self._consecutive_empty = 0
+                        rctx.consecutive_empty = 0
 
-                    consecutive_text = getattr(self, "_consecutive_text_only", 0) + 1
-                    self._consecutive_text_only = consecutive_text
+                    rctx.consecutive_text_only += 1
 
                     # After 3 consecutive text-only responses, compact context
                     # to free output token budget for tool calls
-                    if consecutive_text == 3 and len(messages) > 22:
-                        messages = self._compact_messages(messages, step=step)
+                    if rctx.consecutive_text_only == 3 and len(messages) > 22:
+                        messages, rctx.compaction_count = self._compact_messages(
+                            messages, step=step, compaction_count=rctx.compaction_count)
 
                     workflow_issue = _check_incomplete_workflows(tool_calls_log)
 
@@ -2727,7 +2784,7 @@ class ToolLoopEngine:
                             and len(text_content) < 400
                         )
                         few_tools = len(tool_calls_log) < _MIN_TOOLS_BEFORE_ACCEPT_DEFERRAL
-                        if is_deferring and few_tools and consecutive_text <= 1:
+                        if is_deferring and few_tools and rctx.consecutive_text_only <= 1:
                             pushback = (
                                 "You're giving up too early — you have more tools available. "
                                 "Try a different approach NOW:\n"
@@ -2744,7 +2801,7 @@ class ToolLoopEngine:
                         _debug_logger.step_text_response(step, text_content, "accepted_after_tools")
                         break
 
-                    if consecutive_text >= 5:
+                    if rctx.consecutive_text_only >= 5:
                         pushback = (
                             "CRITICAL: You have produced {n} text responses without "
                             "calling any tool. You MUST call a tool NOW. "
@@ -2754,7 +2811,7 @@ class ToolLoopEngine:
                             "  - evolve_test(evolution_id=...)\n"
                             "  - fail_future_feature(feature_id=..., reason='...')\n"
                             "  - task_complete(summary='...')"
-                        ).format(n=consecutive_text)
+                        ).format(n=rctx.consecutive_text_only)
                     else:
                         pushback = (
                             "Call task_complete(summary='...') to send your reply. "
@@ -2916,6 +2973,21 @@ class ToolLoopEngine:
             images=images,
         )
         return result.text
+
+
+@dataclass
+class RunContext:
+    """Per-invocation state bucket — the Ghost equivalent of DeerFlow's ThreadState.
+
+    Every counter that previously lived on self._ of ToolLoopEngine is now
+    scoped to a single run() call via this object, eliminating cross-run bleed.
+    """
+    session_id: str = ""
+    compaction_count: int = 0
+    consecutive_text_only: int = 0
+    consecutive_empty: int = 0
+    malformed_json_count: int = 0
+    critical_blocks: int = 0
 
 
 class ToolLoopResult:

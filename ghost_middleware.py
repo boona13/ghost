@@ -146,7 +146,16 @@ class MiddlewareChain:
 
     def __init__(self, middlewares: list[Middleware] | None = None):
         self._middlewares: list[Middleware] = list(middlewares or [])
-        self._active_ctx: InvocationContext | None = None
+        self._local = threading.local()
+
+    @property
+    def _active_ctx(self) -> InvocationContext | None:
+        """Per-thread active context — safe for concurrent invocations."""
+        return getattr(self._local, "ctx", None)
+
+    @_active_ctx.setter
+    def _active_ctx(self, value: InvocationContext | None) -> None:
+        self._local.ctx = value
 
     def add(self, mw: Middleware) -> "MiddlewareChain":
         self._middlewares.append(mw)
