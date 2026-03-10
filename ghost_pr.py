@@ -58,6 +58,20 @@ stop the next one. Check EVERY section below.
 - New tool defs = MUST be registered via tool_registry.register()
 - If any of these are missing, the feature is dead code — BLOCK it
 
+### Ghost Tool Code Quality (ghost_tools/<name>/tool.py)
+- Mentally trace EVERY line of the execute function with sample inputs.
+  The code must actually work at runtime, not just look correct.
+- Python operator precedence: `Path.home() / "foo".method()` calls method
+  on the STRING, not on the Path. Correct: `(Path.home() / "foo").method()`.
+  Check ALL chained Path operations for this class of bug.
+- subprocess.run calls: verify the command list is correct, check=True will
+  raise on failure, capture_output catches stderr for error reporting.
+- All function parameters must have sane defaults. The execute function
+  must accept **kwargs for forward compatibility.
+- Return values must be JSON-serializable strings (json.dumps).
+- If any code path could fail silently or produce wrong results at runtime
+  despite passing syntax/import checks — BLOCK the PR.
+
 ### Tool Execute Signatures (caused 6+ TypeError crashes)
 - Every tool execute function MUST accept **kwargs or match the schema exactly
 - Optional params MUST have defaults (e.g. `_=None`, `limit=50`)

@@ -1482,6 +1482,16 @@ _XML_TOOL_CALL_RE = _re.compile(
     _re.IGNORECASE,
 )
 
+_XML_BLOCK_RE = _re.compile(
+    r"<(?:invoke|minimax:tool_call|tool_call)\b[^>]*>.*?</(?:invoke|minimax:tool_call|tool_call)>",
+    _re.IGNORECASE | _re.DOTALL,
+)
+
+_XML_ORPHAN_TAG_RE = _re.compile(
+    r"</?(?:invoke|parameter|minimax:tool_call|tool_call)\b[^>]*>",
+    _re.IGNORECASE,
+)
+
 
 def _is_xml_tool_markup(text: str) -> bool:
     """Detect raw XML tool call markup that some models emit as content."""
@@ -1489,6 +1499,21 @@ def _is_xml_tool_markup(text: str) -> bool:
     if not stripped:
         return False
     return bool(_XML_TOOL_CALL_RE.search(stripped))
+
+
+def _strip_xml_tool_markup(text: str) -> str:
+    """Remove XML tool call markup that some models emit as text content.
+
+    Some models (e.g. minimax) emit tool calls as XML tags in the content
+    stream instead of using proper function calling format. This strips
+    those patterns so the user never sees raw XML.
+    """
+    if not text or not _XML_TOOL_CALL_RE.search(text):
+        return text
+    cleaned = _XML_BLOCK_RE.sub("", text)
+    cleaned = _XML_ORPHAN_TAG_RE.sub("", cleaned)
+    cleaned = _re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned
 
 
 def _parse_openai_stream(response, on_token=None) -> dict:
@@ -1563,9 +1588,14 @@ def _parse_openai_stream(response, on_token=None) -> dict:
             if choice.get("finish_reason"):
                 finish_reason = choice["finish_reason"]
 
+    raw_content = "".join(content_parts) if content_parts else None
+    if raw_content:
+        raw_content = _strip_xml_tool_markup(raw_content)
+        if not raw_content:
+            raw_content = None
     message: dict = {
         "role": "assistant",
-        "content": "".join(content_parts) if content_parts else None,
+        "content": raw_content,
     }
     if tool_calls:
         message["tool_calls"] = [tool_calls[i] for i in sorted(tool_calls)]
@@ -3078,6 +3108,9 @@ class ToolLoopEngine:
                 pass
 
         _llm_pool.shutdown(wait=False)
+
+        if final_text:
+            final_text = _strip_xml_tool_markup(final_text)
 
         return ToolLoopResult(
             text=final_text,

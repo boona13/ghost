@@ -456,7 +456,15 @@ class ToolScopeMiddleware(Middleware):
         else:
             _ALWAYS = {"memory_search", "memory_save", "notify"}
 
-        all_names = list(set(needed) | _ALWAYS)
+        # Include all ToolBuilder-registered tools (ghost_tools/) — these are
+        # user/evolve-created tools that should always be available regardless
+        # of which skill is matched.
+        tool_builder_tools = set()
+        tool_mgr = getattr(ctx.daemon, "tool_manager", None)
+        if tool_mgr:
+            tool_builder_tools = set(tool_mgr.get_tool_names())
+
+        all_names = list(set(needed) | _ALWAYS | tool_builder_tools)
         available = set(ctx.tool_registry.names())
         valid = [n for n in all_names if n in available]
         if valid:

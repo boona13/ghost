@@ -939,7 +939,91 @@ class EvolutionEngine:
             except Exception:
                 pass
 
+            EvolutionEngine._mock_register_tool(abs_path, f, issues)
+
         return issues
+
+    @staticmethod
+    def _mock_register_tool(abs_path, rel_path, issues):
+        """Run register(api) with a mock ToolAPI to verify tool registration works at runtime.
+
+        Catches bugs that pass syntax/import checks but fail when the tool
+        is actually loaded (e.g. malformed dict literals, missing keys,
+        broken function references).
+        """
+        test_script = (
+            "import importlib.util, sys, json, types\n"
+            "\n"
+            "class MockToolAPI:\n"
+            "    def __init__(self):\n"
+            "        self.tools = []\n"
+            "        self.hooks = []\n"
+            "        self.settings = []\n"
+            "    def register_tool(self, defn):\n"
+            "        if not isinstance(defn, dict):\n"
+            "            raise TypeError(f'register_tool expects dict, got {type(defn).__name__}')\n"
+            "        name = defn.get('name')\n"
+            "        if not name:\n"
+            "            raise ValueError('Tool definition missing name')\n"
+            "        execute = defn.get('execute')\n"
+            "        if not callable(execute):\n"
+            "            raise ValueError(f'Tool {name}: execute is not callable')\n"
+            "        params = defn.get('parameters', {})\n"
+            "        if not isinstance(params, dict):\n"
+            "            raise TypeError(f'Tool {name}: parameters must be a dict')\n"
+            "        self.tools.append(name)\n"
+            "    def register_hook(self, *a, **kw): self.hooks.append(a)\n"
+            "    def register_setting(self, *a, **kw): self.settings.append(a)\n"
+            "    def register_cron(self, *a, **kw): pass\n"
+            "    def get_setting(self, *a, **kw): return None\n"
+            "    def set_setting(self, *a, **kw): pass\n"
+            "    def read_data(self, *a, **kw): return None\n"
+            "    def write_data(self, *a, **kw): pass\n"
+            "    def log(self, *a, **kw): pass\n"
+            "    def llm_summarize(self, *a, **kw): return ''\n"
+            "\n"
+            f"spec = importlib.util.spec_from_file_location('_test_tool', r'{abs_path}')\n"
+            "mod = importlib.util.module_from_spec(spec)\n"
+            "spec.loader.exec_module(mod)\n"
+            "api = MockToolAPI()\n"
+            "mod.register(api)\n"
+            "if not api.tools:\n"
+            "    print('ERROR: register() called but no tools were registered', file=sys.stderr)\n"
+            "    sys.exit(1)\n"
+            "print(json.dumps({'tools': api.tools}))\n"
+        )
+        try:
+            r = subprocess.run(
+                [sys.executable, "-c", test_script],
+                capture_output=True, text=True, timeout=30,
+                cwd=str(PROJECT_DIR),
+            )
+            if r.returncode != 0:
+                stderr = r.stderr.strip()
+                for noise in [
+                    r".*RequestsDependencyWarning:.*\n?",
+                    r"\s*warnings\.warn\(.*\n?",
+                ]:
+                    stderr = re.sub(noise, "", stderr)
+                stderr = stderr.strip()
+                if stderr:
+                    error_line = stderr.splitlines()[-1][:300]
+                else:
+                    error_line = "Mock registration failed (unknown error)"
+                issues.append({
+                    "file": rel_path, "severity": "error",
+                    "message": f"Mock register() failed: {error_line}",
+                })
+        except subprocess.TimeoutExpired:
+            issues.append({
+                "file": rel_path, "severity": "error",
+                "message": "Mock register() timed out (30s)",
+            })
+        except Exception as e:
+            issues.append({
+                "file": rel_path, "severity": "warning",
+                "message": f"Could not run mock register(): {e}",
+            })
 
     @staticmethod
     def _check_lock_reentrancy(tree, module_name, issues):
