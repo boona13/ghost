@@ -48,8 +48,15 @@ Live dashboard showing daemon health and quick controls.
 
 ### Models
 
-Multi-provider LLM management with fallback chain visualization.
+Multi-provider LLM management with fallback chain visualization and coding model dispatch.
 
+- **Coding Model Dispatcher** — Budget-aware auto-selection for evolution and bug hunting
+  - Auto-selected coding model display with strategy and cost info
+  - Budget dropdown: Auto (best value), Free (disables self-evolution), Low, Medium, High
+  - Manual override input for forcing a specific model
+  - Min SWE-bench score threshold
+  - SWE-bench Verified Leaderboard table showing all benchmark models with scores, cost, cheapest provider route, and availability
+  - Re-select button to force refresh
 - **Provider cards** — Configure API keys/OAuth for each provider (OpenRouter, OpenAI, Codex, Anthropic, Gemini, xAI, Ollama)
 - **Fallback chain** — Visual representation of the provider fallback order
 - **Model browser** — Search 200+ models by name, filter by provider and tier
@@ -357,6 +364,18 @@ Fetches available models from configured providers (cached 5 minutes).
 #### `PUT /api/models`
 
 Sets active model and/or API key. `{"model": "...", "api_key": "..."}`
+
+#### `GET /api/coding-model-dispatch`
+
+Returns coding model dispatcher status: selected model, budget, benchmarks, available providers.
+
+#### `PUT /api/coding-model-dispatch`
+
+Updates coding model dispatch settings. `{"coding_model_budget": "low", "coding_model_override": null, "min_swe_bench_score": 78.0}`
+
+#### `POST /api/coding-model-dispatch/refresh`
+
+Force re-selects the coding model (clears cache).
 
 ---
 

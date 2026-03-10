@@ -333,6 +333,7 @@ See [DASHBOARD.md](DASHBOARD.md) for the full page and API reference.
 | `ghost_evolve.py` | EvolutionEngine: backup, validate, test, deploy, rollback |
 | `ghost_autonomy.py` | Autonomous growth engine, action items, self-repair |
 | `ghost_future_features.py` | Prioritized feature queue for serial evolution |
+| `ghost_model_dispatch.py` | Budget-aware coding model selection for evolution & bug hunting |
 | `ghost_state_repair.py` | State file validation and repair |
 
 ### Memory
@@ -472,12 +473,16 @@ User clicks in dashboard
 ```
 Timer fires for due job
   → CronService._execute_job(job)
-  → if payload.type == "task":
-      → ToolLoopEngine.run(prompt=payload.prompt)
-  → if payload.type == "notify":
-      → System notification
-  → if payload.type == "shell":
-      → subprocess.run(command)
+  → _cron_fire():
+      → If coding job (feature_implementer, bug_hunter):
+          → If budget == "free": skip (self-evolution disabled)
+          → Else: ModelDispatcher.select("coding") → model_override
+      → if payload.type == "task":
+          → ToolLoopEngine.run(prompt=payload.prompt, model_override=coding_model)
+      → if payload.type == "notify":
+          → System notification
+      → if payload.type == "shell":
+          → subprocess.run(command)
   → Update job state, compute next run time
 ```
 
@@ -507,6 +512,8 @@ All daemon threads are marked `daemon=True`, so they die when the main thread ex
   feed.json                      Activity feed (last 50 entries)
   ghost.pid                      Running daemon PID
   memory.db                      SQLite memory database
+  coding_benchmarks.json         SWE-bench scores for coding model selection
+  model_dispatch_cache.json      Cached coding model selection (24h TTL)
   cron/jobs.json                 Cron job definitions
   future_features.json           Evolution backlog
   action_items.json              User action items

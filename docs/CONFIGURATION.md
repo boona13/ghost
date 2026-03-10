@@ -80,6 +80,17 @@ Ghost stores configuration in `~/.ghost/config.json`. All settings can be change
 | `disabled_skills` | list | `[]` | List of skill names to exclude from matching. Managed via the dashboard's Skills page. |
 | `skill_model_overrides` | dict | `{}` | Per-skill model overrides. Keys are skill names, values are model IDs. |
 
+### Coding Model Dispatcher
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `coding_model_budget` | string/number | `"auto"` | Budget for coding tasks. Presets: `"free"` (disables self-evolution), `"low"` (≤$0.50/MTok), `"medium"` (≤$2/MTok), `"high"` (≤$6/MTok), `"auto"` (best value ratio). A raw number like `1.5` is treated as max $/MTok. |
+| `coding_model_override` | string/null | `null` | Force a specific model for coding tasks (e.g. `"anthropic/claude-opus-4.6"`). Bypasses the dispatcher entirely. |
+| `min_swe_bench_score` | float | `78.0` | Minimum acceptable SWE-bench Verified score for coding model selection. Auto-relaxed with a warning if no model qualifies within budget. |
+| `coding_jobs` | list | `["_ghost_growth_feature_implementer", "_ghost_growth_bug_hunter"]` | Cron job names that should use the coding model instead of the default. |
+
+The dispatcher checks all configured providers and picks the cheapest route to the highest-quality model. For example, a user with a ChatGPT Plus subscription gets `gpt-5.3-codex` at $0 through OAuth. Setting budget to `"free"` completely disables coding cron jobs to avoid low-quality output.
+
 ### Growth & Autonomy
 
 | Key | Type | Default | Description |
@@ -133,6 +144,8 @@ Ghost stores configuration in `~/.ghost/config.json`. All settings can be change
 | `~/.ghost/growth_log.json` | Autonomous growth history |
 | `~/.ghost/integrations.json` | Google OAuth tokens |
 | `~/.ghost/channels.json` | Channel configurations |
+| `~/.ghost/coding_benchmarks.json` | SWE-bench scores for coding model selection (auto-seeded, weekly auto-updated) |
+| `~/.ghost/model_dispatch_cache.json` | Cached coding model selection (24h TTL) |
 | `~/.ghost/cron/jobs.json` | Cron job definitions |
 | `~/.ghost/evolve/backups/` | Project backups before self-modifications |
 | `~/.ghost/audio/` | Generated TTS audio files |

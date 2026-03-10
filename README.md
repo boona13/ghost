@@ -1,6 +1,10 @@
-# Ghost
+<p align="center">
+  <img src="ghost_logo3.png" alt="Ghost" width="180">
+</p>
 
-**The AI agent that rewrites its own source code, reviews its own PRs, and deploys itself — while you sleep.**
+<h1 align="center">Ghost</h1>
+
+<p align="center"><strong>The AI agent that rewrites its own source code, reviews its own PRs, and deploys itself — while you sleep.</strong></p>
 
 Ghost is an autonomous, self-evolving AI agent that runs locally on your machine. It doesn't just respond to prompts — it operates 24/7 with 185+ tools, 22 AI nodes, and 10 autonomous growth routines that continuously improve its own codebase. It writes code, submits internal PRs, runs an adversarial code review with a separate LLM instance, deploys approved changes, and rolls back if anything breaks. If it crashes, it reads the traceback, diagnoses the root cause, patches itself, and restarts.
 
@@ -271,7 +275,7 @@ The reviewer checks ~15 categories: code quality, security, frontend-backend int
 
 ---
 
-## Autonomous Growth — 10+ Routines
+## Autonomous Growth — 11+ Routines
 
 Ghost improves itself on configurable schedules. Each routine is a specialized autonomous agent with a detailed system prompt, full tool access, and its own schedule.
 
@@ -287,6 +291,7 @@ Ghost improves itself on configurable schedules. Each routine is a specialized a
 | **User Context Sync** | Every 4h | Reads Gmail/Calendar to learn patterns and anticipate needs |
 | **Content Health** | Weekly Sun | Tests web extraction pipeline quality across diverse URL types |
 | **Visual Monitor** | Every 8h | Screenshot analysis for visual issues and accessibility |
+| **Model Benchmarks** | Weekly Sun | Searches for the latest SWE-bench leaderboard, updates coding model benchmark data |
 | **Feature Implementer** | Event-driven | Picks features from the priority queue, implements them through the full evolution pipeline |
 | **Implementation Auditor** | Event-driven | Verifies deployed features across 4 layers: structural wiring, API contracts, frontend-backend integration, actual rendering |
 
@@ -310,6 +315,36 @@ Ghost's autonomous product management system. Features flow in from Tech Scout, 
 - **Stale recovery** — In-progress features from crashed sessions are auto-recovered on startup
 - **Cooldown gating** — Rejected features wait 15 minutes before retry
 - **Auto-deferral** — 3 failures → feature is deferred
+
+---
+
+## Coding Model Dispatcher — Budget-Aware Model Selection
+
+Ghost doesn't use the same model for everything. Health checks run on the cheap default model. But when Ghost is rewriting its own code — feature implementation, bug fixing — it automatically switches to the **best coding model the user can afford**.
+
+The dispatcher scores models by **SWE-bench Verified** (the industry standard for real-world bug fixing), filters by the user's budget, and finds the **cheapest route** across all configured providers.
+
+| Budget | What You Get | Cost |
+|---|---|---|
+| `auto` (default) | Best value: highest SWE-bench / cost ratio | Varies |
+| `free` | Self-evolution disabled entirely | $0 |
+| `low` | MiniMax M2.5 (80.2% SWE-bench) | ≤$0.50/MTok |
+| `medium` | GPT-5.2 (80.0%) or MiniMax M2.5 | ≤$2/MTok |
+| `high` | Claude Opus 4.6 (80.8% — best) | ≤$6/MTok |
+
+**Multi-provider routing** — The dispatcher checks all 8 providers and picks the cheapest path. A user with a ChatGPT Plus subscription gets GPT-5.3-Codex at $0 through OAuth. A user with an Anthropic key gets Claude Opus at $3/MTok instead of $5 through OpenRouter.
+
+**Self-updating benchmarks** — A weekly cron job searches for the latest SWE-bench leaderboard and updates the benchmark data automatically. When a new model drops that's better, Ghost discovers and adopts it.
+
+Configure from the dashboard (Models → Coding Model Dispatcher) or via config:
+
+```json
+{
+  "coding_model_budget": "auto",
+  "coding_model_override": null,
+  "min_swe_bench_score": 78.0
+}
+```
 
 ---
 
@@ -406,7 +441,7 @@ The web dashboard at [http://localhost:3333](http://localhost:3333) provides ful
 | **Soul** | Edit Ghost's personality (SOUL.md) |
 | **User Profile** | Edit user info (USER.md) |
 | **Memory** | Search, browse, and prune the memory database |
-| **Models** | Multi-provider management, fallback chain visualization, model browser with pricing |
+| **Models** | Multi-provider management, fallback chain visualization, model browser with pricing, coding model dispatcher with budget control and SWE-bench leaderboard |
 | **Skills** | Browse, search, enable/disable 42+ skills + GhostHub Registry with security scanning |
 | **Autonomy** | Action items, growth routine status, growth log, crash reports |
 | **Evolution** | Self-modification history, approve/reject pending changes, view diffs, rollback |
@@ -444,7 +479,8 @@ ghost_skills.py             Skill loader — auto-discovery and trigger matching
 ghost_plugins.py            Plugin system — hooks, custom tools, plugin data
 ghost_evolve.py             Evolution engine — backup, validate, test, deploy, rollback
 ghost_pr.py                 Adversarial PR review — separate LLM instance with 7 tools
-ghost_autonomy.py           Autonomous growth — 10+ routines, action items, self-repair
+ghost_autonomy.py           Autonomous growth — 11+ routines, action items, self-repair
+ghost_model_dispatch.py     Budget-aware coding model selection for evolution & bug hunting
 ghost_future_features.py    Feature backlog — prioritized queue with dedup and dependency ordering
 ghost_providers.py          LLM providers — 7 providers with format adapters and fallback chains
 ghost_auth_profiles.py      Auth store — API keys, OAuth tokens, credential sync
@@ -524,6 +560,8 @@ All runtime data lives in `~/.ghost/`:
   integrations.json         Google OAuth tokens
   channels.json             Channel configurations
   model_stats.json          GPU model load/eviction statistics
+  coding_benchmarks.json    SWE-bench scores for coding model selection
+  model_dispatch_cache.json Cached coding model selection (24h TTL)
   cron/jobs.json            Scheduled job definitions
   evolve/backups/           Project backups before self-modifications
   evolve/history.json       Evolution history (all deploys and rollbacks)
@@ -577,6 +615,9 @@ Ghost stores configuration at `~/.ghost/config.json`. Every setting is editable 
 | `enable_voice` | `true` | Voice Wake + Talk Mode |
 | `enable_canvas` | `true` | Canvas visual output panel |
 | `enable_integrations` | `true` | Google/Grok integrations |
+| `coding_model_budget` | `"auto"` | Budget for coding tasks: `free`, `low`, `medium`, `high`, `auto`, or $/MTok number |
+| `coding_model_override` | `null` | Force a specific model for coding tasks (bypasses dispatcher) |
+| `min_swe_bench_score` | `78.0` | Minimum SWE-bench score for coding model selection |
 
 ---
 
