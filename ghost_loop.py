@@ -16,6 +16,7 @@ import time
 import hashlib
 import uuid
 import requests
+import sys
 import traceback
 from ghost_tool_intent_security import ToolIntentSecurity
 from ghost_config_tool import _load_config
@@ -2310,26 +2311,31 @@ class ToolLoopEngine:
                 else:
                     payload["tool_choice"] = "auto"
 
-            future = _llm_pool.submit(
-                self._call_llm, payload, DEFAULT_TIMEOUT, on_token,
-                cancel_check=cancel_check,
-            )
-            deadline = time.time() + MAX_LLM_WALL_CLOCK
-            data, error = None, None
-            while True:
-                if cancel_check and cancel_check():
-                    future.cancel()
-                    final_text = "(Stopped by user)"
-                    exit_reason = "cancelled"
-                    break
-                try:
-                    data, error = future.result(timeout=0.5)
-                    break
-                except concurrent.futures.TimeoutError:
-                    if time.time() >= deadline:
-                        data, error = None, f"Wall-clock timeout ({MAX_LLM_WALL_CLOCK}s) — model too slow"
-                        log.warning("LLM call exceeded %ds wall clock at step %d", MAX_LLM_WALL_CLOCK, step)
+            # Guard against interpreter shutdown to avoid RuntimeError on pool submit
+            if sys.is_finalizing():
+                # Execute synchronously during interpreter shutdown
+                data, error = self._call_llm(payload, DEFAULT_TIMEOUT, on_token, cancel_check=cancel_check)
+            else:
+                future = _llm_pool.submit(
+                    self._call_llm, payload, DEFAULT_TIMEOUT, on_token,
+                    cancel_check=cancel_check,
+                )
+                deadline = time.time() + MAX_LLM_WALL_CLOCK
+                data, error = None, None
+                while True:
+                    if cancel_check and cancel_check():
+                        future.cancel()
+                        final_text = "(Stopped by user)"
+                        exit_reason = "cancelled"
                         break
+                    try:
+                        data, error = future.result(timeout=0.5)
+                        break
+                    except concurrent.futures.TimeoutError:
+                        if time.time() >= deadline:
+                            data, error = None, f"Wall-clock timeout ({MAX_LLM_WALL_CLOCK}s) — model too slow"
+                            log.warning("LLM call exceeded %ds wall clock at step %d", MAX_LLM_WALL_CLOCK, step)
+                            break
 
             if exit_reason == "cancelled":
                 break
@@ -2619,17 +2625,22 @@ class ToolLoopEngine:
                                         def _exec_tool_with_ctx(_ctx=_caller_ctx, _name=fn_name, _args=exec_args):
                                             set_shell_caller_context(_ctx)
                                             return tool_registry.execute(_name, _args)
-                                        tool_future = _llm_pool.submit(_exec_tool_with_ctx)
-                                        while True:
-                                            if cancel_check and cancel_check():
-                                                tool_future.cancel()
-                                                tool_result = "(Stopped by user)"
-                                                break
-                                            try:
-                                                tool_result = tool_future.result(timeout=0.5)
-                                                break
-                                            except concurrent.futures.TimeoutError:
-                                                continue
+                                        # Guard against interpreter shutdown to avoid RuntimeError on pool submit
+                                        if sys.is_finalizing():
+                                            # Execute synchronously during interpreter shutdown
+                                            tool_result = _exec_tool_with_ctx()
+                                        else:
+                                            tool_future = _llm_pool.submit(_exec_tool_with_ctx)
+                                            while True:
+                                                if cancel_check and cancel_check():
+                                                    tool_future.cancel()
+                                                    tool_result = "(Stopped by user)"
+                                                    break
+                                                try:
+                                                    tool_result = tool_future.result(timeout=0.5)
+                                                    break
+                                                except concurrent.futures.TimeoutError:
+                                                    continue
                             except Exception as e:
                                 tool_result = f"Tool execution failed: {e}"
 
