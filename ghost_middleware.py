@@ -370,7 +370,112 @@ class SkillMatchMiddleware(Middleware):
 
 
 # ---------------------------------------------------------------------------
-# 3. ToolScopeMiddleware
+# 3. ImageIntentMiddleware
+# ---------------------------------------------------------------------------
+
+
+class ImageIntentMiddleware(Middleware):
+    """Classify image intent BEFORE the LLM sees the payload.
+
+    When images are attached, this middleware determines whether the user wants
+    to PROCESS the image (tool-actionable) or UNDERSTAND the image (vision).
+
+    - Tool-actionable: strips base64 from context (saves huge tokens),
+      injects a hint to use the right tool with the file path.
+    - Vision-required: verifies the effective model supports vision;
+      swaps to a vision-capable model if it doesn't.
+    """
+
+    def before_invoke(self, ctx: InvocationContext) -> None:
+        if not ctx.images and not ctx.image_b64:
+            return
+        if not ctx.tool_registry:
+            return
+        if ctx.source not in ("chat", "channel"):
+            return
+
+        try:
+            from ghost_image_router import (
+                classify_image_intent,
+                get_image_tools,
+                resolve_vision_model,
+                supports_vision,
+            )
+        except ImportError:
+            log.warning("ImageIntentMiddleware: ghost_image_router not available")
+            return
+
+        image_tools = get_image_tools(ctx.tool_registry)
+        auth_store = getattr(ctx.daemon, "auth_store", None) if ctx.daemon else None
+
+        classification = classify_image_intent(
+            ctx.user_message,
+            image_tools,
+            auth_store=auth_store,
+            config=ctx.config,
+        )
+        intent = classification.get("intent", "vision")
+        confidence = classification.get("confidence", 0.0)
+        log.info(
+            "ImageIntentMiddleware: intent=%s confidence=%.2f classification=%s",
+            intent, confidence, classification,
+        )
+
+        if intent == "tool" and confidence >= 0.7:
+            tool_name = classification.get("tool_name", "")
+            matching = [t for t in image_tools if t["name"] == tool_name]
+            param_name = matching[0]["param_name"] if matching else "image_path"
+
+            if tool_name not in ctx.tool_registry.names():
+                log.warning(
+                    "ImageIntentMiddleware: classified tool %s not in registry, "
+                    "falling through to vision path", tool_name,
+                )
+            else:
+                log.info(
+                    "ImageIntentMiddleware: stripping base64, locking to tool %s",
+                    tool_name,
+                )
+                ctx.images = None
+                ctx.image_b64 = None
+
+                # Lock the registry so the identified tool is the ONLY option.
+                # The model cannot wander off to shell_exec or file_read.
+                ctx.tool_registry = ctx.tool_registry.subset([tool_name])
+                # Store routing info so wrap_tool_call can verify
+                ctx.meta["image_routed_tool"] = tool_name
+
+                hint = (
+                    f"\n\n## IMAGE PROCESSING TASK\n"
+                    f"Call `{tool_name}` with `{param_name}` set to the "
+                    f"file path from ATTACHED FILES.\n"
+                )
+                ctx.system_prompt_parts.append(hint)
+                return
+        else:
+            engine = ctx.engine
+            current_model = getattr(engine, "model", None) if engine else None
+            vision_override = resolve_vision_model(
+                current_model, ctx.model_override, ctx.config,
+            )
+            if vision_override:
+                log.info(
+                    "ImageIntentMiddleware: overriding model to %s for vision",
+                    vision_override,
+                )
+                ctx.model_override = vision_override
+
+            effective = ctx.model_override or current_model or ""
+            if not supports_vision(effective):
+                log.warning(
+                    "ImageIntentMiddleware: model %s may not support vision, "
+                    "but no alternative available — sending images anyway",
+                    effective,
+                )
+
+
+# ---------------------------------------------------------------------------
+# 4. ToolScopeMiddleware
 # ---------------------------------------------------------------------------
 
 
@@ -904,19 +1009,22 @@ def build_default_chain() -> MiddlewareChain:
     """Construct the standard middleware pipeline.
 
     Order matters:
-    1. IdentityMiddleware       — prepend identity to system prompt
-    2. SkillMatchMiddleware     — match skills, inject prompts
-    3. ToolScopeMiddleware      — restrict available tools
-    4. CallerContextMiddleware  — set caller context for shell
-    5. DanglingToolCallRepairMiddleware  — fix broken history each step
-    6. ContextSummarizationMiddleware    — proactive context compaction
-    7. SubagentLimitMiddleware  — cap parallel delegate_task calls
-    8. GiveUpDetectionMiddleware         — retry on give-up responses
-    9. BrowserCleanupMiddleware — cleanup browser after task
+    1.  IdentityMiddleware       — prepend identity to system prompt
+    2.  SkillMatchMiddleware     — match skills, inject prompts
+    3.  ImageIntentMiddleware    — classify image intent, strip base64
+                                   or swap to vision model
+    4.  ToolScopeMiddleware      — restrict available tools
+    5.  CallerContextMiddleware  — set caller context for shell
+    6.  DanglingToolCallRepairMiddleware  — fix broken history each step
+    7.  ContextSummarizationMiddleware    — proactive context compaction
+    8.  SubagentLimitMiddleware  — cap parallel delegate_task calls
+    9.  GiveUpDetectionMiddleware         — retry on give-up responses
+    10. BrowserCleanupMiddleware — cleanup browser after task
     """
     return MiddlewareChain([
         IdentityMiddleware(),
         SkillMatchMiddleware(),
+        ImageIntentMiddleware(),
         ToolScopeMiddleware(),
         CallerContextMiddleware(),
         DanglingToolCallRepairMiddleware(),

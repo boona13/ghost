@@ -1960,6 +1960,27 @@ class ToolLoopEngine:
             return cancel_check() if cancel_check else False
 
         candidates = self._fallback_chain.get_candidates()
+
+        # If the payload specifies a model override (via model_override in run()),
+        # prepend it as the first candidate so it's tried before the chain's primary.
+        payload_model = payload.get("model", "")
+        chain_primary = self._fallback_chain.primary if self._fallback_chain._chain else ""
+        if payload_model and payload_model != chain_primary:
+            override_provider = "openrouter"
+            override_model = payload_model
+            # Parse "provider/model" format (e.g. "openrouter/anthropic/claude-sonnet-4-6")
+            if "/" in payload_model:
+                first_slash = payload_model.index("/")
+                potential_provider = payload_model[:first_slash]
+                rest = payload_model[first_slash + 1:]
+                if potential_provider in ("openrouter", "openai", "anthropic",
+                                         "google", "ollama", "openai-codex"):
+                    override_provider = potential_provider
+                    override_model = rest
+            override_entry = (override_provider, override_model)
+            if override_entry not in candidates:
+                candidates = [override_entry] + candidates
+
         all_errors = []
 
         for provider_id, model in candidates:
