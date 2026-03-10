@@ -148,7 +148,7 @@ class GrowthLogger:
                 (now - existing_time) < timedelta(minutes=10)):
                 existing["_warning"] = (
                     "DUPLICATE — this was already logged. Do NOT call log_growth_activity again. "
-                    "Continue with your ACTUAL task (evolve_plan, evolve_apply, file_read, etc.). "
+                    "Continue with your actual task. "
                     "Calling this tool repeatedly is a waste of steps."
                 )
                 return existing

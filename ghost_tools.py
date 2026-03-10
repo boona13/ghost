@@ -604,15 +604,14 @@ def make_file_read(cfg):
             if n >= 8:
                 return (
                     f"CRITICAL: {n} invalid file_read calls this session. "
-                    "You are stuck in a loop. STOP using file_read. "
-                    "Proceed to: evolve_test → evolve_submit_pr → task_complete."
+                    "You are stuck in a loop. STOP using file_read and "
+                    "try a different approach or move on to your next task."
                 )
             if n >= 3:
                 return (
                     f"WARNING: {n} invalid file_read calls. "
                     "You keep passing bad paths. Use FULL filenames like "
-                    "'ghost.py' or 'ghost_channel_security.py'. "
-                    "If you are done editing, proceed to evolve_test."
+                    "'ghost.py' or 'ghost_channel_security.py'."
                 )
             return (
                 f"ERROR: Invalid path '{path}'. Provide a FULL filename like "
@@ -674,10 +673,8 @@ def make_file_write(cfg):
         if _is_ghost_codebase_path(path):
             return (
                 f"BLOCKED: Cannot write to '{path}' — it is inside Ghost's own codebase "
-                f"({PROJECT_DIR}). Self-modification must go through the evolution pipeline: "
-                f"use evolve_plan + evolve_apply to propose changes, then evolve_test + "
-                f"evolve_deploy to apply them safely with backup and rollback. "
-                f"For user project files, use workspace_write instead."
+                f"({PROJECT_DIR}). Direct writes to Ghost source files are not allowed "
+                f"from this context. For user project files, use workspace_write instead."
             )
         p = Path(path).expanduser()
         try:

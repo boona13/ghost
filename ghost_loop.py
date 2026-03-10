@@ -821,14 +821,11 @@ def _check_incomplete_workflows(tool_calls_log: list) -> str | None:
     tools_used = {tc["tool"] for tc in tool_calls_log}
 
     started_feature = "start_future_feature" in tools_used
-    inspected_feature = "get_future_feature" in tools_used
-    listed_features = "list_future_features" in tools_used
     used_evolve_plan = "evolve_plan" in tools_used
     used_evolve_resume = "evolve_resume" in tools_used
     used_evolve_start = used_evolve_plan or used_evolve_resume
     used_evolve_apply = "evolve_apply" in tools_used
     used_fail = "fail_future_feature" in tools_used
-    used_reject = "reject_future_feature" in tools_used
 
     deploy_succeeded = False
     deploy_rejected = False
@@ -874,29 +871,6 @@ def _check_incomplete_workflows(tool_calls_log: list) -> str | None:
             "evolve_apply, evolve_test, evolve_submit_pr. Do NOT defer to "
             "'the next run'. There is no next run — do it now."
         )
-
-    if inspected_feature and not started_feature and not used_fail and not used_reject:
-        return (
-            "You inspected a feature with get_future_feature but never called "
-            "start_future_feature. You MUST start implementing it NOW. "
-            "Call start_future_feature(id), then explore the code with file_read/grep, "
-            "then evolve_plan → evolve_apply → evolve_test → evolve_submit_pr. "
-            "Do NOT describe what you plan to do — actually DO it."
-        )
-
-    if listed_features and not inspected_feature and not used_fail:
-        has_evolve_tools = any(
-            tc["tool"] in ("evolve_plan", "evolve_apply", "evolve_test",
-                           "evolve_submit_pr", "start_future_feature")
-            for tc in tool_calls_log
-        )
-        if not has_evolve_tools:
-            return (
-                "You listed features but didn't proceed. If there are pending features, "
-                "call get_future_feature(id) on the highest priority one, then "
-                "start_future_feature → explore → evolve_plan → evolve_apply → "
-                "evolve_test → evolve_submit_pr. Do it NOW."
-            )
 
     return None
 
@@ -1065,8 +1039,7 @@ class LoopDetector:
                     message=(
                         f"BLOCKED: {tool_name} called {tool_total} times this session. "
                         "Logging tools should only be called ONCE at the end of a task. "
-                        "STOP calling this tool and proceed with your actual task "
-                        "(evolve_plan, evolve_apply, file_read, task_complete, etc.)."
+                        "STOP calling this tool and proceed with your actual task."
                     ),
                 )
             return LoopDetectionResult(
@@ -1078,32 +1051,46 @@ class LoopDetector:
                 ),
             )
 
-        _SHELL_ABUSE_WARN = 12
-        _SHELL_ABUSE_BLOCK = 20
+        _SHELL_ABUSE_WARN = 25
+        _SHELL_ABUSE_BLOCK = 40
         if tool_name == "shell_exec" and tool_total >= _SHELL_ABUSE_WARN:
             self._warning_count += 1
+            in_evolve = any(
+                e["tool"] in ("evolve_plan", "evolve_apply", "evolve_resume")
+                for e in self._history
+            )
             if tool_total >= _SHELL_ABUSE_BLOCK:
-                return LoopDetectionResult(
-                    stuck=True, level="critical", detector="tool_saturation",
-                    count=tool_total,
-                    message=(
-                        f"BLOCKED: shell_exec called {tool_total} times this session. "
-                        "You are stuck in a non-productive loop. "
+                if in_evolve:
+                    advice = (
                         "STOP using shell_exec and either: "
                         "(1) use file_read to inspect files, "
                         "(2) call evolve_test if your changes are complete, "
                         "(3) call fail_future_feature if you cannot make progress, or "
                         "(4) call task_complete to end the session."
-                    ),
+                    )
+                else:
+                    advice = (
+                        "You may be stuck in a loop. Consider: "
+                        "(1) use file_read to inspect files instead, "
+                        "(2) call task_complete if the task is done, or "
+                        "(3) ask the user for clarification."
+                    )
+                return LoopDetectionResult(
+                    stuck=True, level="critical", detector="tool_saturation",
+                    count=tool_total,
+                    message=f"BLOCKED: shell_exec called {tool_total} times this session. {advice}",
+                )
+            if in_evolve:
+                hint = "Use file_read to inspect files and evolve_apply to modify them."
+            else:
+                hint = (
+                    "Consider whether you are repeating the same commands. "
+                    "Use file_read to inspect files instead of shell_exec."
                 )
             return LoopDetectionResult(
                 stuck=True, level="warning", detector="tool_saturation",
                 count=tool_total,
-                message=(
-                    f"WARNING: shell_exec called {tool_total} times. "
-                    "You appear stuck. Use file_read (not shell_exec) to inspect files. "
-                    "Use evolve_apply with patches (not shell commands) to modify files."
-                ),
+                message=f"WARNING: shell_exec called {tool_total} times. {hint}",
             )
 
         _REPEAT_EXEMPT_TOOLS = {"evolve_test", "evolve_apply", "file_read"}
@@ -2920,16 +2907,30 @@ class ToolLoopEngine:
                         break
 
                     if rctx.consecutive_text_only >= 5:
+                        in_evolve = any(
+                            tc["tool"] in ("evolve_plan", "evolve_apply", "evolve_resume")
+                            for tc in tool_calls_log
+                        )
+                        if in_evolve:
+                            action_list = (
+                                "Pick ONE of these actions:\n"
+                                "  - evolve_apply(evolution_id=..., file_path='...', patches=[...])\n"
+                                "  - evolve_test(evolution_id=...)\n"
+                                "  - fail_future_feature(feature_id=..., reason='...')\n"
+                                "  - task_complete(summary='...')"
+                            )
+                        else:
+                            action_list = (
+                                "Pick ONE of these actions:\n"
+                                "  - file_read, grep, shell_exec, or web_search to make progress\n"
+                                "  - task_complete(summary='...') to finish"
+                            )
                         pushback = (
                             "CRITICAL: You have produced {n} text responses without "
                             "calling any tool. You MUST call a tool NOW. "
                             "Do NOT explain what you will do — just call the tool.\n\n"
-                            "Pick ONE of these actions:\n"
-                            "  - evolve_apply(evolution_id=..., file_path='...', patches=[...])\n"
-                            "  - evolve_test(evolution_id=...)\n"
-                            "  - fail_future_feature(feature_id=..., reason='...')\n"
-                            "  - task_complete(summary='...')"
-                        ).format(n=rctx.consecutive_text_only)
+                            "{actions}"
+                        ).format(n=rctx.consecutive_text_only, actions=action_list)
                     else:
                         pushback = (
                             "Call task_complete(summary='...') to send your reply. "
