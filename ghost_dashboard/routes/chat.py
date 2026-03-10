@@ -25,8 +25,6 @@ log = logging.getLogger(__name__)
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from ghost_projects import ProjectRegistry, format_project_for_prompt
-from ghost_tools import set_shell_caller_context
-from ghost import _detected_give_up, _ESCALATION_COACHING
 from ghost_artifacts import (
     set_current_message_id, get_artifacts_dir, scan_tool_result_for_artifacts,
 )
@@ -358,32 +356,6 @@ def _process_message(session, daemon):
 
         tool_names = daemon.tool_registry.names() if daemon.tool_registry else []
 
-        matched_skills = []
-        if daemon.skill_loader:
-            try:
-                daemon.skill_loader.check_reload()
-                disabled = set(daemon.cfg.get("disabled_skills", []))
-                if active_project:
-                    disabled |= set(active_project.config.get("disabled_skills", []))
-                matched_skills = daemon.skill_loader.match(
-                    session.user_message, None, disabled=disabled
-                )
-                if active_project:
-                    project_enabled = active_project.config.get("skills", [])
-                    if project_enabled:
-                        allowed = set(project_enabled)
-                        matched_skills = [s for s in matched_skills if s.name in allowed]
-            except Exception as e:
-                import traceback as _tb
-                _trigger_chat_repair(daemon, "skill_matching", e, _tb.format_exc())
-                matched_skills = []
-
-        try:
-            identity = daemon._build_identity_context()
-        except Exception as e:
-            import traceback as _tb
-            _trigger_chat_repair(daemon, "identity_context", e, _tb.format_exc())
-            identity = ""
         # Build attachment context (text for audio/other) and image list (for vision)
         attachment_context = ""
         image_attachments = []
@@ -456,8 +428,7 @@ def _process_message(session, daemon):
                         f"\n**File ({att['filename']}):** Saved at `{att.get('path', 'unknown')}`\n"
                     )
 
-        system_prompt = (
-            identity +
+        chat_prompt_body = (
             "You are Ghost, an AUTONOMOUS AI agent running LOCALLY on the user's computer. "
             "You have DIRECT ACCESS to the file system, shell, network, and a real web browser.\n\n"
             f"## PROJECT LOCATION (IMPORTANT)\n"
@@ -610,14 +581,12 @@ def _process_message(session, daemon):
             f"Generated images and audio files are automatically copied to this folder.\n"
         )
 
-        if matched_skills and daemon.skill_loader:
-            skills_section = daemon.skill_loader.build_skills_prompt(matched_skills)
-            system_prompt += "\n\n" + skills_section + "\n"
+        prompt_parts = [chat_prompt_body]
 
         if active_project:
             project_prompt = format_project_for_prompt(active_project)
-            system_prompt += (
-                "\n\n" + project_prompt + "\n\n"
+            project_section = (
+                project_prompt + "\n\n"
                 "## PROJECT-SCOPED MEMORY\n"
                 f"You are working within the **{active_project.name}** project.\n"
                 f"- When saving memories related to this project, prefix the text with "
@@ -632,7 +601,7 @@ def _process_message(session, daemon):
             project_skills = set(active_project.config.get("skills", []))
             has_web_skills = not project_skills or bool(project_skills & _WEB_SKILLS)
             if has_web_skills and daemon.tool_registry and "canvas" in (daemon.tool_registry.names() if daemon.tool_registry else []):
-                system_prompt += (
+                project_section += (
                     "\n## CANVAS — LIVE PREVIEW\n"
                     "You have a **Canvas** panel that renders HTML/CSS/JS live beside this chat. "
                     "Use it when building or debugging any visual/web content for this project.\n"
@@ -650,6 +619,7 @@ def _process_message(session, daemon):
                     "- Any task where seeing the rendered output helps\n\n"
                     f"**Project path:** `{active_project.path}` — write final versions here with `file_write`\n"
                 )
+            prompt_parts.append(project_section)
 
         chat_history = _build_chat_history(daemon, max_turns=10)
 
@@ -716,104 +686,47 @@ def _process_message(session, daemon):
         has_url = _message_contains_url(session.user_message)
 
         if daemon.cfg.get("enable_tool_loop", True) and daemon.tool_registry.get_all():
-            _EVOLVE_TOOL_NAMES = {
-                "evolve_plan", "evolve_apply", "evolve_apply_config",
-                "evolve_delete", "evolve_test", "evolve_deploy", "evolve_rollback",
-            }
-            safe_names = [
-                name for name in daemon.tool_registry.get_all()
-                if name not in _EVOLVE_TOOL_NAMES
-            ]
-            chat_registry = daemon.tool_registry.subset(safe_names)
-
-            if active_project and daemon.skill_loader:
-                project_enabled = active_project.config.get("skills", [])
-                if project_enabled:
-                    skill_tools = set()
-                    all_skills = list(daemon.skill_loader.skills.values())
-                    for skill in all_skills:
-                        if skill.name in project_enabled:
-                            skill_tools.update(skill.tools)
-                    _ALWAYS_AVAILABLE = {
-                        "memory_search", "memory_save", "task_complete",
-                        "project_list", "project_get", "project_resolve",
-                        "file_read", "file_write", "file_search",
-                        "shell_exec", "grep", "glob",
-                        "notify", "uptime", "app_control",
-                        "add_future_feature", "list_future_features",
-                        "get_future_feature", "get_feature_stats",
-                    }
-                    allowed = skill_tools | _ALWAYS_AVAILABLE
-                    scoped_names = [n for n in chat_registry.names() if n in allowed]
-                    if scoped_names:
-                        chat_registry = chat_registry.subset(scoped_names)
-
             def on_token(chunk: str):
                 session.token_chunks.append(chunk)
 
-            engine = getattr(daemon, "chat_engine", None) or daemon.engine
-            set_shell_caller_context("interactive")
-            max_escalation_retries = 2
-            escalation_attempt = 0
-            try:
-                loop_result = engine.run(
-                    system_prompt=system_prompt,
-                    user_message=user_message_with_context,
-                    tool_registry=chat_registry,
-                    max_steps=daemon.cfg.get("tool_loop_max_steps", 200),
-                    max_tokens=8192,
-                    force_tool=True,
-                    on_step=on_step,
-                    history=chat_history,
-                    cancel_check=lambda: session.cancelled,
-                    images=image_attachments if image_attachments else None,
-                    enable_reasoning=enable_reasoning,
-                    tool_event_bus=getattr(daemon, "tool_event_bus", None),
-                    on_token=on_token,
-                )
+            chat_engine = getattr(daemon, "chat_engine", None) or daemon.engine
 
-                while (
-                    escalation_attempt < max_escalation_retries
-                    and not session.cancelled
-                    and _detected_give_up(loop_result.text, engine=engine)
-                ):
-                    escalation_attempt += 1
-                    log.info(
-                        "Self-correction: detected give-up in response "
-                        "(attempt %d/%d), escalating",
-                        escalation_attempt, max_escalation_retries,
-                    )
-                    escalation_history = list(chat_history or [])
-                    escalation_history.append(
-                        {"role": "user", "content": user_message_with_context}
-                    )
-                    escalation_history.append(
-                        {"role": "assistant", "content": loop_result.text}
-                    )
-                    coaching_msg = _ESCALATION_COACHING
-                    session.token_chunks.clear()
-                    loop_result = engine.run(
-                        system_prompt=system_prompt,
-                        user_message=coaching_msg,
-                        tool_registry=chat_registry,
-                        max_steps=daemon.cfg.get("tool_loop_max_steps", 200),
-                        max_tokens=8192,
-                        force_tool=True,
-                        on_step=on_step,
-                        history=escalation_history,
-                        cancel_check=lambda: session.cancelled,
-                        enable_reasoning=enable_reasoning,
-                        tool_event_bus=getattr(daemon, "tool_event_bus", None),
-                        on_token=on_token,
-                    )
+            from ghost_middleware import InvocationContext
+            inv = InvocationContext(
+                source="chat",
+                user_message=user_message_with_context,
+                system_prompt_parts=prompt_parts,
+                tool_registry=daemon.tool_registry,
+                daemon=daemon,
+                engine=chat_engine,
+                config=daemon.cfg,
+                max_steps=daemon.cfg.get("tool_loop_max_steps", 200),
+                max_tokens=8192,
+                on_step=on_step,
+                on_token=on_token,
+                history=chat_history,
+                cancel_check=lambda: session.cancelled,
+                images=image_attachments if image_attachments else None,
+                enable_reasoning=enable_reasoning,
+                active_project=active_project,
+                meta={"session": session},
+            )
+            daemon.middleware_chain.invoke(inv)
 
-            finally:
-                set_shell_caller_context("autonomous")
-            session.result = loop_result.text
-            session.tools_used = [tc["tool"] for tc in loop_result.tool_calls]
+            session.result = inv.result_text
+            session.tools_used = inv.tools_used
         else:
-            engine = getattr(daemon, "chat_engine", None) or daemon.engine
-            result = engine.single_shot(
+            chat_engine = getattr(daemon, "chat_engine", None) or daemon.engine
+
+            from ghost_middleware import InvocationContext as _IC
+            _identity_ctx = _IC(source="chat", daemon=daemon)
+            from ghost_middleware import IdentityMiddleware
+            IdentityMiddleware().before_invoke(_identity_ctx)
+            system_prompt = _identity_ctx.system_prompt + "\n\n" + chat_prompt_body
+            if active_project:
+                system_prompt += "\n\n" + prompt_parts[-1] if len(prompt_parts) > 1 else ""
+
+            result = chat_engine.single_shot(
                 system_prompt=system_prompt,
                 user_message=user_message_with_context,
                 images=image_attachments if image_attachments else None,

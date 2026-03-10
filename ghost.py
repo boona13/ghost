@@ -1636,6 +1636,12 @@ class GhostDaemon:
             except Exception as e:
                 print(f"  [langfuse] Failed to initialize: {e}")
 
+        # Middleware pipeline (shared pre/post-processing for all entry points)
+        self.middleware_chain = self._build_middleware_chain()
+
+    def _build_middleware_chain(self):
+        from ghost_middleware import build_default_chain
+        return build_default_chain()
 
     def _load_soul(self):
         """Load SOUL.md with mtime caching."""
@@ -1982,8 +1988,8 @@ class GhostDaemon:
             prompt = payload.get("prompt", "")
             if not prompt:
                 return
-            system_prompt = (
-                self._build_identity_context() +
+            is_evolution_runner = job.get("name") == _FEATURE_IMPLEMENTER_JOB
+            cron_prompt_body = (
                 "You are Ghost, an autonomous AI agent. A scheduled task has fired.\n"
                 f"Task name: {job.get('name', 'unnamed')}\n"
                 f"Description: {job.get('description', 'none')}\n\n"
@@ -1998,78 +2004,35 @@ class GhostDaemon:
                 "- Protect user data: summaries only, never verbatim content. Pin dependency versions.\n"
             )
             if self.cfg.get("enable_tool_loop", True) and self.tool_registry.get_all():
-                is_evolution_runner = job.get("name") == _FEATURE_IMPLEMENTER_JOB
-                if is_evolution_runner:
-                    _IMPLEMENTER_TOOLS = [
-                        # Evolve tools (the whole point of this routine)
-                        "evolve_plan", "evolve_apply", "evolve_apply_config",
-                        "evolve_test", "evolve_deploy", "evolve_rollback",
-                        "evolve_delete", "evolve_submit_pr",
-                        # Feature queue management
-                        "list_future_features", "get_future_feature",
-                        "start_future_feature", "complete_future_feature",
-                        "fail_future_feature", "get_feature_stats",
-                        "add_future_feature",
-                        # Code reading & searching
-                        "file_read", "file_search", "file_write",
-                        "grep", "glob", "find_code_patterns",
-                        "shell_exec",
-                        "shell_session", "shell_bg_start",
-                        "shell_bg_status", "shell_bg_kill",
-                        # Fresh-context verification (fights context degradation)
-                        "delegate_task",
-                        # Web & browser (for UI verification)
-                        "web_fetch", "web_search",
-                        "browser_navigate", "browser_snapshot",
-                        "browser_click", "browser_type",
-                        # Memory & logging
-                        "memory_save", "memory_search",
-                        # Config
-                        "config_get", "config_set",
-                        # Tool Builder
-                        "tools_list", "tools_create", "tools_install_github",
-                        "tools_uninstall", "tools_validate",
-                        "tools_enable", "tools_disable",
-                        # Completion
-                        "task_complete",
-                    ]
-                    available = set(self.tool_registry.names())
-                    impl_names = [t for t in _IMPLEMENTER_TOOLS if t in available]
-                    registry = self.tool_registry.subset(impl_names)
-                else:
-                    excluded = _EVOLVE_TOOL_NAMES | _FEATURE_MUTATE_TOOL_NAMES
-                    safe_names = [
-                        name for name in self.tool_registry.get_all()
-                        if name not in excluded
-                    ]
-                    registry = self.tool_registry.subset(safe_names)
+                from ghost_middleware import InvocationContext
+                inv = InvocationContext(
+                    source="cron",
+                    user_message=prompt,
+                    system_prompt_parts=[cron_prompt_body],
+                    tool_registry=self.tool_registry,
+                    daemon=self,
+                    engine=self.engine,
+                    config=self.cfg,
+                    max_steps=self.cfg.get("tool_loop_max_steps", 200),
+                    on_step=terminal_step,
+                    meta={
+                        "is_evolution_runner": is_evolution_runner,
+                        "job_name": job_name,
+                    },
+                )
+                self.middleware_chain.invoke(inv)
 
-                try:
-                    loop_result = self.engine.run(
-                        system_prompt=system_prompt,
-                        user_message=prompt,
-                        tool_registry=registry,
-                        max_steps=self.cfg.get("tool_loop_max_steps", 200),
-                        max_tokens=4096,
-                        force_tool=True,
-                        on_step=terminal_step,
-                        hook_runner=self.hooks,
-                        tool_intent_security=self.tool_intent_security,
-                        tool_event_bus=self.tool_event_bus,
-                    )
-                    result = loop_result.text
-                    self._tool_count += len(loop_result.tool_calls)
-                    tool_calls_log = loop_result.tool_calls
-                    tools_used = [tc["tool"] for tc in tool_calls_log]
-                except Exception as exc:
-                    result = f"Tool loop error: {exc}"
-                    tool_calls_log = []
-                    tools_used = []
-                    console_bus.emit("error", "cron", job_name, f"Tool loop crashed: {exc}")
+                result = inv.result_text
+                tools_used = inv.tools_used
+                tool_calls_log = inv.result.tool_calls if inv.result else []
+                self._tool_count += len(tool_calls_log)
+
+                if inv.meta.get("engine_error"):
+                    console_bus.emit("error", "cron", job_name,
+                                     f"Tool loop crashed: {inv.meta['engine_error']}")
 
                 if is_evolution_runner:
                     self._cleanup_stuck_features(tool_calls_log)
-                self._cleanup_browser_after_task(tools_used)
             else:
                 result = self.llm.analyze("long_text", prompt)
                 tools_used = []
@@ -2357,21 +2320,6 @@ class GhostDaemon:
                                              name=f"typing-{msg.channel_id}")
             typing_thread.start()
 
-        identity = self._build_identity_context()
-
-        # Skills matching (same as dashboard chat)
-        matched_skills = []
-        if self.skill_loader:
-            try:
-                self.skill_loader.check_reload()
-                disabled = set(self.cfg.get("disabled_skills", []))
-                matched_skills = self.skill_loader.match(
-                    msg.text, None, disabled=disabled
-                )
-            except Exception as e:
-                log.warning("Failed to match skills: %s", e)
-                matched_skills = []
-
         tool_names = self.tool_registry.names() if self.tool_registry else []
 
         # Channel-aware additions
@@ -2386,8 +2334,7 @@ class GhostDaemon:
         except ImportError:
             pass
 
-        system_prompt = (
-            identity +
+        inbound_prompt_body = (
             "You are Ghost, an AUTONOMOUS AI agent running LOCALLY on the user's computer. "
             "You have DIRECT ACCESS to the file system, shell, network, and a real web browser.\n\n"
             f"The user is messaging you via **{msg.channel_id}** "
@@ -2496,12 +2443,9 @@ class GhostDaemon:
             "6. **READ BEFORE WRITE**: Before modifying any file, ALWAYS file_read it first.\n\n"
         )
 
+        prompt_parts = [inbound_prompt_body]
         if channel_context:
-            system_prompt += channel_context + "\n"
-
-        if matched_skills and self.skill_loader:
-            skills_section = self.skill_loader.build_skills_prompt(matched_skills)
-            system_prompt += "\n" + skills_section + "\n"
+            prompt_parts.append(channel_context)
 
         # Build channel chat history from recent feed entries
         channel_history = self._build_channel_history(msg.channel_id)
@@ -2580,65 +2524,29 @@ class GhostDaemon:
         if image_b64 and not msg.text:
             msg.text = "The user sent an image. Describe and analyze it."
 
-        # Detect URLs to force tool use (same as dashboard)
-        _url_re = re.compile(r'https?://[^\s<>"\']+')
-        has_url = bool(_url_re.search(msg.text))
-
         if self.cfg.get("enable_tool_loop", True) and self.tool_registry.get_all():
-            inbound_names = [
-                name for name in self.tool_registry.get_all()
-                if name not in _EVOLVE_TOOL_NAMES
-            ]
-            inbound_registry = self.tool_registry.subset(inbound_names)
-            skill_model = self._resolve_skill_model(matched_skills)
-
-            set_shell_caller_context("interactive")
             _user_msg = msg.text[:self.cfg.get("max_input_chars", 16000)]
-            try:
-                loop_result = self.engine.run(
-                    system_prompt=system_prompt,
-                    user_message=_user_msg,
-                    tool_registry=inbound_registry,
-                    max_steps=self.cfg.get("tool_loop_max_steps", 200),
-                    temperature=0.3,
-                    max_tokens=8192,
-                    on_step=terminal_step,
-                    hook_runner=self.hooks,
-                    history=channel_history,
-                    force_tool=True,
-                    tool_intent_security=self.tool_intent_security,
-                    model_override=skill_model,
-                    tool_event_bus=self.tool_event_bus,
-                    image_b64=image_b64,
-                )
-                for _esc in range(2):
-                    if not _detected_give_up(loop_result.text, engine=self.engine):
-                        break
-                    log.info("Self-correction: give-up detected (attempt %d/2), escalating", _esc + 1)
-                    _esc_history = list(channel_history or [])
-                    _esc_history.append({"role": "user", "content": _user_msg})
-                    _esc_history.append({"role": "assistant", "content": loop_result.text})
-                    loop_result = self.engine.run(
-                        system_prompt=system_prompt,
-                        user_message=_ESCALATION_COACHING,
-                        tool_registry=inbound_registry,
-                        max_steps=self.cfg.get("tool_loop_max_steps", 200),
-                        temperature=0.3,
-                        max_tokens=8192,
-                        on_step=terminal_step,
-                        hook_runner=self.hooks,
-                        history=_esc_history,
-                        force_tool=True,
-                        tool_intent_security=self.tool_intent_security,
-                        model_override=skill_model,
-                        tool_event_bus=self.tool_event_bus,
-                    )
-            finally:
-                set_shell_caller_context("autonomous")
-            reply = loop_result.text
-            self._tool_count += len(loop_result.tool_calls)
-            tools_used = [tc["tool"] for tc in loop_result.tool_calls]
-            self._cleanup_browser_after_task(tools_used)
+
+            from ghost_middleware import InvocationContext
+            inv = InvocationContext(
+                source="channel",
+                user_message=_user_msg,
+                system_prompt_parts=prompt_parts,
+                tool_registry=self.tool_registry,
+                daemon=self,
+                engine=self.engine,
+                config=self.cfg,
+                max_steps=self.cfg.get("tool_loop_max_steps", 200),
+                max_tokens=8192,
+                on_step=terminal_step,
+                history=channel_history,
+                image_b64=image_b64,
+            )
+            self.middleware_chain.invoke(inv)
+
+            reply = inv.result_text
+            self._tool_count += len(inv.result.tool_calls) if inv.result else 0
+            tools_used = inv.tools_used
         else:
             if image_b64:
                 reply = self.llm.analyze_image(
@@ -2689,84 +2597,49 @@ class GhostDaemon:
             text = modified
 
         preview = text.strip().replace("\n", " ")[:60]
-        ctx = self.context_memory.get_context_prefix(content_type)
+        ctx_prefix = self.context_memory.get_context_prefix(content_type)
 
-        # Match skills (respecting disabled list from config)
-        matched_skills = []
-        skill_name = ""
-        if self.skill_loader:
-            self.skill_loader.check_reload()
-            disabled = set(self.cfg.get("disabled_skills", []))
-            matched_skills = self.skill_loader.match(text, content_type, disabled=disabled)
-
-        # Build system prompt (identity + base + skills)
-        identity = self._build_identity_context()
-        base_prompt = PROMPTS.get(content_type, PROMPTS["long_text"])
-        if matched_skills:
-            skill_name = matched_skills[0].name
-            skills_section = self.skill_loader.build_skills_prompt(matched_skills)
-            system_prompt = identity + base_prompt + "\n\n" + skills_section
-        else:
-            system_prompt = identity + base_prompt
-
-        # Prepare input
+        # Prepare input (source-specific: URL fetching, context prefix)
         if content_type == "url":
             page_text = fetch_url_text(text.strip())
             llm_input = f"URL: {text.strip()}\n\nPage content:\n{page_text}"
         else:
             llm_input = text.strip()
+        if ctx_prefix:
+            llm_input = ctx_prefix + llm_input
 
-        if ctx:
-            llm_input = ctx + llm_input
+        base_prompt = PROMPTS.get(content_type, PROMPTS["long_text"])
 
-        # Run tool loop or single-shot
-        tools_used = []
-        tokens_used = 0
         use_tools = self.cfg.get("enable_tool_loop", True) and self.tool_registry.get_all()
 
         if use_tools:
-            safe_names = [
-                name for name in self.tool_registry.get_all()
-                if name not in _EVOLVE_TOOL_NAMES
-            ]
-            tool_reg = self.tool_registry.subset(safe_names)
-            if matched_skills:
-                needed = self.skill_loader.get_tools_for_skills(matched_skills)
-                if needed:
-                    always_tools = ["memory_search", "memory_save", "notify"]
-                    all_names = list(set(needed + always_tools))
-                    available = tool_reg.names()
-                    valid_names = [n for n in all_names if n in available]
-                    if valid_names:
-                        tool_reg = tool_reg.subset(valid_names)
+            from ghost_middleware import InvocationContext
+            inv = InvocationContext(
+                source="monitor",
+                user_message=llm_input[:self.cfg.get("max_input_chars", 4000)],
+                system_prompt_parts=[base_prompt],
+                tool_registry=self.tool_registry,
+                daemon=self,
+                engine=self.engine,
+                config=self.cfg,
+                max_steps=self.cfg.get("tool_loop_max_steps", 200),
+                max_tokens=2048,
+                temperature=0.3,
+                on_step=terminal_step,
+                meta={"content_type": content_type},
+            )
+            self.middleware_chain.invoke(inv)
 
-            skill_model = self._resolve_skill_model(matched_skills)
-
-            set_shell_caller_context("interactive")
-            try:
-                loop_result = self.engine.run(
-                    system_prompt=system_prompt,
-                    user_message=llm_input[:self.cfg.get("max_input_chars", 4000)],
-                    tool_registry=tool_reg,
-                    max_steps=self.cfg.get("tool_loop_max_steps", 200),
-                    temperature=0.3,
-                    max_tokens=2048,
-                    on_step=terminal_step,
-                    force_tool=True,
-                    hook_runner=self.hooks,
-                    tool_intent_security=self.tool_intent_security,
-                    model_override=skill_model,
-                    tool_event_bus=self.tool_event_bus,
-                )
-            finally:
-                set_shell_caller_context("autonomous")
-            result = loop_result.text
-            self._tool_count += len(loop_result.tool_calls)
-            tools_used = [tc["tool"] for tc in loop_result.tool_calls]
-            tokens_used = loop_result.total_tokens
-            self._cleanup_browser_after_task(tools_used)
+            result = inv.result_text
+            tools_used = inv.tools_used
+            tokens_used = inv.tokens_used
+            skill_name = inv.matched_skills[0].name if inv.matched_skills else ""
+            self._tool_count += len(inv.result.tool_calls) if inv.result else 0
         else:
             result = self.llm.analyze(content_type, llm_input, context_prefix="")
+            tools_used = []
+            tokens_used = 0
+            skill_name = ""
 
         # Hook: after_analyze
         modified_result = self.hooks.run("after_analyze", content_type, text, result) if self.hooks else None
@@ -2948,9 +2821,7 @@ class GhostDaemon:
 
         if action_id == "ask" and source:
             tool_names = self.tool_registry.names() if self.tool_registry else []
-            identity = self._build_identity_context()
-            system_prompt = (
-                identity +
+            ask_prompt_body = (
                 "You are Ghost, an AUTONOMOUS AI agent running LOCALLY on the user's computer. "
                 "You have DIRECT ACCESS to the file system, shell, network, and a real web browser.\n\n"
                 f"## PROJECT LOCATION (IMPORTANT)\n"
@@ -3098,53 +2969,26 @@ class GhostDaemon:
                 "10. You have unlimited tool calls. Keep going until the task is fully complete."
             )
             if self.cfg.get("enable_tool_loop", True) and self.tool_registry.get_all():
-                ask_names = [
-                    name for name in self.tool_registry.get_all()
-                    if name not in _EVOLVE_TOOL_NAMES
-                ]
-                ask_registry = self.tool_registry.subset(ask_names)
                 terminal_print("ask", f"[ask] {source[:50]}...", "Ghost is thinking...")
-                set_shell_caller_context("interactive")
-                try:
-                    loop_result = self.engine.run(
-                        system_prompt=system_prompt,
-                        user_message=source,
-                        tool_registry=ask_registry,
-                        max_steps=self.cfg.get("tool_loop_max_steps", 200),
-                        max_tokens=8192,
-                        force_tool=True,
-                        on_step=terminal_step,
-                        hook_runner=self.hooks,
-                        tool_intent_security=self.tool_intent_security,
-                        tool_event_bus=self.tool_event_bus,
-                    )
-                    for _esc in range(2):
-                        if not _detected_give_up(loop_result.text, engine=self.engine):
-                            break
-                        log.info("Self-correction: give-up detected in ask (attempt %d/2), escalating", _esc + 1)
-                        _esc_history = [
-                            {"role": "user", "content": source},
-                            {"role": "assistant", "content": loop_result.text},
-                        ]
-                        loop_result = self.engine.run(
-                            system_prompt=system_prompt,
-                            user_message=_ESCALATION_COACHING,
-                            tool_registry=ask_registry,
-                            max_steps=self.cfg.get("tool_loop_max_steps", 200),
-                            max_tokens=8192,
-                            force_tool=True,
-                            on_step=terminal_step,
-                            hook_runner=self.hooks,
-                            tool_intent_security=self.tool_intent_security,
-                            tool_event_bus=self.tool_event_bus,
-                            history=_esc_history,
-                        )
-                finally:
-                    set_shell_caller_context("autonomous")
-                result = loop_result.text
-                self._tool_count += len(loop_result.tool_calls)
-                tools_used = [tc["tool"] for tc in loop_result.tool_calls]
-                self._cleanup_browser_after_task(tools_used)
+
+                from ghost_middleware import InvocationContext
+                inv = InvocationContext(
+                    source="action",
+                    user_message=source,
+                    system_prompt_parts=[ask_prompt_body],
+                    tool_registry=self.tool_registry,
+                    daemon=self,
+                    engine=self.engine,
+                    config=self.cfg,
+                    max_steps=self.cfg.get("tool_loop_max_steps", 200),
+                    max_tokens=8192,
+                    on_step=terminal_step,
+                )
+                self.middleware_chain.invoke(inv)
+
+                result = inv.result_text
+                tools_used = inv.tools_used
+                self._tool_count += len(inv.result.tool_calls) if inv.result else 0
             else:
                 result = self.llm.analyze("long_text", source)
                 tools_used = []

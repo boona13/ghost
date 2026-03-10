@@ -2032,7 +2032,8 @@ class ToolLoopEngine:
             max_steps=DEFAULT_MAX_STEPS, temperature=0.3, max_tokens=DEFAULT_MAX_TOKENS,
             image_b64=None, images=None, on_step=None, force_tool=False, history=None,
             cancel_check=None, hook_runner=None, tool_intent_security=None, model_override=None,
-            enable_reasoning=False, tool_event_bus=None, on_token=None):
+            enable_reasoning=False, tool_event_bus=None, on_token=None,
+            middleware_chain=None):
         """
         Run the autonomous tool loop.
 
@@ -2210,6 +2211,12 @@ class ToolLoopEngine:
                 exit_reason = "task_complete"
                 break
 
+            if middleware_chain:
+                try:
+                    messages = middleware_chain.before_model(messages, step)
+                except Exception as _mw_err:
+                    log.warning("middleware_chain.before_model error at step %d: %s", step, _mw_err)
+
             payload = {
                 "model": effective_model,
                 "messages": messages,
@@ -2332,6 +2339,15 @@ class ToolLoopEngine:
                 msg["content"] = ""
 
             messages.append(msg)
+
+            if middleware_chain:
+                try:
+                    override_msg = middleware_chain.after_model(messages, msg, step)
+                    if override_msg is not None:
+                        messages[-1] = override_msg
+                        msg = override_msg
+                except Exception as _mw_err:
+                    log.warning("middleware_chain.after_model error at step %d: %s", step, _mw_err)
 
             if msg.get("tool_calls") and tool_registry:
                 msg["tool_calls"] = guard_model_output(msg["tool_calls"])
@@ -2489,34 +2505,42 @@ class ToolLoopEngine:
                                 })
                                 continue
 
+                        _mw_intercepted = None
+                        if middleware_chain:
+                            try:
+                                _mw_intercepted = middleware_chain.wrap_tool_call(fn_name, exec_args, step)
+                            except Exception as _mw_err:
+                                log.warning("middleware_chain.wrap_tool_call error for %s: %s", fn_name, _mw_err)
+
                         t0 = time.time()
-                        try:
-                            if not ok_intent:
-                                tool_result = f"BLOCKED by tool-intent security: {reason_intent}"
-                            else:
-                                _caller_ctx = get_shell_caller_context()
-                                # Poll tools (browser, shell_exec) must run in main thread
-                                # because they use libraries (playwright) that are not thread-safe
-                                if fn_name in KNOWN_POLL_TOOLS:
-                                    set_shell_caller_context(_caller_ctx)
-                                    tool_result = tool_registry.execute(fn_name, exec_args)
+                        if _mw_intercepted is not None:
+                            tool_result = _mw_intercepted
+                        else:
+                            try:
+                                if not ok_intent:
+                                    tool_result = f"BLOCKED by tool-intent security: {reason_intent}"
                                 else:
-                                    def _exec_tool_with_ctx(_ctx=_caller_ctx, _name=fn_name, _args=exec_args):
-                                        set_shell_caller_context(_ctx)
-                                        return tool_registry.execute(_name, _args)
-                                    tool_future = _llm_pool.submit(_exec_tool_with_ctx)
-                                    while True:
-                                        if cancel_check and cancel_check():
-                                            tool_future.cancel()
-                                            tool_result = "(Stopped by user)"
-                                            break
-                                        try:
-                                            tool_result = tool_future.result(timeout=0.5)
-                                            break
-                                        except concurrent.futures.TimeoutError:
-                                            continue
-                        except Exception as e:
-                            tool_result = f"Tool execution failed: {e}"
+                                    _caller_ctx = get_shell_caller_context()
+                                    if fn_name in KNOWN_POLL_TOOLS:
+                                        set_shell_caller_context(_caller_ctx)
+                                        tool_result = tool_registry.execute(fn_name, exec_args)
+                                    else:
+                                        def _exec_tool_with_ctx(_ctx=_caller_ctx, _name=fn_name, _args=exec_args):
+                                            set_shell_caller_context(_ctx)
+                                            return tool_registry.execute(_name, _args)
+                                        tool_future = _llm_pool.submit(_exec_tool_with_ctx)
+                                        while True:
+                                            if cancel_check and cancel_check():
+                                                tool_future.cancel()
+                                                tool_result = "(Stopped by user)"
+                                                break
+                                            try:
+                                                tool_result = tool_future.result(timeout=0.5)
+                                                break
+                                            except concurrent.futures.TimeoutError:
+                                                continue
+                            except Exception as e:
+                                tool_result = f"Tool execution failed: {e}"
 
                         tool_duration_ms = (time.time() - t0) * 1000
 
@@ -2531,6 +2555,14 @@ class ToolLoopEngine:
                             )
                             if modified_result is not None and isinstance(modified_result, str):
                                 tool_result = modified_result
+
+                        if middleware_chain:
+                            try:
+                                _mw_result = middleware_chain.after_tool_call(fn_name, exec_args, tool_result, step)
+                                if _mw_result is not None:
+                                    tool_result = _mw_result
+                            except Exception as _mw_err:
+                                log.warning("middleware_chain.after_tool_call error for %s: %s", fn_name, _mw_err)
 
                         if tool_event_bus:
                             try:
