@@ -1133,7 +1133,7 @@ def stream_status(message_id):
 
             time.sleep(0.1)
 
-    return Response(generate(), mimetype="text/event-stream",
+    return Response(generate(), content_type="text/event-stream; charset=utf-8",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 

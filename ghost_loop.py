@@ -1502,6 +1502,11 @@ def _parse_openai_stream(response, on_token=None) -> dict:
     resp_id = ""
     usage = {}
 
+    # Force UTF-8 decoding — many API providers send text/event-stream
+    # without a charset parameter, causing requests to default to Latin-1
+    # and mangle emoji/non-ASCII characters.
+    response.encoding = "utf-8"
+
     for line in response.iter_lines(decode_unicode=True):
         if not line:
             continue
