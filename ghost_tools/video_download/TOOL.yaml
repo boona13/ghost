@@ -1,0 +1,15 @@
+name: video_download
+version: 1.0.0
+description: "Download Instagram/TikTok videos and auto-convert to H.264 for QuickTime compatibility"
+author: ghost
+category: utility
+enabled: true
+
+tools:
+  - video_download
+
+dependencies:
+  - yt-dlp
+  - ffmpeg
+
+settings: []
