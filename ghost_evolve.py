@@ -2478,8 +2478,8 @@ def build_evolve_tools(cfg):
                 "PR APPROVED AND MERGED — deploy triggered. "
                 "You may now log this as a successful evolution."
             )
-        is_reviewer_rejection = "REJECTED" in msg or "BLOCKED" in msg
-        if feature_id and is_reviewer_rejection:
+        is_fixable_rejection = "REJECTED" in msg and "BLOCKED" not in msg
+        if feature_id and is_fixable_rejection:
             _feature_cooldowns[feature_id] = time.time()
         return msg
 
