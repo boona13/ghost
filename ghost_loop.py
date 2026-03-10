@@ -1488,6 +1488,22 @@ def _condense_for_llm_summary(old_messages: list) -> str:
     return "\n".join(parts)[:_MAX_SUMMARY_INPUT_CHARS]
 
 
+import re as _re
+
+_XML_TOOL_CALL_RE = _re.compile(
+    r"</?(?:invoke|parameter|minimax:tool_call|tool_call)[^>]*>",
+    _re.IGNORECASE,
+)
+
+
+def _is_xml_tool_markup(text: str) -> bool:
+    """Detect raw XML tool call markup that some models emit as content."""
+    stripped = text.strip()
+    if not stripped:
+        return False
+    return bool(_XML_TOOL_CALL_RE.search(stripped))
+
+
 def _parse_openai_stream(response, on_token=None) -> dict:
     """Parse an OpenAI-compatible SSE stream into a Chat Completions response dict.
 
@@ -1534,7 +1550,7 @@ def _parse_openai_stream(response, on_token=None) -> dict:
             delta = choice.get("delta", {})
             if delta.get("content"):
                 content_parts.append(delta["content"])
-                if on_token:
+                if on_token and not _is_xml_tool_markup(delta["content"]):
                     try:
                         on_token(delta["content"])
                     except Exception:

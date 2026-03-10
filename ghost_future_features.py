@@ -123,8 +123,12 @@ class FutureFeaturesStore:
             category = CATEGORY_FEATURE
         
         # Check for duplicates: exact title match against active AND implemented features
+        _STOP_WORDS = {"a", "an", "the", "for", "with", "and", "or", "to", "of", "in", "on", "by", "via", "from"}
         title_lower = title.lower()
         title_words = set(title_lower.split())
+        title_content_words = title_words - _STOP_WORDS
+        active_statuses = {STATUS_PENDING, STATUS_APPROVAL_REQUIRED, STATUS_IN_PROGRESS,
+                           STATUS_REVIEW_REJECTED, STATUS_IMPLEMENTED, STATUS_COMPLETED}
         for f in features:
             f_title = f.get("title", "").lower()
             f_status = f.get("status", "")
@@ -135,17 +139,21 @@ class FutureFeaturesStore:
                 if f_status in [STATUS_IMPLEMENTED, STATUS_COMPLETED]:
                     return {**f, "_warning": "Duplicate feature (already implemented)"}
 
-            # Fuzzy match: if 70%+ of words overlap, likely the same feature
-            if f_status in [STATUS_PENDING, STATUS_APPROVAL_REQUIRED, STATUS_IN_PROGRESS,
-                            STATUS_REVIEW_REJECTED, STATUS_IMPLEMENTED, STATUS_COMPLETED]:
-                f_words = set(f_title.split())
-                if title_words and f_words:
-                    overlap = len(title_words & f_words) / max(len(title_words), len(f_words))
-                    if overlap >= 0.7:
-                        label = "already implemented" if f_status in [STATUS_IMPLEMENTED, STATUS_COMPLETED] else "already in backlog"
-                        return {**f, "_warning": f"Similar feature ({label}): '{f.get('title', '')}'"}
+            if f_status not in active_statuses:
+                continue
 
-        
+            f_words = set(f_title.split())
+            f_content_words = f_words - _STOP_WORDS
+            if not title_content_words or not f_content_words:
+                continue
+
+            content_overlap = len(title_content_words & f_content_words) / max(len(title_content_words), len(f_content_words))
+            all_overlap = len(title_words & f_words) / max(len(title_words), len(f_words))
+
+            if content_overlap >= 0.5 or all_overlap >= 0.6:
+                label = "already implemented" if f_status in [STATUS_IMPLEMENTED, STATUS_COMPLETED] else "already in backlog"
+                return {**f, "_warning": f"Similar feature ({label}): '{f.get('title', '')}'"}
+
         # P0 always requires approval, regardless of auto_implement
         status = STATUS_APPROVAL_REQUIRED if priority == "P0" else STATUS_PENDING
         if not auto_implement and priority != "P0":
@@ -788,7 +796,12 @@ def build_future_features_tools(cfg, on_queue_change=None):
             _notify_queue()
 
         status_note = "(requires approval)" if feature["status"] == STATUS_APPROVAL_REQUIRED else ""
-        return f"Feature added: [{feature['id']}] {feature['title']} [{feature['priority']}] {status_note}"
+        return (
+            f"Feature added: [{feature['id']}] {feature['title']} [{feature['priority']}] {status_note}\n"
+            "STOP — do NOT implement this feature now. Do NOT call start_future_feature or "
+            "evolve_plan. The Feature Implementer cron job will pick it up automatically. "
+            "Tell the user the feature has been queued."
+        )
 
     def _list_future_features(status: str = "", limit: int = 50):
         """List features in the backlog.
@@ -894,7 +907,12 @@ def build_future_features_tools(cfg, on_queue_change=None):
         ok = store.approve(feature_id)
         if ok:
             _notify_queue()
-            return f"Feature approved for implementation: {feature_id}"
+            return (
+                f"Feature approved for implementation: {feature_id}\n"
+                "STOP — do NOT implement this feature now. Do NOT call start_future_feature "
+                "or evolve_plan. The Feature Implementer cron job will handle it. "
+                "Tell the user the feature is approved and queued for implementation."
+            )
         return f"Could not approve feature (may not exist or not require approval): {feature_id}"
 
     def _start_future_feature(feature_id: str):
