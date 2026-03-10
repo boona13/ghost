@@ -2419,6 +2419,7 @@ class ToolLoopEngine:
                     del msg["tool_calls"]
             if msg.get("tool_calls") and tool_registry:
                 rctx.consecutive_text_only = 0
+                step_loop_warnings: list[str] = []
                 for tc in msg["tool_calls"]:
                     # If a deploy was triggered by a prior tool in this batch,
                     # skip remaining calls — Ghost is about to restart.
@@ -2507,9 +2508,8 @@ class ToolLoopEngine:
                     else:
                         warning_text = ""
                         if detection.stuck and detection.level == "warning":
-                            if loop_detector.should_emit_warning(detection.detector, detection.count):
-                                warning_text = detection.message + "\n\n"
-                                loop_hint = f"WARN:{detection.detector}"
+                            warning_text = detection.message
+                            loop_hint = f"WARN:{detection.detector}"
                             if loop_detector._warning_count >= 6:
                                 final_text = (
                                     f"(Loop terminated: model stuck calling the same tools "
@@ -2519,6 +2519,33 @@ class ToolLoopEngine:
                                 _debug_logger.step_error(step,
                                     f"Force-exit: {loop_detector._warning_count} loop warnings")
                                 break
+
+                        if warning_text:
+                            tool_result = warning_text
+                            loop_detector.record_result(call_id, tool_result)
+                            step_loop_warnings.append(warning_text)
+                            _debug_logger.step_tool_call(
+                                step, fn_name, fn_args, tool_result,
+                                duration_ms=0,
+                                loop_detection=loop_hint,
+                            )
+                            tool_calls_log.append({
+                                "step": step,
+                                "tool": fn_name,
+                                "args": fn_args,
+                                "result": tool_result[:3000],
+                            })
+                            if on_step:
+                                try:
+                                    on_step(step, fn_name, tool_result)
+                                except Exception:
+                                    pass
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc_id,
+                                "content": tool_result,
+                            })
+                            continue
 
                         exec_args = fn_args
                         if hook_runner:
@@ -2643,9 +2670,6 @@ class ToolLoopEngine:
 
                         loop_detector.record_result(call_id, tool_result)
 
-                        if warning_text:
-                            tool_result = warning_text + tool_result
-
                     _debug_logger.step_tool_call(
                         step, fn_name, fn_args, tool_result,
                         duration_ms=tool_duration_ms,
@@ -2711,6 +2735,18 @@ class ToolLoopEngine:
                                     "file too large for single tool call') then task_complete."
                                 ),
                             })
+
+                if step_loop_warnings:
+                    combined = "\n".join(dict.fromkeys(step_loop_warnings))
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            f"⚠️ LOOP DETECTION WARNING (step {step}):\n{combined}\n\n"
+                            "You MUST change your approach NOW. The tool calls above were "
+                            "BLOCKED and did NOT execute. Use different tools or call "
+                            "task_complete to end the session."
+                        ),
+                    })
 
                 if exit_reason in ("task_complete", "cancelled",
                                    "critical_loop_break", "warning_accumulation_break"):
