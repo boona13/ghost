@@ -1,154 +1,104 @@
-"""Text to PDF converter - converts plain text or markdown to styled PDF documents."""
+"""Text-to-PDF tool: convert plain text/markdown into a styled PDF in artifacts."""
 
-import os
 import json
+import re
+from pathlib import Path
 
 
 def register(api):
     """Entry point called by ToolManager with a ToolAPI instance."""
 
+    styles = {
+        "default": {"font": "Helvetica", "title": 24, "heading": 18, "body": 12, "margins": 15},
+        "minimal": {"font": "Helvetica", "title": 20, "heading": 16, "body": 11, "margins": 12},
+        "formal": {"font": "Times", "title": 26, "heading": 20, "body": 12, "margins": 18},
+        "code": {"font": "Courier", "title": 20, "heading": 16, "body": 10, "margins": 14},
+    }
+
+    def _sanitize_filename(name: str) -> str:
+        safe = re.sub(r"[^A-Za-z0-9_-]+", "", (name or "").strip())
+        return safe[:120] or "document"
+
+    def _clean_inline_md(line: str) -> str:
+        line = re.sub(r"`([^`]+)`", r"\1", line)
+        line = re.sub(r"\*\*([^*]+)\*\*", r"\1", line)
+        line = re.sub(r"\*([^*]+)\*", r"\1", line)
+        return line
+
+    def _render_text(pdf, text: str, cfg: dict):
+        in_code = False
+        for raw in text.splitlines():
+            line = raw.rstrip("\n")
+            if line.strip().startswith("```"):
+                in_code = not in_code
+                pdf.ln(2)
+                continue
+            if in_code:
+                pdf.set_font("Courier", "", cfg["body"])
+                pdf.multi_cell(0, 5, line)
+                continue
+            if not line.strip():
+                pdf.ln(3)
+                continue
+            if line.startswith("# "):
+                pdf.set_font(cfg["font"], "B", cfg["title"])
+                pdf.multi_cell(0, 10, _clean_inline_md(line[2:]))
+                pdf.ln(2)
+                continue
+            if line.startswith("## ") or line.startswith("### "):
+                size = cfg["heading"] if line.startswith("## ") else max(cfg["heading"] - 2, 10)
+                pdf.set_font(cfg["font"], "B", size)
+                pdf.multi_cell(0, 8, _clean_inline_md(line.lstrip("# ")))
+                pdf.ln(1)
+                continue
+            bullet = re.match(r"^\s*([-*]|\d+\.)\s+(.*)$", line)
+            if bullet:
+                pdf.set_font(cfg["font"], "", cfg["body"])
+                pdf.multi_cell(0, 6, f"- {_clean_inline_md(bullet.group(2))}")
+                continue
+            pdf.set_font(cfg["font"], "", cfg["body"])
+            pdf.multi_cell(0, 6, _clean_inline_md(line))
+
     def text_to_pdf(text, filename="document", style="default", **kwargs):
-        """Convert text or markdown to a styled PDF document.
-        
-        Args:
-            text: The text or markdown content to convert (required)
-            filename: Output PDF filename without extension (default: 'document')
-            style: Style preset - 'default', 'minimal', 'formal', 'code' (default: 'default')
-        
-        Returns:
-            JSON string with {success: bool, filepath: str, error: str}
-        """
+        if not isinstance(text, str) or not text.strip():
+            return json.dumps({"success": False, "filepath": None, "error": "text must be a non-empty string"})
+        if not isinstance(filename, str):
+            return json.dumps({"success": False, "filepath": None, "error": "filename must be a string"})
+        if not isinstance(style, str) or style not in styles:
+            return json.dumps({"success": False, "filepath": None, "error": "style must be one of: default, minimal, formal, code"})
+
         try:
             from fpdf import FPDF
-            import markdown
-        except ImportError:
-            return json.dumps({
-                "success": False,
-                "filepath": None,
-                "error": "Dependencies not installed. Install with: pip install fpdf2 markdown"
-            })
-        
-        # Style configurations
-        styles = {
-            "default": {"title_size": 24, "heading_size": 18, "body_size": 12, "font": "Helvetica"},
-            "minimal": {"title_size": 20, "heading_size": 16, "body_size": 11, "font": "Helvetica"},
-            "formal": {"title_size": 26, "heading_size": 20, "body_size": 12, "font": "Times"},
-            "code": {"title_size": 20, "heading_size": 16, "body_size": 10, "font": "Courier"}
-        }
-        
-        s = styles.get(style, styles["default"])
-        
-        class PDF(FPDF):
-            def header(self):
-                self.set_font(s["font"], "", 8)
-                self.set_text_color(128)
-                self.cell(0, 5, "", 0, 1)
-                self.ln(5)
-        
-        pdf = PDF()
-        pdf.set_auto_page_break(auto=True, margin=15)
-        
-        # Convert markdown to HTML, then parse for PDF
-        html = markdown.markdown(text, extensions=["extra", "codehilite"])
-        
-        # Simple HTML-like parsing for basic elements
-        lines = text.split("\n")
-        in_code_block = False
-        code_content = []
-        
-        for line in lines:
-            # Code blocks
-            if line.strip().startswith("```"):
-                if not in_code_block:
-                    in_code_block = True
-                    code_content = []
-                    continue
-                else:
-                    # End of code block - output it
-                    in_code_block = False
-                    pdf.set_font(s["font"], "B", s["heading_size"])
-                    pdf.multi_cell(0, 8, "\n".join(code_content))
-                    pdf.ln(4)
-                    continue
-            
-            if in_code_block:
-                code_content.append(line)
-                continue
-            
-            # Headers
-            if line.startswith("### "):
-                pdf.set_font(s["font"], "B", s["heading_size"] - 2)
-                pdf.multi_cell(0, 7, line[4:])
-                pdf.ln(3)
-            elif line.startswith("## "):
-                pdf.set_font(s["font"], "B", s["heading_size"])
-                pdf.multi_cell(0, 8, line[3:])
-                pdf.ln(4)
-            elif line.startswith("# "):
-                pdf.set_font(s["font"], "B", s["title_size"])
-                pdf.multi_cell(0, 10, line[2:])
-                pdf.ln(5)
-            # Bullet points
-            elif line.strip().startswith("- ") or line.strip().startswith("* "):
-                pdf.set_font(s["font"], "", s["body_size"])
-                pdf.cell(10)
-                pdf.multi_cell(0, 6, "• " + line.strip()[2:])
-            # Numbered lists (basic)
-            elif line.strip()[0:2].isdot() if line.strip() else False:
-                pass  # Skip for now
-            # Bold/italic
-            elif "**" in line:
-                pdf.set_font(s["font"], "", s["body_size"])
-                line = line.replace("**", "")
-                pdf.multi_cell(0, 6, line)
-                pdf.ln(2)
-            # Empty line
-            elif line.strip() == "":
-                pdf.ln(3)
-            # Regular text
-            else:
-                pdf.set_font(s["font"], "", s["body_size"])
-                pdf.multi_cell(0, 6, line)
-                pdf.ln(2)
-        
-        # Ensure safe filename
-        safe_name = "".join(c for c in filename if c.isalnum() or c in "-_").strip()
-        if not safe_name:
-            safe_name = "document"
-        
-        # Output directory
-        output_dir = os.path.expanduser("~/.ghost/artifacts")
-        os.makedirs(output_dir, exist_ok=True)
-        
-        filepath = os.path.join(output_dir, f"{safe_name}.pdf")
-        pdf.output(filepath)
-        
-        api.log(f"Created PDF: {filepath}")
-        return json.dumps({
-            "success": True,
-            "filepath": filepath,
-            "error": None
-        })
+        except (ImportError, ModuleNotFoundError):
+            return json.dumps({"success": False, "filepath": None, "error": "Missing dependency: fpdf2 is not installed for text_to_pdf"})
+
+        try:
+            cfg = styles[style]
+            pdf = FPDF()
+            pdf.set_margins(cfg["margins"], cfg["margins"], cfg["margins"])
+            pdf.set_auto_page_break(auto=True, margin=cfg["margins"])
+            pdf.add_page()
+            _render_text(pdf, text, cfg)
+
+            out_dir = Path.home() / ".ghost" / "artifacts"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            path = out_dir / f"{_sanitize_filename(filename)}.pdf"
+            pdf.output(str(path))
+            api.log(f"Created PDF: {path}")
+            return json.dumps({"success": True, "filepath": str(path), "error": None})
+        except (OSError, ValueError, TypeError, UnicodeEncodeError) as exc:
+            api.log(f"text_to_pdf failed: {exc}")
+            return json.dumps({"success": False, "filepath": None, "error": str(exc)})
 
     api.register_tool({
         "name": "text_to_pdf",
-        "description": "Convert plain text or markdown to a styled PDF document. Supports markdown formatting (headers, lists, bold, italic, code blocks) with style presets (default, minimal, formal, code). Saves to ~/.ghost/artifacts/",
+        "description": "Convert plain text or markdown to a styled PDF document saved in artifacts.",
         "parameters": {
             "type": "object",
             "properties": {
-                "text": {
-                    "type": "string",
-                    "description": "The text or markdown content to convert to PDF"
-                },
-                "filename": {
-                    "type": "string",
-                    "description": "Output PDF filename without extension (default: 'document')"
-                },
-                "style": {
-                    "type": "string",
-                    "description": "Style preset: 'default', 'minimal', 'formal', or 'code'",
-                    "enum": ["default", "minimal", "formal", "code"]
-                }
+                "text": {"type": "string", "description": "Text or markdown content to convert"},
+                "filename": {"type": "string", "description": "Output filename without extension", "default": "document"},
+                "style": {"type": "string", "enum": ["default", "minimal", "formal", "code"], "default": "default"}
             },
             "required": ["text"]
         },
