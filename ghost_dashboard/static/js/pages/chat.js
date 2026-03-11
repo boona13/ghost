@@ -1072,6 +1072,7 @@ export async function render(container) {
         eventSource.close();
         eventSource = null;
         stopArtifactPolling();
+        if (progressEl) { progressEl.remove(); progressEl = null; }
         if (streamingEl) { streamingEl.remove(); streamingEl = null; }
         thinkingEl.remove();
 
@@ -1105,6 +1106,7 @@ export async function render(container) {
         eventSource.close();
         eventSource = null;
         stopArtifactPolling();
+        if (progressEl) { progressEl.remove(); progressEl = null; }
         thinkingEl.remove();
         stepsContainer.remove();
         appendMessage(messagesEl, 'error', data.error);
@@ -1116,6 +1118,7 @@ export async function render(container) {
         eventSource.close();
         eventSource = null;
         stopArtifactPolling();
+        if (progressEl) { progressEl.remove(); progressEl = null; }
         thinkingEl.remove();
         stepsContainer.remove();
         appendMessage(messagesEl, 'error', data.error);

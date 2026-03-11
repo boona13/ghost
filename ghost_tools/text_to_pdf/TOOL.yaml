@@ -1,0 +1,7 @@
+name: text_to_pdf
+version: 1.1.0
+description: Convert plain text to styled PDF with Unicode-safe fallbacks
+author: ghost
+category: utility
+deps:
+- fpdf2
