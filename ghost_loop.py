@@ -2373,6 +2373,18 @@ class ToolLoopEngine:
                 else:
                     payload["tool_choice"] = "auto"
 
+            _msg_chars = sum(len(m.get("content", "") or "") for m in messages)
+            _tools_chars = sum(
+                len(t.get("function", {}).get("description", ""))
+                + len(json.dumps(t.get("function", {}).get("parameters", {})))
+                for t in (payload.get("tools") or [])
+            )
+            _est_tokens = (_msg_chars + _tools_chars) // 4
+            log.info(
+                "[token_audit] step=%d msgs=%d msg_chars=%d tool_schemas=%d est_tokens=%d",
+                step, len(messages), _msg_chars, _tools_chars, _est_tokens,
+            )
+
             try:
                 future = _llm_pool.submit(
                     self._call_llm, payload, DEFAULT_TIMEOUT, on_token,

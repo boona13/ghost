@@ -2215,7 +2215,9 @@ class EvolutionEngine:
         for evo_id, evo in list(self._active_evolutions.items()):
             if only_ids is not None and evo_id not in only_ids:
                 continue
-            if evo.get("changes") and evo.get("status") not in ("deployed", "review_rejected"):
+            if evo.get("status") in ("deployed", "review_rejected"):
+                continue
+            if evo.get("changes") or evo.get("git_branch"):
                 to_clean.append((evo_id, evo))
 
         for evo_id, evo in to_clean:

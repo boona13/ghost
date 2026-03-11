@@ -327,6 +327,8 @@ class SkillMatchMiddleware(Middleware):
     """Match skills, inject prompt section, resolve model override."""
 
     def before_invoke(self, ctx: InvocationContext) -> None:
+        if ctx.meta.get("is_evolution_runner"):
+            return
         daemon = ctx.daemon
         if not daemon or not getattr(daemon, "skill_loader", None):
             return
@@ -527,6 +529,10 @@ class ToolScopeMiddleware(Middleware):
             available = set(ctx.tool_registry.names())
             allowed = [t for t in self._IMPLEMENTER_ALLOWLIST
                        if t in available]
+            log.info(
+                "ToolScope: evo_runner filtering %d -> %d tools (available=%d)",
+                len(available), len(allowed), len(available),
+            )
             ctx.tool_registry = ctx.tool_registry.subset(allowed)
             return
 
