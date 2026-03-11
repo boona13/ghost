@@ -2306,10 +2306,12 @@ class ToolLoopEngine:
         _llm_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
         for step in range(max_steps):
-            if cancel_check and cancel_check():
-                final_text = "(Stopped by user)"
-                exit_reason = "cancelled"
-                break
+            if cancel_check:
+                _cmsg = _cancel_msg()
+                if _cmsg:
+                    final_text = _cmsg
+                    exit_reason = "cancelled"
+                    break
 
             try:
                 from ghost_evolve import get_engine as _get_evo_engine
@@ -2384,11 +2386,13 @@ class ToolLoopEngine:
             deadline = time.time() + MAX_LLM_WALL_CLOCK
             data, error = None, None
             while True:
-                if cancel_check and cancel_check():
-                    future.cancel()
-                    final_text = "(Stopped by user)"
-                    exit_reason = "cancelled"
-                    break
+                if cancel_check:
+                    _cmsg = _cancel_msg()
+                    if _cmsg:
+                        future.cancel()
+                        final_text = _cmsg
+                        exit_reason = "cancelled"
+                        break
                 try:
                     data, error = future.result(timeout=0.5)
                     break
@@ -2548,10 +2552,12 @@ class ToolLoopEngine:
 
                     consecutive_task_completes = 0
 
-                    if cancel_check and cancel_check():
-                        final_text = "(Stopped by user)"
-                        exit_reason = "cancelled"
-                        break
+                    if cancel_check:
+                        _cmsg = _cancel_msg()
+                        if _cmsg:
+                            final_text = _cmsg
+                            exit_reason = "cancelled"
+                            break
 
                     detection = loop_detector.check(fn_name, fn_args)
                     call_id = loop_detector.record_call(fn_name, fn_args)
@@ -2694,10 +2700,12 @@ class ToolLoopEngine:
                                                 break
                                             raise
                                         while True:
-                                            if cancel_check and cancel_check():
-                                                tool_future.cancel()
-                                                tool_result = "(Stopped by user)"
-                                                break
+                                            if cancel_check:
+                                                _cmsg = _cancel_msg()
+                                                if _cmsg:
+                                                    tool_future.cancel()
+                                                    tool_result = _cmsg
+                                                    break
                                             try:
                                                 tool_result = tool_future.result(timeout=0.5)
                                                 break
@@ -2708,10 +2716,12 @@ class ToolLoopEngine:
 
                         tool_duration_ms = (time.time() - t0) * 1000
 
-                        if cancel_check and cancel_check():
-                            final_text = "(Stopped by user)"
-                            exit_reason = "cancelled"
-                            break
+                        if cancel_check:
+                            _cmsg = _cancel_msg()
+                            if _cmsg:
+                                final_text = _cmsg
+                                exit_reason = "cancelled"
+                                break
 
                         if hook_runner:
                             modified_result = hook_runner.run(
@@ -2833,11 +2843,13 @@ class ToolLoopEngine:
                                    "critical_loop_break", "warning_accumulation_break"):
                     break
 
-                if cancel_check and cancel_check():
-                    if not final_text:
-                        final_text = "(Stopped by user)"
-                    exit_reason = "cancelled"
-                    break
+                if cancel_check:
+                    _cmsg = _cancel_msg()
+                    if _cmsg:
+                        if not final_text:
+                            final_text = _cmsg
+                        exit_reason = "cancelled"
+                        break
 
                 # --- Auto-collect parallel subagent results ---
                 # Scan this step's tool results for task() submissions.

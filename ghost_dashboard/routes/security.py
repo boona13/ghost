@@ -123,7 +123,7 @@ def _run_ai_audit(session, daemon):
             max_tokens=8192,
             force_tool=False,
             on_step=on_step,
-            cancel_check=lambda: session.cancelled,
+            cancel_check=lambda: "(Stopped by user)" if session.cancelled else False,
             tool_event_bus=getattr(daemon, "tool_event_bus", None),
         )
         session.result = loop_result.text

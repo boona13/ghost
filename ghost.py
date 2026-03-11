@@ -2043,7 +2043,7 @@ class GhostDaemon:
                     nonlocal _timed_out
                     if time.time() >= deadline:
                         _timed_out = True
-                        return True
+                        return f"(Timed out after {timeout_s}s)"
                     return False
 
                 coding_model = None

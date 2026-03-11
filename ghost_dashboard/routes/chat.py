@@ -717,7 +717,7 @@ def _process_message(session, daemon):
                 on_step=on_step,
                 on_token=on_token,
                 history=chat_history,
-                cancel_check=lambda: session.cancelled,
+                cancel_check=lambda: "(Stopped by user)" if session.cancelled else False,
                 images=image_attachments if image_attachments else None,
                 enable_reasoning=enable_reasoning,
                 active_project=active_project,
