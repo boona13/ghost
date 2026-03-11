@@ -447,6 +447,7 @@ DEFAULT_CONFIG = {
     "enable_tts": True,
     "enable_voice": True,
     "enable_canvas": True,
+    "enable_response_integrity": True,
     "enable_security_audit": True,
     "enable_session_memory": True,
     "web_fetch_max_chars": 50000,

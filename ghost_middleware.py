@@ -1069,6 +1069,9 @@ class ResponseIntegrityMiddleware(Middleware):
     )
 
     def after_invoke(self, ctx: InvocationContext) -> None:
+        if not ctx.config.get("enable_response_integrity", True):
+            log.debug("ResponseIntegrity: disabled by config")
+            return
         if ctx.source not in self._ACTIVE_SOURCES:
             log.debug("ResponseIntegrity: skipped (source=%s)", ctx.source)
             return
