@@ -1,0 +1,6 @@
+name: base64_toolkit
+version: 1.0.0
+description: Encode/decode text or small files with base64 safely
+author: ghost
+category: utility
+deps: []
