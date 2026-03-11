@@ -1967,15 +1967,21 @@ class ToolLoopEngine:
         if payload_model and payload_model != chain_primary:
             override_provider = "openrouter"
             override_model = payload_model
-            # Parse "provider/model" format (e.g. "openrouter/anthropic/claude-sonnet-4-6")
-            if "/" in payload_model:
-                first_slash = payload_model.index("/")
-                potential_provider = payload_model[:first_slash]
-                rest = payload_model[first_slash + 1:]
-                if potential_provider in ("openrouter", "openai", "anthropic",
-                                         "google", "ollama", "openai-codex"):
-                    override_provider = potential_provider
-                    override_model = rest
+            _KNOWN_PROVIDERS = frozenset({
+                "openrouter", "openai", "anthropic",
+                "google", "ollama", "openai-codex",
+                "deepseek", "xai",
+            })
+            # Parse "provider:model" (dispatch format) or "provider/model" (OpenRouter format)
+            for sep in (":", "/"):
+                if sep in payload_model:
+                    idx = payload_model.index(sep)
+                    potential_provider = payload_model[:idx]
+                    rest = payload_model[idx + 1:]
+                    if potential_provider in _KNOWN_PROVIDERS:
+                        override_provider = potential_provider
+                        override_model = rest
+                        break
             override_entry = (override_provider, override_model)
             if override_entry not in candidates:
                 candidates = [override_entry] + candidates
