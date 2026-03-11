@@ -555,7 +555,12 @@ class EvolutionEngine:
             fromfile=f"a/{rel_path}",
             tofile=f"b/{rel_path}",
         ))
-        diff_text = "".join(diff) if diff else "(new file)"
+        if diff:
+            diff_text = "".join(diff)
+        elif not file_exists:
+            diff_text = "(new file)"
+        else:
+            diff_text = "(no change)"
 
         evo["changes"].append({
             "file": rel_path,
@@ -2283,9 +2288,18 @@ class EvolutionEngine:
                         self._active_evolutions.pop(evo_id, None)
                         continue
 
+            new_files_created = set()
             for change in evo.get("changes", []):
-                file_path = PROJECT_DIR / change["file"]
-                if file_path.exists() and "(new file)" in change.get("diff", ""):
+                rel = change["file"]
+                d = change.get("diff", "")
+                if d.startswith("(new file)"):
+                    new_files_created.add(rel)
+                elif d and d != "(no change)":
+                    new_files_created.discard(rel)
+
+            for rel in new_files_created:
+                file_path = PROJECT_DIR / rel
+                if file_path.exists():
                     try:
                         file_path.unlink()
                     except Exception:
@@ -2378,14 +2392,24 @@ class EvolutionEngine:
         only = changed_files if changed_files else None
         ok, msg = self._restore_backup(backup_path, only_files=only)
         if ok:
+            new_files_created = set()
+            for change in target.get("changes", []):
+                rel = change.get("file", "")
+                d = change.get("diff", "")
+                if d.startswith("(new file)"):
+                    new_files_created.add(rel)
+                elif d and d != "(no change)":
+                    new_files_created.discard(rel)
+
             for change in target.get("changes", []):
                 fpath = change.get("file", "")
-                file_path = PROJECT_DIR / fpath
-                if file_path.exists() and "(new file)" in change.get("diff", ""):
-                    try:
-                        file_path.unlink()
-                    except Exception:
-                        pass
+                if fpath in new_files_created:
+                    file_path = PROJECT_DIR / fpath
+                    if file_path.exists():
+                        try:
+                            file_path.unlink()
+                        except Exception:
+                            pass
                 if fpath.startswith("ghost_tools/"):
                     parts = Path(fpath).parts
                     if len(parts) >= 2:
