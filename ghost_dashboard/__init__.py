@@ -112,26 +112,15 @@ def start_with_daemon(daemon, port=3333, open_browser=False):
 
     bind_host = os.environ.get("GHOST_BIND_HOST", "127.0.0.1")
 
-    # Find an available port using pre-check to avoid werkzeug's sys.exit(1)
-    candidate_ports = [port] + list(range(port + 1, port + 11))
-    actual_port = None
-    for p in candidate_ports:
-        if _is_port_available(bind_host, p):
-            actual_port = p
-            break
-        elif p == port:
-            print(f"  ⚠ Dashboard port {p} is in use, trying fallback ports...")
-    
-    if actual_port is None:
-        print(f"  ⚠ Dashboard: could not find open port near {port}")
+    if not _is_port_available(bind_host, port):
+        print(f"  ⚠ Dashboard port {port} is already in use — refusing to start a second instance.")
+        print(f"    Run ./stop.sh first, or let ./start.sh handle cleanup automatically.")
         return None
-    
+
     try:
-        _server_ref = make_server(bind_host, actual_port, app, threaded=True)
-        if actual_port != port:
-            print(f"  ℹ Dashboard fallback to available port {actual_port}")
+        _server_ref = make_server(bind_host, port, app, threaded=True)
     except OSError as e:
-        print(f"  ⚠ Dashboard bind failed on {bind_host}:{actual_port}: {e}")
+        print(f"  ⚠ Dashboard bind failed on {bind_host}:{port}: {e}")
         return None
 
     t = threading.Thread(target=_server_ref.serve_forever, daemon=True, name="ghost-dashboard")
@@ -165,26 +154,15 @@ def run_dashboard(port=3333, open_browser=True):
 
     bind_host = os.environ.get("GHOST_BIND_HOST", "127.0.0.1")
 
-    # Find an available port using pre-check to avoid werkzeug's sys.exit(1)
-    candidate_ports = [port] + list(range(port + 1, port + 11))
-    actual_port = None
-    for p in candidate_ports:
-        if _is_port_available(bind_host, p):
-            actual_port = p
-            break
-        elif p == port:
-            print(f"\n  ⚠ Dashboard port {p} is in use, trying fallback ports...")
-    
-    if actual_port is None:
-        print(f"\n  ⚠ Ghost Dashboard: could not find open port near {port}\n")
+    if not _is_port_available(bind_host, port):
+        print(f"\n  ⚠ Dashboard port {port} is already in use.")
+        print(f"    Another Ghost instance may be running. Use ./stop.sh first.\n")
         return
-    
+
     try:
-        server = make_server(bind_host, actual_port, app, threaded=True)
-        if actual_port != port:
-            print(f"  ℹ Dashboard fallback to available port {actual_port}")
+        server = make_server(bind_host, port, app, threaded=True)
     except OSError as e:
-        print(f"\n  ⚠ Dashboard bind failed on {bind_host}:{actual_port}: {e}\n")
+        print(f"\n  ⚠ Dashboard bind failed on {bind_host}:{port}: {e}\n")
         return
 
     url = f"http://localhost:{port}"

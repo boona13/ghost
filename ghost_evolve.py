@@ -458,15 +458,23 @@ class EvolutionEngine:
 
         evo_id_short = evo.get("id", evolution_id)
 
-        if content is not None and not content.strip() and file_exists and not append:
-            return False, (
-                f"REJECTED: You sent empty content for existing file '{rel_path}'. "
-                f"This is a known model serialization issue. Use line_edits instead:\n"
-                f'  evolve_apply("{evo_id_short}", "{rel_path}", line_edits=['
-                f'{{"start": <first_line>, "end": <last_line>, "replacement": "<new code>"}}])\n'
-                f"Get line numbers from file_read. start/end are 1-indexed, inclusive. "
-                f"Only provide the NEW replacement text — the old text is identified by line numbers."
-            )
+        if content is not None and not content.strip() and file_exists:
+            if patches or line_edits:
+                content = None
+            elif not append:
+                return False, (
+                    f"REJECTED: You sent empty content for existing file '{rel_path}'. "
+                    f"This is a known model serialization issue. Use line_edits instead:\n"
+                    f'  evolve_apply("{evo_id_short}", "{rel_path}", line_edits=['
+                    f'{{"start": <first_line>, "end": <last_line>, "replacement": "<new code>"}}])\n'
+                    f"Get line numbers from file_read. start/end are 1-indexed, inclusive. "
+                    f"Only provide the NEW replacement text — the old text is identified by line numbers."
+                )
+            else:
+                return False, (
+                    f"REJECTED: You sent empty content with append=True for existing file '{rel_path}'. "
+                    f"Nothing to append. Use line_edits or patches to modify this file."
+                )
 
         if not file_exists and patches and content is None and not line_edits:
             return False, (
