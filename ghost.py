@@ -49,6 +49,7 @@ from ghost_future_features import build_future_features_tools, FutureFeaturesSto
 from ghost_hybrid_memory import build_hybrid_memory_tools
 from ghost_code_intel import build_code_intel_tools
 from ghost_data_extract import build_data_extract_tools
+from ghost_base64_toolkit import build_base64_toolkit_tools
 from ghost_x_tracker import build_x_tracker_tools
 from ghost_web_search import build_web_search_tools
 from ghost_web_fetch import build_web_fetch_tools
@@ -1327,6 +1328,11 @@ class GhostDaemon:
         # Data Extraction tools (structured data from text)
         if cfg.get("enable_data_extract", True):
             for tool_def in build_data_extract_tools():
+                self.tool_registry.register(tool_def)
+
+        # Base64 Toolkit tools (encode/decode)
+        if cfg.get("enable_base64_toolkit", True):
+            for tool_def in build_base64_toolkit_tools():
                 self.tool_registry.register(tool_def)
 
         # Web Search tools (multi-provider: Perplexity, Grok, Brave, Gemini with fallback)
