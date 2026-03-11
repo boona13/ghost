@@ -478,10 +478,15 @@ class EvolutionEngine:
             old_lines = old_content.splitlines()
             new_lines = content.splitlines()
             if len(new_lines) < len(old_lines) * MAX_LINE_LOSS_RATIO:
+                first_old = old_content.splitlines()[0] if old_content.splitlines() else ""
                 return False, (
                     f"REJECTED: content mode would delete >{int((1-MAX_LINE_LOSS_RATIO)*100)}% of "
                     f"'{rel_path}' ({len(old_lines)} → {len(new_lines)} lines). "
-                    "Use 'patches' for targeted changes, or provide content that preserves the file."
+                    "Your output was likely TRUNCATED — the file content is too large for a single tool call.\n"
+                    "You MUST use 'patches' instead. Example:\n"
+                    f'  evolve_apply("{evo.get("id", evolution_id)}", "{rel_path}", '
+                    'patches=[{"old": "<exact lines to replace>", "new": "<replacement lines>"}])\n'
+                    f"The file starts with: {first_old[:80]!r}"
                 )
             log.info("evolve_apply: auto-accepting content mode on '%s' "
                      "(%d → %d lines) — prefer patches next time", rel_path,
