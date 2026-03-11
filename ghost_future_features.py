@@ -845,11 +845,14 @@ def build_future_features_tools(cfg, on_queue_change=None):
             lines.append(f"  {status_emoji} [{f['id']}] {f['title']} [{f.get('priority', '?')}]{cat_str}{impl_str}{dep_str}{audited_str}{cooldown_str}")
         return "\n".join(lines)
 
+    _get_feature_call_count: dict = {}
+
     def _get_future_feature(feature_id: str):
         """Get detailed info about a specific feature."""
         f = store.get_by_id(feature_id)
         if not f:
             return f"Feature not found: {feature_id}"
+        _get_feature_call_count[feature_id] = _get_feature_call_count.get(feature_id, 0) + 1
         impl_type = f.get("implementation_type", "core")
         lines = [
             f"Feature: {f['title']}",
@@ -900,6 +903,11 @@ def build_future_features_tools(cfg, on_queue_change=None):
             lines.append(f"\nImplementation Log:")
             for entry in f["implementation_log"][-5:]:
                 lines.append(f"  - {entry['timestamp']}: {entry['message']}")
+        if _get_feature_call_count.get(feature_id, 0) > 1 and f.get("status") == STATUS_IN_PROGRESS:
+            lines.append(
+                "\n⚠️ You have already fetched this feature. It is ALREADY in_progress. "
+                "STOP researching. Proceed to evolve_plan NOW."
+            )
         return "\n".join(lines)
 
     def _approve_future_feature(feature_id: str):
@@ -920,6 +928,13 @@ def build_future_features_tools(cfg, on_queue_change=None):
         if not cfg.get("enable_future_features", True):
             return "BLOCKED — Future Features is disabled in config. Do NOT attempt to implement any feature. Call task_complete now."
         item = store.get_by_id(feature_id)
+        if item and item.get("status") == STATUS_IN_PROGRESS:
+            return (
+                f"Feature {feature_id} is ALREADY in_progress. "
+                "Do NOT call start_future_feature again. "
+                "Proceed IMMEDIATELY to evolve_plan(description, files) — "
+                "you have done enough research."
+            )
         resume_evo = None
         resume_branch = None
         if item:
