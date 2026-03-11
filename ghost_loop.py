@@ -2263,6 +2263,13 @@ class ToolLoopEngine:
         exit_reason = "max_steps"
         rctx = RunContext()
 
+        def _cancel_msg():
+            """Extract cancel reason from cancel_check (string = reason, True = default)."""
+            result = cancel_check()
+            if isinstance(result, str) and result:
+                return result
+            return "(Stopped)" if result else ""
+
         # Use model_override if provided, otherwise fall back to default model
         effective_model = model_override if model_override else self.model
         
