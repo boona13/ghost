@@ -407,13 +407,17 @@ class EvolutionEngine:
         return False, "Timed out waiting for approval (5 minutes). Evolution cancelled."
 
     def apply_change(self, evolution_id, file_path, content=None, patches=None,
-                     append=False):
+                     append=False, line_edits=None):
         """Apply a code change to a file.
 
         append=True lets the LLM build a new file incrementally across
         multiple calls when the content is too large for a single JSON
         tool-call output.  Each call appends to the file; the diff is
         recorded on every call so rollback stays correct.
+
+        line_edits is a list of {start: int, end: int, replacement: str}
+        dicts that replace line ranges by number (1-indexed, inclusive).
+        This avoids the model needing to reproduce existing file content.
         """
         evo = self._active_evolutions.get(evolution_id)
         if not evo:
@@ -452,13 +456,31 @@ class EvolutionEngine:
         if file_exists:
             old_content = abs_path.read_text(encoding="utf-8")
 
-        if not file_exists and patches and content is None:
+        evo_id_short = evo.get("id", evolution_id)
+
+        if content is not None and not content.strip() and file_exists and not append:
+            return False, (
+                f"REJECTED: You sent empty content for existing file '{rel_path}'. "
+                f"This is a known model serialization issue. Use line_edits instead:\n"
+                f'  evolve_apply("{evo_id_short}", "{rel_path}", line_edits=['
+                f'{{"start": <first_line>, "end": <last_line>, "replacement": "<new code>"}}])\n'
+                f"Get line numbers from file_read. start/end are 1-indexed, inclusive. "
+                f"Only provide the NEW replacement text — the old text is identified by line numbers."
+            )
+
+        if not file_exists and patches and content is None and not line_edits:
             return False, (
                 f"File '{rel_path}' does NOT exist — you cannot use patches on a "
                 f"non-existent file. To CREATE a new file, use:\n"
                 f"  evolve_apply(evolution_id, '{rel_path}', content='<full file content>')\n"
                 f"Do NOT use patches=[...] for new files. Provide the complete file "
                 f"content in the content= parameter."
+            )
+
+        if not file_exists and line_edits:
+            return False, (
+                f"File '{rel_path}' does NOT exist — you cannot use line_edits on a "
+                f"non-existent file. Use content= to create it."
             )
 
         PATCH_ONLY_EXTENSIONS = {".css", ".js", ".html", ".py"}
@@ -468,78 +490,119 @@ class EvolutionEngine:
             c["file"] == rel_path and c.get("diff", "").startswith("(new file)")
             for c in evo.get("changes", [])
         )
-        _content_mode_on_existing = (
-            content is not None and not append and old_content
-            and Path(rel_path).suffix.lower() in PATCH_ONLY_EXTENSIONS
-            and len(old_content) > PATCH_ONLY_MIN_SIZE
-            and not file_created_this_evo
-        )
-        if _content_mode_on_existing:
-            old_lines = old_content.splitlines()
-            new_lines = content.splitlines()
-            if len(new_lines) < len(old_lines) * MAX_LINE_LOSS_RATIO:
-                first_old = old_content.splitlines()[0] if old_content.splitlines() else ""
-                return False, (
-                    f"REJECTED: content mode would delete >{int((1-MAX_LINE_LOSS_RATIO)*100)}% of "
-                    f"'{rel_path}' ({len(old_lines)} → {len(new_lines)} lines). "
-                    "Your output was likely TRUNCATED — the file content is too large for a single tool call.\n"
-                    "You MUST use 'patches' instead. Example:\n"
-                    f'  evolve_apply("{evo.get("id", evolution_id)}", "{rel_path}", '
-                    'patches=[{"old": "<exact lines to replace>", "new": "<replacement lines>"}])\n'
-                    f"The file starts with: {first_old[:80]!r}"
-                )
-            log.info("evolve_apply: auto-accepting content mode on '%s' "
-                     "(%d → %d lines) — prefer patches next time", rel_path,
-                     len(old_lines), len(new_lines))
 
-        if append and content is not None:
-            new_content = old_content + content
-        elif content is not None:
-            new_content = content
-        elif patches:
-            new_content = old_content
-            for patch in patches:
-                old_str = patch.get("old", "")
-                new_str = patch.get("new", "")
-                if old_str and old_str in new_content:
-                    new_content = new_content.replace(old_str, new_str, 1)
-                elif old_str:
-                    matched = False
-                    # Fallback 1: normalize line endings
-                    norm_old = old_str.replace('\r\n', '\n')
-                    norm_content = new_content.replace('\r\n', '\n')
-                    if norm_old in norm_content:
-                        new_content = norm_content.replace(norm_old, new_str.replace('\r\n', '\n'), 1)
-                        matched = True
-                    # Fallback 2: strip trailing whitespace per line
-                    if not matched:
-                        def _strip_trailing(s):
-                            return '\n'.join(line.rstrip() for line in s.split('\n'))
-                        st_old = _strip_trailing(old_str)
-                        st_content = _strip_trailing(new_content)
-                        if st_old and st_old in st_content:
-                            pos = st_content.index(st_old)
-                            lines_before = st_content[:pos].count('\n')
-                            lines_match = st_old.count('\n') + 1
-                            orig_lines = new_content.split('\n')
-                            replaced_lines = new_str.split('\n')
-                            new_content = '\n'.join(
-                                orig_lines[:lines_before] + replaced_lines +
-                                orig_lines[lines_before + lines_match:]
-                            )
-                            matched = True
-                    if not matched:
-                        if file_created_this_evo:
-                            hint = (
-                                f" Since you CREATED this file in this evolution, you can use "
-                                f"evolve_apply(evo_id, '{rel_path}', content='<full corrected file>') "
-                                f"to overwrite it entirely. This is easier than fixing patch mismatches."
-                            )
-                        else:
-                            hint = f" Hint: Use file_read on '{rel_path}' to get the exact current content, then retry with matching text."
-                        return False, f"Patch target not found in {rel_path}: {old_str[:80]}...{hint}"
+        if line_edits and file_exists:
+            if not isinstance(line_edits, list) or not line_edits:
+                return False, (
+                    "line_edits must be a non-empty list of "
+                    '{"start": <int>, "end": <int>, "replacement": "<str>"} objects.'
+                )
+            file_lines = old_content.splitlines(keepends=True)
+            total_lines = len(file_lines)
+            sorted_edits = sorted(line_edits, key=lambda e: e.get("start", 0), reverse=True)
+            for edit in sorted_edits:
+                start = edit.get("start")
+                end = edit.get("end")
+                replacement = edit.get("replacement")
+                if start is None or end is None or replacement is None:
+                    return False, (
+                        f"Each line_edit must have 'start', 'end', and 'replacement'. "
+                        f"Got: {edit}"
+                    )
+                if not isinstance(start, int) or not isinstance(end, int):
+                    return False, f"start and end must be integers. Got start={start!r}, end={end!r}"
+                if start < 1 or end < start or start > total_lines:
+                    return False, (
+                        f"Invalid line range: start={start}, end={end} "
+                        f"(file has {total_lines} lines). "
+                        f"Lines are 1-indexed. start must be >= 1, end >= start, "
+                        f"start <= {total_lines}."
+                    )
+                end_clamped = min(end, total_lines)
+                repl_text = replacement
+                if repl_text and not repl_text.endswith('\n'):
+                    repl_text += '\n'
+                repl_lines = repl_text.splitlines(keepends=True) if repl_text.strip() else []
+                file_lines[start - 1:end_clamped] = repl_lines
+            new_content = "".join(file_lines)
         else:
-            return False, "Provide either 'content' (full file) or 'patches' (search/replace pairs)"
+            _content_mode_on_existing = (
+                content is not None and not append and old_content
+                and Path(rel_path).suffix.lower() in PATCH_ONLY_EXTENSIONS
+                and len(old_content) > PATCH_ONLY_MIN_SIZE
+                and not file_created_this_evo
+            )
+            if _content_mode_on_existing:
+                old_lines = old_content.splitlines()
+                new_lines = content.splitlines()
+                if len(new_lines) < len(old_lines) * MAX_LINE_LOSS_RATIO:
+                    return False, (
+                        f"REJECTED: content mode would delete >{int((1-MAX_LINE_LOSS_RATIO)*100)}% of "
+                        f"'{rel_path}' ({len(old_lines)} → {len(new_lines)} lines). "
+                        "Your output was likely TRUNCATED or EMPTY.\n"
+                        "Use line_edits instead (PREFERRED for existing files):\n"
+                        f'  evolve_apply("{evo_id_short}", "{rel_path}", line_edits=['
+                        f'{{"start": <first_line>, "end": <last_line>, "replacement": "<new code>"}}])\n'
+                        "Get line numbers from file_read. start/end are 1-indexed, inclusive.\n"
+                        "Alternative: patches=[{\"old\": \"<exact lines>\", \"new\": \"<replacement>\"}]"
+                    )
+                log.info("evolve_apply: auto-accepting content mode on '%s' "
+                         "(%d → %d lines) — prefer line_edits next time", rel_path,
+                         len(old_lines), len(new_lines))
+
+            if append and content is not None:
+                new_content = old_content + content
+            elif content is not None:
+                new_content = content
+            elif patches:
+                new_content = old_content
+                for patch in patches:
+                    old_str = patch.get("old", "")
+                    new_str = patch.get("new", "")
+                    if old_str and old_str in new_content:
+                        new_content = new_content.replace(old_str, new_str, 1)
+                    elif old_str:
+                        matched = False
+                        norm_old = old_str.replace('\r\n', '\n')
+                        norm_content = new_content.replace('\r\n', '\n')
+                        if norm_old in norm_content:
+                            new_content = norm_content.replace(norm_old, new_str.replace('\r\n', '\n'), 1)
+                            matched = True
+                        if not matched:
+                            def _strip_trailing(s):
+                                return '\n'.join(line.rstrip() for line in s.split('\n'))
+                            st_old = _strip_trailing(old_str)
+                            st_content = _strip_trailing(new_content)
+                            if st_old and st_old in st_content:
+                                pos = st_content.index(st_old)
+                                lines_before = st_content[:pos].count('\n')
+                                lines_match = st_old.count('\n') + 1
+                                orig_lines = new_content.split('\n')
+                                replaced_lines = new_str.split('\n')
+                                new_content = '\n'.join(
+                                    orig_lines[:lines_before] + replaced_lines +
+                                    orig_lines[lines_before + lines_match:]
+                                )
+                                matched = True
+                        if not matched:
+                            if file_created_this_evo:
+                                hint = (
+                                    f" Since you CREATED this file in this evolution, you can use "
+                                    f"evolve_apply(evo_id, '{rel_path}', content='<full corrected file>') "
+                                    f"to overwrite it entirely. This is easier than fixing patch mismatches."
+                                )
+                            else:
+                                hint = (
+                                    f" Use line_edits instead — specify line numbers from file_read:\n"
+                                    f'  evolve_apply("{evo_id_short}", "{rel_path}", line_edits=['
+                                    f'{{"start": <line>, "end": <line>, "replacement": "<new code>"}}])'
+                                )
+                            return False, f"Patch target not found in {rel_path}: {old_str[:80]}...{hint}"
+            else:
+                return False, (
+                    "Provide one of: 'line_edits' (preferred for existing files), "
+                    "'patches' (search/replace pairs), or 'content' (full file for new files)."
+                )
 
         for pattern in PROTECTED_PATTERNS:
             if pattern in old_content and pattern not in new_content:
@@ -1603,8 +1666,8 @@ class EvolutionEngine:
             return False, (
                 f"PRE-SUBMIT VALIDATION FAILED — {len(lint_issues)} issue(s) found:\n"
                 f"{issues_text}\n\n"
-                "Fix these issues with evolve_apply, then re-run evolve_test, "
-                "then try evolve_submit_pr again."
+                "Fix these issues with evolve_apply (use line_edits for existing files), "
+                "then re-run evolve_test, then try evolve_submit_pr again."
             )
 
         # Ensure git branch exists — recover if plan() failed to create it
@@ -2547,17 +2610,25 @@ def build_evolve_tools(cfg):
         else:
             parts.append("Auto-approved.")
         parts.append(
-            "\n🔴 MANDATORY BEFORE evolve_apply: RE-READ every file you will import from "
-            "or patch. Your earlier file_read results have been compacted from context. "
-            "Call file_read NOW for each dependency file, then call evolve_apply. "
-            "For EXISTING files, use evolve_apply(evo_id, 'path', patches=[...]).\n\n"
-            "🔴 LARGE NEW FILES — CHUNKING IS MANDATORY:\n"
+            "\n🔴 MANDATORY BEFORE evolve_apply: RE-READ every file you will modify "
+            "WITH NUMBERED LINES: file_read(path, numbered=true). "
+            "Your earlier file_read results have been compacted from context.\n\n"
+            "🔴 EDITING EXISTING FILES — USE line_edits (MANDATORY):\n"
+            "Do NOT use content= or patches= on existing files. Use line_edits:\n"
+            "  1. file_read('path/to/file.py', numbered=true) → shows '  45| def foo():' etc.\n"
+            "  2. evolve_apply(evo_id, 'path/to/file.py', line_edits=[\n"
+            '       {"start": 45, "end": 52, "replacement": "    def fixed():\\n        return True\\n"}\n'
+            "     ])\n"
+            "- start/end = 1-indexed line numbers from the numbered file_read output\n"
+            "- replacement = the NEW code only (old code is identified by line numbers)\n"
+            "- Multiple edits per call are supported\n"
+            "- Do NOT set content= when using line_edits\n\n"
+            "🔴 NEW FILES — CHUNKING IS MANDATORY:\n"
             "Your output token limit is ~8K tokens. A single evolve_apply with content= "
             "WILL FAIL with 'malformed JSON' if the file is longer than ~150 lines.\n"
             "For ANY new file over 100 lines, you MUST split it into chunks:\n"
             "  1. evolve_apply(evo_id, 'path', content='<first ~100 lines>')\n"
             "  2. evolve_apply(evo_id, 'path', content='<next ~100 lines>', append=True)\n"
-            "  3. evolve_apply(evo_id, 'path', content='<next ~100 lines>', append=True)\n"
             "Each chunk must be valid partial Python (complete function/class bodies).\n"
             "NEVER try to write an entire module in one call — it ALWAYS truncates.\n"
             "After ALL chunks are written, call file_read on the new file before patching.\n\n"
@@ -2575,9 +2646,10 @@ def build_evolve_tools(cfg):
         return "\n".join(parts)
 
     def evolve_apply_exec(evolution_id, file_path, content=None, patches=None,
-                          append=False):
+                          append=False, line_edits=None):
         ok, msg = engine.apply_change(evolution_id, file_path, content=content,
-                                      patches=patches, append=append)
+                                      patches=patches, append=append,
+                                      line_edits=line_edits)
         return msg
 
     def evolve_apply_config_exec(evolution_id=None, updates=None, **kwargs):
@@ -2649,7 +2721,7 @@ def build_evolve_tools(cfg):
                 pass
         else:
             lines.append(
-                "\nTests FAILED. Fix the issues and call evolve_apply again, "
+                "\nTests FAILED. Fix the issues with evolve_apply (use line_edits for existing files), "
                 "then re-run evolve_test. Or call evolve_rollback to revert.\n"
                 "WARNING: Do NOT log this evolution as successful — it has not passed tests."
             )
@@ -2740,7 +2812,8 @@ def build_evolve_tools(cfg):
             lines.append(f"\nLAST REVIEWER FEEDBACK:\n{feedback}")
         lines.append(
             "\nYou are now on the feature branch. Apply TARGETED fixes "
-            "with evolve_apply, then evolve_test, then evolve_submit_pr."
+            "with evolve_apply (use line_edits=[{start, end, replacement}] for existing files), "
+            "then evolve_test, then evolve_submit_pr."
         )
         return "\n".join(lines)
 
@@ -2767,8 +2840,8 @@ def build_evolve_tools(cfg):
             return (
                 "REJECTED: No changes have been applied yet — there is nothing to rollback. "
                 "You called evolve_plan but never called evolve_apply. "
-                "You MUST call evolve_apply to make changes, then evolve_test, then evolve_deploy. "
-                "Do NOT give up. Implement the feature NOW."
+                "You MUST call evolve_apply (use line_edits for existing files) to make changes, "
+                "then evolve_test, then evolve_deploy. Do NOT give up. Implement the feature NOW."
             )
 
         ok, msg = engine.rollback(evolution_id)
@@ -2818,17 +2891,23 @@ def build_evolve_tools(cfg):
             "description": (
                 "Apply a code change as part of a planned evolution. "
                 "You must call evolve_plan first to get an evolution_id. "
-                "Use file_read to understand the current code before modifying. "
-                "For EXISTING files (.py, .js, .css, .html): you MUST use 'patches' — a list of "
-                "{old: '...', new: '...'} search/replace pairs. Full-file 'content' mode is BLOCKED "
-                "for existing files to prevent accidentally overwriting styles/logic. "
-                "To APPEND code, use a patch where 'old' is the last few lines and 'new' is those lines "
-                "plus your additions. "
-                "For NEW files: ALWAYS use chunked writes (your output limit is ~150 lines). "
-                "Call 1: evolve_apply(evo_id, path, content='<first ~80 lines>') — creates the file. "
-                "Call 2+: evolve_apply(evo_id, path, content='<next ~80 lines>', append=True) — appends. "
-                "Each chunk must end at a complete statement/function boundary. "
-                "Writing >100 lines in a single call WILL cause malformed JSON truncation. "
+                "Use file_read to understand the current code before modifying.\n\n"
+                "== EDITING EXISTING FILES (PREFERRED METHOD: line_edits) ==\n"
+                "Use line_edits to replace lines by number. Steps:\n"
+                "1. Call file_read to see the file with line numbers\n"
+                "2. Call evolve_apply with line_edits=[{start: <first_line>, end: <last_line>, "
+                "replacement: '<new code>'}]\n"
+                "start/end are 1-indexed inclusive line numbers from file_read. "
+                "You only provide the NEW replacement text. Multiple edits in one call are supported.\n"
+                "Example: line_edits=[{\"start\": 45, \"end\": 52, \"replacement\": "
+                "\"    def fixed_func(self):\\n        return True\\n\"}]\n\n"
+                "== ALTERNATIVE: patches (search/replace) ==\n"
+                "patches=[{old: '<exact existing lines>', new: '<replacement>'}]. "
+                "You must reproduce the old text EXACTLY. Use line_edits if patches fail.\n\n"
+                "== NEW FILES: use content= ==\n"
+                "For new files, use chunked writes (output limit ~150 lines):\n"
+                "Call 1: evolve_apply(evo_id, path, content='<first ~80 lines>')\n"
+                "Call 2+: evolve_apply(evo_id, path, content='<next ~80 lines>', append=True)\n"
                 "NEVER use shell_exec to write files — always use evolve_apply. "
                 f"LIMIT: Max {MAX_NEW_FILE_SIZE} bytes for new files. "
                 "CRITICAL: After your last evolve_apply, you MUST call evolve_test then evolve_deploy. "
@@ -2845,9 +2924,22 @@ def build_evolve_tools(cfg):
                         "type": "string",
                         "description": "Relative file path from project root (e.g. 'ghost_dashboard/routes/weather.py')",
                     },
+                    "line_edits": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "start": {"type": "integer", "description": "First line number to replace (1-indexed, from file_read)"},
+                                "end": {"type": "integer", "description": "Last line number to replace (1-indexed, inclusive)"},
+                                "replacement": {"type": "string", "description": "New code to insert in place of lines start..end"},
+                            },
+                            "required": ["start", "end", "replacement"],
+                        },
+                        "description": "PREFERRED for existing files. Replace line ranges by number. Get line numbers from file_read.",
+                    },
                     "content": {
                         "type": "string",
-                        "description": "Full new content for the file (new files) or a chunk to append (with append=true)",
+                        "description": "Full new content for the file (new files only) or a chunk to append (with append=true)",
                     },
                     "patches": {
                         "type": "array",
@@ -2858,7 +2950,7 @@ def build_evolve_tools(cfg):
                                 "new": {"type": "string"},
                             },
                         },
-                        "description": "Search/replace pairs for targeted edits",
+                        "description": "Search/replace pairs — alternative to line_edits. Requires exact text match.",
                     },
                     "append": {
                         "type": "boolean",

@@ -596,7 +596,7 @@ def make_file_read(cfg):
     allowed_roots = cfg.get("allowed_roots", DEFAULT_ALLOWED_ROOTS)
     _invalid_path_counter = {"count": 0}
 
-    def execute(path, max_lines=200, offset=0):
+    def execute(path, max_lines=200, offset=0, numbered=False):
         stripped = (path or "").strip()
         if not stripped or stripped in (".", ".py", ".js", ".json", ".html", ".css") or len(stripped) < 3:
             _invalid_path_counter["count"] += 1
@@ -637,26 +637,46 @@ def make_file_read(cfg):
             total = len(lines)
             if offset > 0:
                 lines = lines[offset:]
+
+            def _number_lines(lines_list, start_num):
+                width = len(str(start_num + len(lines_list)))
+                return [f"{str(start_num + i).rjust(width)}| {l}"
+                        for i, l in enumerate(lines_list)]
+
             if len(lines) > max_lines:
                 shown = lines[:max_lines]
                 remaining = len(lines) - max_lines
-                header = f"[Lines {offset + 1}–{offset + max_lines} of {total}]\n" if offset > 0 else ""
+                start_line = offset + 1
+                header = f"[Lines {start_line}–{offset + max_lines} of {total}]\n"
+                if numbered:
+                    return header + "\n".join(_number_lines(shown, start_line)) + f"\n\n... ({remaining} more lines, use offset={offset + max_lines} to continue)"
                 return header + "\n".join(shown) + f"\n\n... ({remaining} more lines, use offset={offset + max_lines} to continue)"
             if offset > 0:
-                return f"[Lines {offset + 1}–{total} of {total}]\n" + "\n".join(lines)
+                start_line = offset + 1
+                header = f"[Lines {start_line}–{total} of {total}]\n"
+                if numbered:
+                    return header + "\n".join(_number_lines(lines, start_line))
+                return header + "\n".join(lines)
+            if numbered:
+                return f"[{total} lines]\n" + "\n".join(_number_lines(lines, 1))
             return text
         except Exception as e:
             return f"Read error: {e}"
 
     return {
         "name": "file_read",
-        "description": "Read the contents of a file. Path must be within allowed directories. Use offset to paginate through large files.",
+        "description": (
+            "Read the contents of a file. Path must be within allowed directories. "
+            "Use offset to paginate through large files. "
+            "Set numbered=true to show line numbers (useful before evolve_apply with line_edits)."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {"type": "string", "description": "Absolute or ~ path to the file"},
                 "max_lines": {"type": "integer", "description": "Max lines to return (default 200)", "default": 200},
                 "offset": {"type": "integer", "description": "Line number to start reading from (0-based, default 0)", "default": 0},
+                "numbered": {"type": "boolean", "description": "If true, prefix each line with its 1-based line number (e.g. '  45| code here'). Use this before evolve_apply with line_edits.", "default": False},
             },
             "required": ["path"],
         },
