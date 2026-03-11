@@ -435,6 +435,16 @@ class EvolutionEngine:
         if Path(rel_path).name in PROTECTED_FILES:
             return False, f"Cannot modify protected file: {rel_path}"
 
+        rel = Path(rel_path)
+        if (not abs_path.exists()
+                and rel.parent == Path(".")
+                and rel.name.startswith("ghost_")
+                and rel.suffix == ".py"):
+            return False, (
+                f"BLOCKED: Creating new ghost_*.py files at the project root is not allowed. "
+                f"New tools MUST be created in ghost_tools/<name>/ using tools_create(). "
+                f"Use: tools_create('{rel.stem.replace('ghost_', '')}', description, code, deps=[...])"
+            )
 
         old_content = ""
         file_exists = abs_path.exists()
@@ -529,6 +539,14 @@ class EvolutionEngine:
 
         abs_path.parent.mkdir(parents=True, exist_ok=True)
         abs_path.write_text(new_content, encoding="utf-8")
+
+        if rel_path.startswith("ghost_tools/"):
+            parts = Path(rel_path).parts
+            if len(parts) >= 2:
+                tool_dir = PROJECT_DIR / parts[0] / parts[1]
+                marker = tool_dir / ".evolving"
+                if not marker.exists():
+                    marker.write_text(evolution_id, encoding="utf-8")
 
         diff = list(difflib.unified_diff(
             old_content.splitlines(keepends=True),
@@ -1859,6 +1877,14 @@ class EvolutionEngine:
             self._save_history()
             self._active_evolutions.pop(evolution_id, None)
 
+            for change in evo.get("changes", []):
+                fpath = change.get("file", "")
+                if fpath.startswith("ghost_tools/"):
+                    parts = Path(fpath).parts
+                    if len(parts) >= 2:
+                        marker = PROJECT_DIR / parts[0] / parts[1] / ".evolving"
+                        marker.unlink(missing_ok=True)
+
             deploy_info = {
                 "evolution_id": evolution_id,
                 "feature_id": feature_id,
@@ -2340,12 +2366,18 @@ class EvolutionEngine:
         ok, msg = self._restore_backup(backup_path, only_files=only)
         if ok:
             for change in target.get("changes", []):
-                file_path = PROJECT_DIR / change["file"]
+                fpath = change.get("file", "")
+                file_path = PROJECT_DIR / fpath
                 if file_path.exists() and "(new file)" in change.get("diff", ""):
                     try:
                         file_path.unlink()
                     except Exception:
                         pass
+                if fpath.startswith("ghost_tools/"):
+                    parts = Path(fpath).parts
+                    if len(parts) >= 2:
+                        marker = PROJECT_DIR / parts[0] / parts[1] / ".evolving"
+                        marker.unlink(missing_ok=True)
 
             rollback_entry = {
                 "id": f"rollback_{uuid.uuid4().hex[:8]}",

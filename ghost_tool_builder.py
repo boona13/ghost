@@ -405,6 +405,10 @@ class ToolManager:
             if not child.is_dir() or child.name.startswith((".", "_")):
                 continue
 
+            if (child / ".evolving").exists():
+                log.info("Skipping %s — evolution in progress (.evolving marker)", child.name)
+                continue
+
             manifest_path = child / "TOOL.yaml"
             entry_path = child / "tool.py"
 
