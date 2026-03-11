@@ -2112,6 +2112,7 @@ class GhostDaemon:
                     engine=self.engine,
                     config=self.cfg,
                     max_steps=50 if is_evolution_runner else self.cfg.get("tool_loop_max_steps", 200),
+                    max_tokens=16384 if is_evolution_runner else 4096,
                     on_step=terminal_step,
                     cancel_check=_cron_cancel_check,
                     model_override=coding_model,
