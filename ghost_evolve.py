@@ -463,21 +463,29 @@ class EvolutionEngine:
 
         PATCH_ONLY_EXTENSIONS = {".css", ".js", ".html", ".py"}
         PATCH_ONLY_MIN_SIZE = 200
+        MAX_LINE_LOSS_RATIO = 0.5
         file_created_this_evo = any(
             c["file"] == rel_path and c.get("diff", "").startswith("(new file)")
             for c in evo.get("changes", [])
         )
-        if (content is not None and not append and old_content
-                and Path(rel_path).suffix.lower() in PATCH_ONLY_EXTENSIONS
-                and len(old_content) > PATCH_ONLY_MIN_SIZE
-                and not file_created_this_evo):
-            return False, (
-                f"REJECTED: Cannot use full-file 'content' mode on existing {Path(rel_path).suffix} file "
-                f"'{rel_path}' ({len(old_content)} bytes). Use 'patches' instead — provide a list of "
-                "{old: '...', new: '...'} search/replace pairs. This prevents accidentally overwriting "
-                "or losing existing code. To APPEND new code, use a patch where 'old' is the last few "
-                "lines of the file and 'new' is those same lines plus your additions."
-            )
+        _content_mode_on_existing = (
+            content is not None and not append and old_content
+            and Path(rel_path).suffix.lower() in PATCH_ONLY_EXTENSIONS
+            and len(old_content) > PATCH_ONLY_MIN_SIZE
+            and not file_created_this_evo
+        )
+        if _content_mode_on_existing:
+            old_lines = old_content.splitlines()
+            new_lines = content.splitlines()
+            if len(new_lines) < len(old_lines) * MAX_LINE_LOSS_RATIO:
+                return False, (
+                    f"REJECTED: content mode would delete >{int((1-MAX_LINE_LOSS_RATIO)*100)}% of "
+                    f"'{rel_path}' ({len(old_lines)} → {len(new_lines)} lines). "
+                    "Use 'patches' for targeted changes, or provide content that preserves the file."
+                )
+            log.info("evolve_apply: auto-accepting content mode on '%s' "
+                     "(%d → %d lines) — prefer patches next time", rel_path,
+                     len(old_lines), len(new_lines))
 
         if append and content is not None:
             new_content = old_content + content
