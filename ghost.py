@@ -3295,28 +3295,9 @@ class GhostDaemon:
         try:
             from ghost_dashboard import start_with_daemon
             dash_port = int(self.cfg.get("dashboard_port", 3333))
-            candidate_ports = [dash_port]
-            # Graceful fallback for common local conflicts (e.g., 3333 already used)
-            for p in range(dash_port + 1, dash_port + 11):
-                candidate_ports.append(p)
-
-            last_error = None
-            for port in candidate_ports:
-                try:
-                    actual = start_with_daemon(self, port=port)
-                    if actual:
-                        self._dashboard_port = actual
-                        if actual != dash_port:
-                            print(
-                                f"  {YEL}Dashboard port {dash_port} busy; using {actual}{RST}"
-                            )
-                        break
-                except Exception as e:
-                    last_error = e
-                    continue
-
-            if self._dashboard_port is None and last_error is not None:
-                raise last_error
+            actual = start_with_daemon(self, port=dash_port)
+            if actual:
+                self._dashboard_port = actual
 
             # Wire dashboard → queue processor
             try:
@@ -3947,15 +3928,7 @@ def main():
         except Exception as e:
             log.warning("Invalid port specified, using default 3333: %s", e)
             port = 3333
-        try:
-            run_dashboard(port=port)
-        except OSError as e:
-            msg = str(e)
-            if "Address already in use" in msg or "Port" in msg and "in use" in msg:
-                print(f"\n  {YEL}Dashboard port {port} is busy; trying nearby ports...{RST}")
-                run_dashboard(port=port + 1)
-                return
-            raise
+        run_dashboard(port=port)
         return
 
     cfg = load_config()

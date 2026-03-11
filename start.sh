@@ -39,8 +39,25 @@ if [ -f "$GHOST_HOME/ghost.pid" ]; then
   rm -f "$GHOST_HOME/ghost.pid"
 fi
 
-# Kill anything still holding the dashboard port (catches orphaned instances
-# whose PID files were lost).
+# Kill any ghost_supervisor.py processes (catches orphaned supervisors whose
+# PID files were lost — a live supervisor will respawn ghost after we kill it).
+if command -v pgrep &>/dev/null; then
+  ORPHAN_SUPS=$(pgrep -f "ghost_supervisor\\.py" 2>/dev/null)
+  if [ -n "$ORPHAN_SUPS" ]; then
+    echo "Killing orphaned supervisor(s): $ORPHAN_SUPS"
+    echo "$ORPHAN_SUPS" | xargs kill 2>/dev/null
+    sleep 2
+    ORPHAN_SUPS=$(pgrep -f "ghost_supervisor\\.py" 2>/dev/null)
+    if [ -n "$ORPHAN_SUPS" ]; then
+      echo "$ORPHAN_SUPS" | xargs kill -9 2>/dev/null
+      sleep 1
+    fi
+    killed=true
+  fi
+fi
+
+# Kill anything still holding the dashboard port (catches orphaned ghost
+# processes whose PID files and supervisors are gone).
 if command -v lsof &>/dev/null; then
   PORT_PIDS=$(lsof -ti:"$GHOST_PORT" 2>/dev/null)
   if [ -n "$PORT_PIDS" ]; then
