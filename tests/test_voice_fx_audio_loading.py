@@ -52,7 +52,7 @@ def test_detect_audio_format_reads_stream_header_only(tmp_path, monkeypatch):
 
     monkeypatch.setattr(Path, "open", _tracked_open)
     assert node._detect_audio_format(input_path) == "m4a"
-    assert 32 in read_sizes
+    assert node.AUDIO_HEADER_BYTES in read_sizes
     assert -1 not in read_sizes
 
 

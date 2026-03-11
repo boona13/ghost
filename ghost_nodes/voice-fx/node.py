@@ -40,12 +40,14 @@ EFFECTS = {
     "radio": "Old AM radio / walkie-talkie",
 }
 
+AUDIO_HEADER_BYTES = 32
+
 
 def _detect_audio_format(path: Path) -> str:
     """Best-effort format detection from magic bytes + extension."""
     try:
         with path.open("rb") as handle:
-            header = handle.read(32)
+            header = handle.read(AUDIO_HEADER_BYTES)
     except OSError as exc:
         log.warning("Could not read header for %s: %s", path, exc)
         return "unknown"
