@@ -2072,6 +2072,26 @@ class GhostDaemon:
                     except Exception as _dispatch_err:
                         log.warning("Model dispatch failed: %s", _dispatch_err)
 
+                if is_evolution_runner and self._features_store:
+                    _in_prog = list(self._features_store.get_all("in_progress"))
+                    if _in_prog:
+                        pass  # resume flow — LLM picks up the in_progress feature
+                    else:
+                        _next = self._features_store.get_next_implementable()
+                        if not _next:
+                            console_bus.emit("info", "cron", job_name,
+                                             "No implementable features found")
+                            return
+                        _ok, _err = self._features_store.mark_in_progress(
+                            _next["id"], force=True)
+                        if _ok:
+                            prompt += (
+                                f"\n\nPRE-SELECTED FEATURE: {_next['id']}\n"
+                                f"This feature has already been marked in_progress. "
+                                f"Skip step 1 (list) and go directly to step 2: "
+                                f"get_future_feature('{_next['id']}').\n"
+                            )
+
                 inv = InvocationContext(
                     source="cron",
                     user_message=prompt,

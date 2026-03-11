@@ -164,3 +164,6 @@ youtube_transcript_api>=1.2.4
 
 # Auto-added by Ghost evolve
 yt-dlp>=2026.3.3
+
+# Auto-added by Ghost evolve
+spotipy>=2.26.0

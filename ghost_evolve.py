@@ -2250,6 +2250,35 @@ class EvolutionEngine:
                     except Exception:
                         pass
 
+            # Clean up orphaned PRs and re-queue the associated feature
+            pr_id = evo.get("pr_id")
+            if not pr_id:
+                try:
+                    from ghost_pr import get_pr_store
+                    for _pr in get_pr_store().list_prs():
+                        if _pr.get("evolution_id") == evo_id and _pr.get("status") in ("open", "reviewing"):
+                            pr_id = _pr["pr_id"]
+                            break
+                except Exception:
+                    pass
+            if pr_id:
+                try:
+                    from ghost_pr import get_pr_store
+                    _pr_store = get_pr_store()
+                    _pr_data = _pr_store.get_pr(pr_id)
+                    if _pr_data and _pr_data.get("status") in ("open", "reviewing"):
+                        _pr_store.set_verdict(pr_id, "rejected",
+                                              reason="Evolution rolled back (timeout/incomplete)")
+                    _feat_id = _pr_data.get("feature_id") if _pr_data else None
+                    if _feat_id:
+                        from ghost_future_features import FutureFeaturesStore
+                        FutureFeaturesStore().mark_review_rejected(
+                            _feat_id,
+                            reason=f"PR {pr_id} orphaned by evolution rollback",
+                            pr_id=pr_id)
+                except Exception:
+                    pass
+
             self._active_evolutions.pop(evo_id, None)
             results.append((evo_id, True, f"Auto-rolled back incomplete evolution {evo_id}"))
 
