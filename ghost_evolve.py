@@ -104,6 +104,7 @@ class EvolutionEngine:
         self._history = self._load_history()
         self._active_jobs_fn = None  # Set by GhostDaemon to check cron status
         self.tool_event_bus = None  # Set by GhostDaemon for hook emission
+        self.tool_manager = None    # Set by GhostDaemon for tool unload on rejection
         self._deploy_triggered = threading.Event()
         self._cleanup_orphaned_pending()
 
@@ -1411,7 +1412,17 @@ class EvolutionEngine:
 
         removed = []
         for tool_rel in tool_dirs_to_remove:
+            tool_name = tool_rel.split("/")[1] if "/" in tool_rel else ""
             tool_abs = PROJECT_DIR / tool_rel
+
+            # Unload from in-memory ToolManager first (unregister LLM tools)
+            if tool_name and self.tool_manager:
+                try:
+                    self.tool_manager.uninstall_tool(tool_name)
+                    log.info("Unloaded rejected tool from ToolManager: %s", tool_name)
+                except Exception as e:
+                    log.warning("Failed to unload %s from ToolManager: %s", tool_name, e)
+
             if tool_abs.exists() and tool_abs.is_dir():
                 try:
                     shutil.rmtree(tool_abs)
@@ -1419,6 +1430,8 @@ class EvolutionEngine:
                     log.info("Cleaned up rejected tool: %s", tool_rel)
                 except Exception as e:
                     log.warning("Failed to remove %s: %s", tool_rel, e)
+            elif tool_name:
+                removed.append(tool_rel)
 
         if removed:
             try:

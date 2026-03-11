@@ -1373,6 +1373,8 @@ class GhostDaemon:
         if self.evolve_engine:
             self.evolve_engine.tool_event_bus = self.tool_event_bus
 
+        # NOTE: evolve_engine.tool_manager is wired after ToolManager init (below)
+
         # ── GhostNodes: AI Plugin Ecosystem ─────────────────────────
         self.resource_manager = None
         self.node_manager = None
@@ -1516,6 +1518,9 @@ class GhostDaemon:
                          tool_count, discovered, len(tool_names))
         except Exception as e:
             log.warning("ToolManager init error (non-fatal): %s", e, exc_info=True)
+
+        if self.evolve_engine and self.tool_manager:
+            self.evolve_engine.tool_manager = self.tool_manager
 
         # Security Audit tools (self-auditing + auto-fix)
         if cfg.get("enable_security_audit", True):

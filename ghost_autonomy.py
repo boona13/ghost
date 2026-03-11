@@ -1440,7 +1440,7 @@ def run_self_repair(daemon):
                 category="config",
                 priority="critical"
             )
-            log_growth_activity(
+            GrowthLogger().log(
                 routine="self_repair",
                 summary="Detected supervisor race condition causing SIGKILL",
                 details=f"Found {len(pids)} concurrent supervisor instances: {pids}",
