@@ -343,9 +343,13 @@ class SkillMatchMiddleware(Middleware):
 
             content_type = ctx.meta.get("content_type")
 
-            ctx.matched_skills = daemon.skill_loader.match(
-                ctx.user_message, content_type, disabled=disabled
-            )
+            engine = getattr(daemon, "engine", None)
+            if engine:
+                ctx.matched_skills = daemon.skill_loader.llm_match(
+                    engine, ctx.user_message, content_type, disabled=disabled
+                )
+            else:
+                ctx.matched_skills = []
 
             if ctx.active_project:
                 project_enabled = ctx.active_project.config.get("skills", [])

@@ -431,14 +431,14 @@ _GHOST_SYSTEM_MAP = (
     "SkillLoader (ghost_skills.py):\n"
     "  __init__(extra_dirs=None)\n"
     "  .skills -> Dict[str, Skill]    .reload()    .check_reload(interval=30)\n"
-    "  .match(text, content_type=None, disabled=None) -> list[Skill]\n"
+    "  .llm_match(engine, user_message, content_type=None, disabled=None) -> list[Skill]\n"
     "  .get(name) -> Skill|None    .list_all() -> list[Skill]\n"
     "  .build_skills_prompt(matched_skills) -> str\n"
     "  .get_tools_for_skills(matched_skills) -> set[str]\n"
     "  NOTE: There is NO .get_skill(), NO .load(). Use .get(name) or .skills dict.\n\n"
     "Skill (ghost_skills.py):\n"
     "  Slots: .name .description .triggers .tools .body .path .priority .os_filter .requires .model\n"
-    "  .matches(text, content_type=None) -> bool    .to_prompt_section() -> str\n"
+    "  .to_prompt_section() -> str\n"
 )
 
 _PRE_PR_CHECKLIST = (

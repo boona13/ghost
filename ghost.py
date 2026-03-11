@@ -2812,12 +2812,13 @@ class GhostDaemon:
 
         ctx = self.context_memory.get_context_prefix("image")
 
-        # Match skills for images (e.g. trader skill for chart screenshots)
         matched_skills = []
         skill_name = ""
         if self.skill_loader:
             disabled = set(self.cfg.get("disabled_skills", []))
-            matched_skills = self.skill_loader.match("image screenshot", "image", disabled=disabled)
+            matched_skills = self.skill_loader.llm_match(
+                self.engine, "image screenshot", "image", disabled=disabled
+            )
 
         system_prompt = self._build_identity_context() + PROMPTS["image"]
         if matched_skills:

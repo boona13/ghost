@@ -121,20 +121,6 @@ class Skill:
         self.requires = requires or {}
         self.model = model
 
-    def matches(self, text, content_type=None):
-        """Check if this skill should activate for the given text/type."""
-        if not isinstance(text, str):
-            text = str(text)
-        text_lower = text.lower()
-        for trigger in self.triggers:
-            if not isinstance(trigger, str):
-                continue
-            if trigger.lower() in text_lower:
-                return True
-        if content_type and content_type in self.triggers:
-            return True
-        return False
-
     def to_prompt_section(self):
         """Format this skill for injection into the system prompt."""
         return (
@@ -237,7 +223,7 @@ def parse_skill_md(path):
 
 
 class SkillLoader:
-    """Discovers, loads, and matches skills from multiple directories."""
+    """Discovers, loads, and selects skills from multiple directories via LLM."""
 
     def __init__(self, extra_dirs=None):
         self.skills: Dict[str, Skill] = {}
@@ -294,29 +280,94 @@ class SkillLoader:
         if time.time() - self._last_scan > interval:
             self.reload()
 
-    def match(self, text, content_type=None, disabled=None):
-        """Find all skills that match the given text/type. Returns sorted by priority."""
+    def build_catalog(self, disabled=None):
+        """Compact name+description list for LLM-based skill selection."""
         disabled = disabled or set()
-        matches = []
+        lines = []
         for skill in self.skills.values():
             if skill.name in disabled:
                 continue
-            if skill.matches(text, content_type):
-                matches.append(skill)
-        # Defensive: handle string priorities gracefully; convert to float for comparison
+            desc = skill.description or "(no description)"
+            lines.append(f"- {skill.name}: {desc}")
+        return "\n".join(lines)
+
+    def llm_match(self, engine, user_message, content_type=None, disabled=None):
+        """Use LLM to select relevant skills. Falls back to [] on failure.
+
+        1. Content-type fast path — if content_type is set and a skill has it
+           in its triggers, include that skill directly (no LLM needed).
+        2. LLM classification — send a compact catalog to a fast model and
+           ask it to return a JSON array of relevant skill names.
+        """
+        disabled = disabled or set()
+        if not user_message or not self.skills:
+            return []
+
+        ct_matches = []
+        if content_type:
+            for skill in self.skills.values():
+                if skill.name in disabled:
+                    continue
+                if content_type in skill.triggers:
+                    ct_matches.append(skill)
+
+        catalog = self.build_catalog(disabled=disabled)
+        if not catalog.strip():
+            return ct_matches
+
+        system_prompt = (
+            "You are a skill router. Given a user message, decide which skills "
+            "(if any) are relevant.\n\n"
+            "Rules:\n"
+            "- Return ONLY a JSON array of skill names, e.g. [\"trader\", \"browser\"].\n"
+            "- Return [] if no skill is relevant.\n"
+            "- Pick at most 2-3 skills. Fewer is better.\n"
+            "- Only pick a skill if the user's intent clearly matches it.\n\n"
+            f"Available skills:\n{catalog}"
+        )
+
+        try:
+            result = engine.single_shot(
+                system_prompt=system_prompt,
+                user_message=user_message[:2000],
+                temperature=0.0,
+                max_tokens=200,
+            )
+            raw = (result.text if hasattr(result, "text") else str(result)).strip()
+            bracket_start = raw.find("[")
+            bracket_end = raw.rfind("]")
+            if bracket_start == -1 or bracket_end == -1:
+                log.debug("SkillLoader.llm_match: no JSON array in response: %s", raw[:200])
+                return ct_matches
+            names = json.loads(raw[bracket_start:bracket_end + 1])
+            if not isinstance(names, list):
+                return ct_matches
+        except Exception as exc:
+            log.warning("SkillLoader.llm_match LLM call failed: %s", exc)
+            return ct_matches
+
+        llm_skills = []
+        for name in names:
+            if not isinstance(name, str):
+                continue
+            skill = self.skills.get(name)
+            if skill and skill.name not in disabled:
+                llm_skills.append(skill)
+
+        seen = {s.name for s in ct_matches}
+        merged = list(ct_matches)
+        for s in llm_skills:
+            if s.name not in seen:
+                merged.append(s)
+                seen.add(s.name)
+
         def _priority_key(s):
             p = s.priority
-            if isinstance(p, str):
-                try:
-                    p = int(p)
-                except ValueError:
-                    try:
-                        p = float(p)
-                    except ValueError:
-                        p = 0
-            return -p if isinstance(p, (int, float)) else 0
-        matches.sort(key=_priority_key)
-        return matches
+            if isinstance(p, (int, float)):
+                return -p
+            return 0
+        merged.sort(key=_priority_key)
+        return merged
 
     def get(self, name):
         return self.skills.get(name)

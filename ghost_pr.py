@@ -179,7 +179,7 @@ ToolRegistry (ghost_loop.py):
 
 SkillLoader (ghost_skills.py):
   .skills -> Dict[str, Skill]  .reload()  .check_reload(interval=30)
-  .match(text, content_type=None, disabled=None) -> list[Skill]
+  .llm_match(engine, user_message, content_type=None, disabled=None) -> list[Skill]
   .get(name) -> Skill|None  .list_all() -> list[Skill]
   Known hallucinations: .get_skill(), .load() — these DO NOT exist
 
