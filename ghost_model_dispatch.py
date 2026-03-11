@@ -161,7 +161,9 @@ def _get_available_providers(cfg: dict, auth_store=None) -> set[str]:
 def _resolve_budget(cfg: dict) -> tuple[float, str]:
     """Convert budget config to (max_cost_per_mtok, strategy).
 
-    strategy is "best_value" for auto, "best_quality" for explicit budgets.
+    "best_value" (score/cost) for auto and low — prefers free models like
+    GPT 5.3 Codex over marginally-higher-scoring paid models.
+    "best_quality" (highest score) for medium, high, and explicit numeric budgets.
     """
     raw = cfg.get("coding_model_budget", "auto")
 
@@ -174,7 +176,8 @@ def _resolve_budget(cfg: dict) -> tuple[float, str]:
         return (100.0, "best_value")
 
     if raw_str in BUDGET_PRESETS:
-        return (BUDGET_PRESETS[raw_str], "best_quality")
+        strategy = "best_value" if raw_str in ("free", "low") else "best_quality"
+        return (BUDGET_PRESETS[raw_str], strategy)
 
     try:
         return (float(raw_str), "best_quality")
