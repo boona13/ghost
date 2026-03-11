@@ -327,8 +327,6 @@ class SkillMatchMiddleware(Middleware):
     """Match skills, inject prompt section, resolve model override."""
 
     def before_invoke(self, ctx: InvocationContext) -> None:
-        if ctx.source == "cron":
-            return
         daemon = ctx.daemon
         if not daemon or not getattr(daemon, "skill_loader", None):
             return
