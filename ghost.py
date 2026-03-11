@@ -969,6 +969,11 @@ MAG = "\033[35m"
 def terminal_step(step, tool_name, tool_result):
     """Live-print each tool call as the agent works."""
     now = datetime.now().strftime("%H:%M:%S")
+    if tool_name == "__reasoning__":
+        preview = tool_result[:200].replace("\n", " ")
+        print(f"  {DIM}{now}{RST}  {YEL}⚡ Step {step}{RST}  {DIM}💭 {preview}{'…' if len(tool_result) > 200 else ''}{RST}")
+        import sys; sys.stdout.flush()
+        return
     args_preview = tool_result[:120].replace("\n", " ")
     print(f"  {DIM}{now}{RST}  {YEL}⚡ Step {step}{RST}  {GRN}{tool_name}{RST}")
     print(f"  {DIM}→ {args_preview}{'…' if len(tool_result) > 120 else ''}{RST}")

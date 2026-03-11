@@ -2501,6 +2501,12 @@ class ToolLoopEngine:
                 if not msg["tool_calls"]:
                     del msg["tool_calls"]
             if msg.get("tool_calls") and tool_registry:
+                assistant_text = (msg.get("content") or "").strip()
+                if assistant_text and on_step:
+                    try:
+                        on_step(step, "__reasoning__", assistant_text)
+                    except Exception:
+                        pass
                 rctx.consecutive_text_only = 0
                 step_loop_warnings: list[str] = []
                 for tc in msg["tool_calls"]:

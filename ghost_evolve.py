@@ -2476,6 +2476,15 @@ def build_evolve_tools(cfg):
             "After ALL chunks are written, call file_read on the new file before patching.\n\n"
             "🔴 NEVER use shell_exec to read or inspect files. ALWAYS use file_read."
         )
+        try:
+            from ghost_autonomy import _CODE_PATTERNS, _DEV_STANDARDS
+            parts.append(
+                "\n\n## CODING STANDARDS (apply these NOW during evolve_apply)"
+            )
+            parts.append(_CODE_PATTERNS)
+            parts.append(_DEV_STANDARDS)
+        except ImportError:
+            pass
         return "\n".join(parts)
 
     def evolve_apply_exec(evolution_id, file_path, content=None, patches=None,
@@ -2543,6 +2552,14 @@ def build_evolve_tools(cfg):
                 "\nAll tests passed. Call evolve_submit_pr to submit for code review, "
                 "or evolve_deploy for direct deploy (self-repair only)."
             )
+            try:
+                from ghost_autonomy import _PRE_PR_CHECKLIST
+                lines.append(
+                    "\n## BEFORE SUBMITTING — complete this checklist:"
+                )
+                lines.append(_PRE_PR_CHECKLIST)
+            except ImportError:
+                pass
         else:
             lines.append(
                 "\nTests FAILED. Fix the issues and call evolve_apply again, "

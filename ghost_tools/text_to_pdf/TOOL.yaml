@@ -1,0 +1,9 @@
+name: text_to_pdf
+version: 1.0.0
+description: Convert plain text or markdown to styled PDF documents with customizable
+  styling
+author: ghost
+category: utility
+deps:
+- fpdf2
+- markdown

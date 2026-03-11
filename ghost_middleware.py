@@ -554,16 +554,20 @@ class ToolScopeMiddleware(Middleware):
         if not needed:
             return
 
+        _ALWAYS_CORE = {
+            "memory_search", "memory_save", "task_complete",
+            "file_read", "file_write", "file_search",
+            "shell_exec", "grep", "glob",
+            "notify", "uptime", "app_control",
+            "add_future_feature", "list_future_features",
+            "get_future_feature", "get_feature_stats",
+        }
         if ctx.source == "chat" and ctx.active_project:
-            _ALWAYS = {
-                "memory_search", "memory_save", "task_complete",
+            _ALWAYS = _ALWAYS_CORE | {
                 "project_list", "project_get", "project_resolve",
-                "file_read", "file_write", "file_search",
-                "shell_exec", "grep", "glob",
-                "notify", "uptime", "app_control",
-                "add_future_feature", "list_future_features",
-                "get_future_feature", "get_feature_stats",
             }
+        elif ctx.source == "chat":
+            _ALWAYS = _ALWAYS_CORE
         else:
             _ALWAYS = {"memory_search", "memory_save", "notify"}
 
