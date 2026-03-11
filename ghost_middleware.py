@@ -16,9 +16,22 @@ import logging
 import re
 import threading
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 log = logging.getLogger("ghost.middleware")
+
+
+def _push_chat_progress(ctx: InvocationContext, message: str) -> None:
+    """Push a progress event to the chat SSE stream (no-op for non-chat sources)."""
+    if ctx.source != "chat":
+        return
+    session = ctx.meta.get("session") if ctx.meta else None
+    if session and hasattr(session, "progress"):
+        session.progress.append({
+            "message": message,
+            "time": datetime.now().isoformat(),
+        })
 
 # ---------------------------------------------------------------------------
 # InvocationContext — carries ALL state for a single agent invocation
@@ -639,6 +652,7 @@ class GiveUpDetectionMiddleware(Middleware):
             ctx.escalation_count = attempt + 1
             log.info("Give-up detected (attempt %d/%d), escalating",
                      attempt + 1, self.MAX_RETRIES)
+            _push_chat_progress(ctx, f"Retrying response (escalation {attempt + 1}/{self.MAX_RETRIES})...")
 
             esc_history = list(ctx.history or [])
             esc_history.append({"role": "user", "content": ctx.user_message})
@@ -1028,8 +1042,17 @@ class ResponseIntegrityMiddleware(Middleware):
 
     MAX_RETRIES = 1
 
-    # Sources where integrity checking applies (user-facing).
     _ACTIVE_SOURCES = {"chat", "channel", "action"}
+
+    # Tools that only read data — fabricating side effects is impossible
+    # when only these were called, so we can skip the integrity check.
+    _READ_ONLY_TOOLS = frozenset({
+        "list_future_features", "get_future_feature", "get_feature_stats",
+        "memory_search",
+        "file_read", "file_search",
+        "web_search", "web_fetch",
+        "uptime", "task_complete", "__reasoning__",
+    })
 
     _VALIDATOR_PROMPT = (
         "You are a response auditor. Compare the assistant's response against "
@@ -1060,11 +1083,21 @@ class ResponseIntegrityMiddleware(Middleware):
             log.debug("ResponseIntegrity: skipped (no engine)")
             return
 
-        tools_used_str = ", ".join(sorted(set(ctx.tools_used))) or "(none)"
+        unique_tools = set(ctx.tools_used)
+        if unique_tools <= self._READ_ONLY_TOOLS:
+            log.info(
+                "ResponseIntegrity: skipped (all %d tool(s) are read-only: %s)",
+                len(unique_tools),
+                ", ".join(sorted(unique_tools)),
+            )
+            return
+
+        tools_used_str = ", ".join(sorted(unique_tools)) or "(none)"
         log.info(
             "ResponseIntegrity: validating response (tools_used=[%s], response_len=%d)",
             tools_used_str, len(ctx.result_text),
         )
+        _push_chat_progress(ctx, "Validating response integrity...")
 
         validator_input = (
             f"## Tools actually called\n[{tools_used_str}]\n\n"
@@ -1119,6 +1152,7 @@ class ResponseIntegrityMiddleware(Middleware):
             cancelled = ctx.cancel_check() if ctx.cancel_check else False
             if cancelled:
                 break
+            _push_chat_progress(ctx, "Correcting response (integrity retry)...")
 
             correction_msg = (
                 f"INTEGRITY VIOLATION (detected by automated audit):\n"
