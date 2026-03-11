@@ -358,6 +358,12 @@ def build_headers(provider: ProviderConfig, api_key: str = "") -> dict:
 
 def adapt_request(provider: ProviderConfig, payload: dict) -> dict:
     """Convert an OpenAI-format payload to the provider's native format."""
+    for t in payload.get("tools", []):
+        fn = t.get("function", t)
+        params = fn.get("parameters")
+        if isinstance(params, dict):
+            _fix_array_schemas(params)
+
     if provider.api_format == "openai":
         prepared = dict(payload)
         if provider.id == "ollama":

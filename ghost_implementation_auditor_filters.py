@@ -199,8 +199,8 @@ def build_implementation_auditor_filter_tools():
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "implemented_features": {"type": "array"},
-                    "active_fix_features": {"type": "array"},
+                    "implemented_features": {"type": "array", "items": {"type": "object"}},
+                    "active_fix_features": {"type": "array", "items": {"type": "object"}},
                 },
                 "required": ["implemented_features", "active_fix_features"],
             },

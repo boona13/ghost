@@ -719,7 +719,13 @@ class EvolutionEngine:
                 if not abs_f.exists():
                     continue
 
-                if f.startswith("ghost_tools/"):
+                module_name = Path(f).with_suffix("").as_posix().replace("/", ".")
+                use_file_import = (
+                    f.startswith("ghost_tools/")
+                    or f.startswith("ghost_nodes/")
+                    or not all(part.isidentifier() for part in module_name.split("."))
+                )
+                if use_file_import:
                     import_cmd = (
                         "import importlib.util, sys; "
                         f"spec = importlib.util.spec_from_file_location('_test', r'{abs_f}'); "
@@ -727,7 +733,6 @@ class EvolutionEngine:
                         "spec.loader.exec_module(mod)"
                     )
                 else:
-                    module_name = Path(f).with_suffix("").as_posix().replace("/", ".")
                     import_cmd = f"import {module_name}"
 
                 try:
