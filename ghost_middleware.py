@@ -1000,6 +1000,179 @@ class ToolCallInterceptMiddleware(Middleware):
         return str(handler)
 
 
+# ---------------------------------------------------------------------------
+# 11. ResponseIntegrityMiddleware  (after_invoke)
+#
+#     Uses a fast LLM subagent to detect when the primary model's response
+#     claims it performed tool actions that never actually executed.
+#     If fabrication is detected, re-runs the engine with a correction
+#     prompt so the model either performs the real action or responds
+#     honestly.  This is a semantic check — no brittle regex patterns.
+# ---------------------------------------------------------------------------
+
+
+class ResponseIntegrityMiddleware(Middleware):
+    """Catch fabricated tool-action claims via LLM-based validation."""
+
+    MAX_RETRIES = 1
+
+    # Sources where integrity checking applies (user-facing).
+    _ACTIVE_SOURCES = {"chat", "channel", "action"}
+
+    _VALIDATOR_PROMPT = (
+        "You are a response auditor. Compare the assistant's response against "
+        "the tools it actually called. Does the response claim a completed "
+        "action that required a tool NOT in the tools_used list?\n\n"
+        "Examples of fabrication:\n"
+        "- Says 'feature queued' but add_future_feature not in tools_used\n"
+        "- Says 'file saved' but file_write not in tools_used\n"
+        "- Says 'email sent' but send_email not in tools_used\n\n"
+        "Mentioning tools in passing or suggesting future actions is NOT fabrication.\n\n"
+        "Reply with exactly one word: PASS or FAIL\n"
+        "If FAIL, add a colon and short reason. Example: FAIL: claims feature "
+        "was queued but add_future_feature was never called"
+    )
+
+    def after_invoke(self, ctx: InvocationContext) -> None:
+        if ctx.source not in self._ACTIVE_SOURCES:
+            log.debug("ResponseIntegrity: skipped (source=%s)", ctx.source)
+            return
+        if not ctx.result_text or len(ctx.result_text.strip()) < 30:
+            log.debug("ResponseIntegrity: skipped (short/empty result)")
+            return
+        if not ctx.tools_used:
+            log.debug("ResponseIntegrity: skipped (no tools used)")
+            return
+        engine = ctx.engine
+        if not engine:
+            log.debug("ResponseIntegrity: skipped (no engine)")
+            return
+
+        tools_used_str = ", ".join(sorted(set(ctx.tools_used))) or "(none)"
+        log.info(
+            "ResponseIntegrity: validating response (tools_used=[%s], response_len=%d)",
+            tools_used_str, len(ctx.result_text),
+        )
+
+        validator_input = (
+            f"## Tools actually called\n[{tools_used_str}]\n\n"
+            f"## Assistant response to validate\n{ctx.result_text[:3000]}"
+        )
+
+        verdict = None
+        for _attempt in range(2):
+            try:
+                raw = engine.single_shot(
+                    system_prompt=self._VALIDATOR_PROMPT,
+                    user_message=validator_input,
+                    temperature=0.1 + _attempt * 0.2,
+                    max_tokens=256,
+                )
+                if raw and raw.strip():
+                    verdict = raw.strip()
+                    break
+                log.info(
+                    "ResponseIntegrity: validator attempt %d returned empty",
+                    _attempt + 1,
+                )
+            except Exception as exc:
+                log.warning(
+                    "ResponseIntegrityMiddleware: validator attempt %d failed: %s",
+                    _attempt + 1, exc,
+                )
+
+        if not verdict:
+            log.warning(
+                "ResponseIntegrity: validator returned no verdict after retries — "
+                "cannot validate, proceeding without check"
+            )
+            return
+
+        log.info("ResponseIntegrity: verdict=%s", verdict[:200])
+
+        if verdict.upper().startswith("PASS"):
+            return
+
+        if not verdict.upper().startswith("FAIL"):
+            log.info("ResponseIntegrity: unrecognized verdict format — skipping")
+            return
+
+        explanation = verdict[5:].strip().lstrip(":").strip()
+        log.warning(
+            "ResponseIntegrity FAIL — tools_used=[%s] explanation=%s",
+            tools_used_str, explanation,
+        )
+
+        for attempt in range(self.MAX_RETRIES):
+            cancelled = ctx.cancel_check() if ctx.cancel_check else False
+            if cancelled:
+                break
+
+            correction_msg = (
+                f"INTEGRITY VIOLATION (detected by automated audit):\n"
+                f"{explanation}\n\n"
+                f"Tools you actually called this session: [{tools_used_str}].\n"
+                f"Your previous response claimed to have performed an action that "
+                f"was never executed. You MUST either:\n"
+                f"1. Actually call the missing tool NOW to complete the action, OR\n"
+                f"2. Respond honestly — tell the user what you actually did and "
+                f"what still needs to be done.\n"
+                f"Do NOT repeat the false claim."
+            )
+
+            retry_history = list(ctx.history or [])
+            retry_history.append({"role": "user", "content": ctx.user_message})
+            retry_history.append({"role": "assistant", "content": ctx.result_text})
+
+            if ctx.source == "chat" and "session" in ctx.meta:
+                session = ctx.meta["session"]
+                if hasattr(session, "token_chunks"):
+                    session.token_chunks.clear()
+
+            from ghost_tools import set_shell_caller_context
+            set_shell_caller_context(ctx.caller_context)
+            try:
+                retry_result = engine.run(
+                    system_prompt=ctx.system_prompt,
+                    user_message=correction_msg,
+                    tool_registry=ctx.tool_registry,
+                    max_steps=ctx.max_steps,
+                    max_tokens=ctx.max_tokens,
+                    temperature=ctx.temperature,
+                    force_tool=ctx.force_tool,
+                    on_step=ctx.on_step,
+                    history=retry_history,
+                    cancel_check=ctx.cancel_check,
+                    images=ctx.images,
+                    image_b64=ctx.image_b64,
+                    enable_reasoning=ctx.enable_reasoning,
+                    model_override=ctx.model_override,
+                    hook_runner=(ctx.daemon.hooks if ctx.daemon else None),
+                    tool_intent_security=getattr(
+                        ctx.daemon, "tool_intent_security", None),
+                    tool_event_bus=getattr(
+                        ctx.daemon, "tool_event_bus", None),
+                    on_token=ctx.on_token,
+                )
+                if retry_result:
+                    ctx.result = retry_result
+                    ctx.result_text = retry_result.text or ""
+                    new_tools = [
+                        tc["tool"]
+                        for tc in (retry_result.tool_calls or [])
+                    ]
+                    ctx.tools_used = ctx.tools_used + new_tools
+                    ctx.tokens_used += retry_result.total_tokens or 0
+            except Exception as exc:
+                log.warning(
+                    "ResponseIntegrity retry %d failed: %s",
+                    attempt + 1, exc,
+                )
+                break
+            finally:
+                set_shell_caller_context("autonomous")
+
+
 # ===========================================================================
 # FACTORY — builds the default chain with all middlewares
 # ===========================================================================
@@ -1019,7 +1192,8 @@ def build_default_chain() -> MiddlewareChain:
     7.  ContextSummarizationMiddleware    — proactive context compaction
     8.  SubagentLimitMiddleware  — cap parallel delegate_task calls
     9.  GiveUpDetectionMiddleware         — retry on give-up responses
-    10. BrowserCleanupMiddleware — cleanup browser after task
+    10. ResponseIntegrityMiddleware       — catch fabricated action claims
+    11. BrowserCleanupMiddleware — cleanup browser after task
     """
     return MiddlewareChain([
         IdentityMiddleware(),
@@ -1031,5 +1205,6 @@ def build_default_chain() -> MiddlewareChain:
         ContextSummarizationMiddleware(),
         SubagentLimitMiddleware(),
         GiveUpDetectionMiddleware(),
+        ResponseIntegrityMiddleware(),
         BrowserCleanupMiddleware(),
     ])

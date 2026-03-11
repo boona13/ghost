@@ -79,7 +79,6 @@ _DEFERRAL_RE = _re.compile(
 )
 _MIN_TOOLS_BEFORE_ACCEPT_DEFERRAL = 4
 
-
 # ═════════════════════════════════════════════════════════════════════
 #  MODEL FALLBACK CHAIN
 # ═════════════════════════════════════════════════════════════════════
@@ -2905,6 +2904,7 @@ class ToolLoopEngine:
                             "content": pushback,
                         })
                         continue
+
                     final_text = text_content
                     exit_reason = "first_text_response"
                     _debug_logger.step_text_response(step, text_content, "accepted_first_turn")
@@ -2960,6 +2960,7 @@ class ToolLoopEngine:
                             _debug_logger.step_text_response(step, text_content, "pushback_deferral")
                             messages.append({"role": "user", "content": pushback})
                             continue
+
                         final_text = text_content
                         exit_reason = "text_after_tools"
                         _debug_logger.step_text_response(step, text_content, "accepted_after_tools")
@@ -3005,6 +3006,7 @@ class ToolLoopEngine:
                         "content": pushback,
                     })
                     continue
+
                 final_text = text_content
                 exit_reason = "text_at_end"
                 _debug_logger.step_text_response(step, text_content, "accepted_at_end")
