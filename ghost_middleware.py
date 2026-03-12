@@ -633,6 +633,25 @@ class GiveUpDetectionMiddleware(Middleware):
 
     MAX_RETRIES = 2
 
+    _META_RESPONSE_PATTERNS = [
+        re.compile(r"escalation\s+(path|ladder|directive)", re.IGNORECASE),
+        re.compile(r"(got|received)\s+(the\s+)?correction", re.IGNORECASE),
+        re.compile(r"follow\s+that\s+(exact\s+)?programmatic", re.IGNORECASE),
+        re.compile(r"programmatic\s+escalation", re.IGNORECASE),
+        re.compile(r"follow\s+the\s+escalation", re.IGNORECASE),
+    ]
+
+    @classmethod
+    def _is_meta_response(cls, text: str) -> bool:
+        """Detect if a response talks about internal process instead of answering the user."""
+        if not text or len(text.strip()) < 20:
+            return False
+        for pattern in cls._META_RESPONSE_PATTERNS:
+            if pattern.search(text):
+                log.warning("Meta-response detected (matched: %s)", pattern.pattern)
+                return True
+        return False
+
     def after_invoke(self, ctx: InvocationContext) -> None:
         if ctx.source in ("cron", "monitor"):
             return
@@ -667,12 +686,21 @@ class GiveUpDetectionMiddleware(Middleware):
                 if hasattr(session, "token_chunks"):
                     session.token_chunks.clear()
 
+            escalation_msg = (
+                _ESCALATION_COACHING + "\n\n"
+                "The user's original request you MUST fulfill:\n"
+                + ctx.user_message + "\n\n"
+                "Your response MUST directly answer the request above. "
+                "Do NOT describe your approach, plans, or internal process — "
+                "execute the task and return concrete results to the user."
+            )
+
             from ghost_tools import set_shell_caller_context
             set_shell_caller_context(ctx.caller_context)
             try:
                 retry_result = ctx.engine.run(
                     system_prompt=ctx.system_prompt,
-                    user_message=_ESCALATION_COACHING,
+                    user_message=escalation_msg,
                     tool_registry=ctx.tool_registry,
                     max_steps=ctx.max_steps,
                     max_tokens=ctx.max_tokens,
@@ -695,8 +723,16 @@ class GiveUpDetectionMiddleware(Middleware):
                     on_token=ctx.on_token,
                 )
                 if retry_result:
+                    retry_text = retry_result.text or ""
+                    if self._is_meta_response(retry_text):
+                        log.warning(
+                            "Escalation attempt %d produced meta-response, "
+                            "keeping original response",
+                            attempt + 1,
+                        )
+                        break
                     ctx.result = retry_result
-                    ctx.result_text = retry_result.text or ""
+                    ctx.result_text = retry_text
                     new_tools = [
                         tc["tool"]
                         for tc in (retry_result.tool_calls or [])
