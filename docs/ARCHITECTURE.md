@@ -177,7 +177,7 @@ Total: **60+ tools** active simultaneously depending on configuration.
 | OpenAI Codex | ChatGPT subscription via OAuth | No extra cost |
 | Anthropic | Direct API | claude-opus-4-6, claude-sonnet-4-6 |
 | Google Gemini | Direct API (free tier) | gemini-2.5-pro, gemini-2.5-flash |
-| xAI | Direct API | grok-4, grok-3 |
+| DeepSeek | Direct API | deepseek-chat, deepseek-reasoner |
 | Ollama | Local models | llama3, mistral, etc. |
 
 Features: jittered exponential backoff, 5-minute cooldown with periodic probing, automatic API format adaptation (OpenAI ↔ Anthropic Messages ↔ Codex Responses), OAuth auto-refresh.

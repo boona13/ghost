@@ -123,7 +123,6 @@ The dispatcher checks all configured providers and picks the cheapest route to t
 | `OPENAI_API_KEY` | OpenAI direct API key. |
 | `ANTHROPIC_API_KEY` | Anthropic direct API key. |
 | `GOOGLE_API_KEY` | Google Gemini API key. |
-| `XAI_API_KEY` | xAI/Grok API key. |
 | `DEEPSEEK_API_KEY` | DeepSeek API key. |
 | `ELEVENLABS_API_KEY` | ElevenLabs TTS API key. |
 

@@ -57,7 +57,7 @@ Multi-provider LLM management with fallback chain visualization and coding model
   - Min SWE-bench score threshold
   - SWE-bench Verified Leaderboard table showing all benchmark models with scores, cost, cheapest provider route, and availability
   - Re-select button to force refresh
-- **Provider cards** — Configure API keys/OAuth for each provider (OpenRouter, OpenAI, Codex, Anthropic, Gemini, xAI, Ollama)
+- **Provider cards** — Configure API keys/OAuth for each provider (OpenRouter, OpenAI, Codex, Anthropic, Google, DeepSeek, Ollama)
 - **Fallback chain** — Visual representation of the provider fallback order
 - **Model browser** — Search 200+ models by name, filter by provider and tier
 - **Model cards** — Name, provider, context length, pricing per million tokens

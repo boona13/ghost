@@ -332,7 +332,7 @@ The dispatcher scores models by **SWE-bench Verified** (the industry standard fo
 | `medium` | GPT-5.2 (80.0%) or MiniMax M2.5 | ≤$2/MTok |
 | `high` | Claude Opus 4.6 (80.8% — best) | ≤$6/MTok |
 
-**Multi-provider routing** — The dispatcher checks all 8 providers and picks the cheapest path. A user with a ChatGPT Plus subscription gets GPT-5.3-Codex at $0 through OAuth. A user with an Anthropic key gets Claude Opus at $3/MTok instead of $5 through OpenRouter.
+**Multi-provider routing** — The dispatcher checks all 7 providers and picks the cheapest path. A user with a ChatGPT Plus subscription gets GPT-5.3-Codex at $0 through OAuth. A user with an Anthropic key gets Claude Opus at $3/MTok instead of $5 through OpenRouter.
 
 **Self-updating benchmarks** — A weekly cron job searches for the latest SWE-bench leaderboard and updates the benchmark data automatically. When a new model drops that's better, Ghost discovers and adopts it.
 

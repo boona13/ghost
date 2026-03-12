@@ -113,8 +113,7 @@ ghost_canvas.py                 — Visual output panel for HTML/CSS/JS demos an
 
 # Webhooks & Integrations
 ghost_webhooks.py               — Webhook triggers for external service integration
-ghost_integrations.py           — Third-party service integrations framework
-ghost_grok_api.py               — xAI Grok API integration
+ghost_integrations.py           — Third-party service integrations (Google Workspace, Grok image/video)
 ghost_x_tracker.py              — X/Twitter interaction tracking (anti-duplication)
 ghost_mcp.py                    — MCP client for external tool server integration
 
@@ -393,7 +392,7 @@ Ghost supports **6 LLM providers** with automatic fallback across providers and 
 - **OpenAI Codex** — ChatGPT subscription via OAuth PKCE (no extra cost)
 - **Anthropic** — Direct Claude API (claude-opus-4-6, claude-sonnet-4-6)
 - **Google Gemini** — Direct API with free tier (gemini-2.5-pro)
-- **xAI** — Direct Grok API access (grok-4, grok-3)
+- **DeepSeek** — Direct API (deepseek-chat, deepseek-reasoner)
 - **Ollama** — Local models, completely free (llama3, mistral)
 
 **Fallback Chain** (provider-aware):
@@ -403,13 +402,13 @@ The chain tries (provider, model) pairs in order. Only providers with valid cred
 3. OpenAI Codex (if OAuth configured)
 4. Anthropic direct (if key configured)
 5. Google Gemini (if key configured)
-6. xAI direct (if key configured)
+6. DeepSeek direct (if key configured)
 7. Ollama local (if running)
 
 **Behavior:**
 - Each candidate gets up to 3 attempts (with jittered exponential backoff).
 - Failed models enter a **5-minute cooldown** with periodic **probing** (every 60s).
-- API format adapters automatically translate between OpenAI, Anthropic Messages, and Codex Responses formats (xAI uses OpenAI-compatible format).
+- API format adapters automatically translate between OpenAI, Anthropic Messages, and Codex Responses formats.
 - OAuth tokens are automatically refreshed 5 minutes before expiry.
 - All retries use **jittered delays** (±30% randomness) to prevent thundering herd.
 - Users configure providers via the setup wizard or Models page in the dashboard.
