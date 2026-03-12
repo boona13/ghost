@@ -186,42 +186,34 @@ google_calendar(action="get_event", event_id="event_id_here")
 
 ### Creating Events
 
-**Timed event:**
+**Quick add (recommended for most cases):**
+```python
+google_calendar(action="quick_add", text="Lunch with Bob tomorrow at noon")
+```
+
+**Create a structured event (timed):**
 ```python
 google_calendar(
     action="create_event",
     summary="Team Standup",
-    start={"dateTime": "2026-03-01T10:00:00", "timeZone": "America/New_York"},
-    end={"dateTime": "2026-03-01T10:30:00", "timeZone": "America/New_York"},
+    start={"dateTime": "2026-03-12T10:00:00", "timeZone": "America/New_York"},
+    end={"dateTime": "2026-03-12T10:30:00", "timeZone": "America/New_York"},
     description="Weekly sync",
     location="Zoom"
 )
 ```
 
-**All-day event:**
+**Create on a specific calendar:**
 ```python
 google_calendar(
     action="create_event",
-    summary="Project Deadline",
-    start={"date": "2026-03-15"},
-    end={"date": "2026-03-16"}
-)
-```
-
-**Event with attendees:**
-```python
-google_calendar(
-    action="create_event",
+    calendar_id="primary",
     summary="Design Review",
-    start={"dateTime": "2026-03-02T14:00:00", "timeZone": "America/New_York"},
-    end={"dateTime": "2026-03-02T15:00:00", "timeZone": "America/New_York"},
-    attendees=[{"email": "designer@example.com"}, {"email": "pm@example.com"}]
+    start={"dateTime": "2026-03-13T14:00:00", "timeZone": "America/New_York"},
+    end={"dateTime": "2026-03-13T15:00:00", "timeZone": "America/New_York"},
+    description="Review updated mocks",
+    location="Conference Room B"
 )
-```
-
-**Quick add (natural language):**
-```python
-google_calendar(action="quick_add", text="Lunch with Bob tomorrow at noon")
 ```
 
 ### Managing Events
@@ -244,10 +236,10 @@ google_calendar(action="delete_event", event_id="event_id_here")
 ### Calendar Best Practices
 
 - **Use the user's timezone** (check USER.md for timezone preference)
-- **Always confirm before creating events with attendees** — sends invites
-- **Use quick_add for simple events** — faster and more natural
-- **Check for conflicts** before scheduling — list events for that time first
-- **Include timezone in all dateTime values** to avoid confusion
+- **Prefer `quick_add` for date/time-specific requests** (natural language parsing is robust)
+- **Use ISO 8601 for `time_min` / `time_max` in list queries**
+- **If attendees/invites are required, confirm capability first** (do not assume unsupported fields)
+- **Check for conflicts** before scheduling — list events for that time window first
 
 ## Google Drive
 
@@ -462,8 +454,14 @@ google_sheets(action="add_sheet", spreadsheet_id="sheet_id", title="Q2 Data")
 
 ### Morning Briefing
 ```python
-# 1. Check today's calendar
-events = google_calendar(action="list_events", time_min="today_start", time_max="today_end")
+# 1. Check today's calendar window (ISO timestamps)
+events = google_calendar(
+    action="list_events",
+    time_min="2026-03-12T00:00:00-05:00",
+    time_max="2026-03-12T23:59:59-05:00",
+    order_by="startTime",
+    max_results=20
+)
 
 # 2. Check unread emails
 emails = google_gmail(action="list_messages", label_ids=["INBOX", "UNREAD"], max_results=5)
@@ -489,14 +487,14 @@ for msg in unread:
 # 1. Get event details
 event = google_calendar(action="get_event", event_id="event_id")
 
-# 2. Search for related emails
-emails = google_gmail(action="search", query=f"subject:{event_topic} newer_than:30d")
+# 2. Search for related emails (replace with a concrete topic string)
+emails = google_gmail(action="search", query="subject:Design Review newer_than:30d")
 
 # 3. Find related Drive files
-files = google_drive(action="search", query=event_topic)
+files = google_drive(action="search", query="Design Review")
 
 # 4. Create prep doc
-google_docs(action="create_document", title=f"Prep: {event_summary}")
+google_docs(action="create_document", title="Prep: Design Review")
 ```
 
 ### Data Collection to Sheets
@@ -530,3 +528,5 @@ google_sheets(action="append_values", spreadsheet_id=sheet_id, range="Sheet1!A:D
 - Drive file IDs can be extracted from Google URLs: `docs.google.com/document/d/{ID}/edit`
 - Sheets ranges use A1 notation: `Sheet1!A1:C10`
 - Calendar `quick_add` is the fastest way to create simple events
+- Calendar examples in this skill intentionally use currently supported `google_calendar` parameters.
+- If calendar tool schema expands, update examples in this file to match the tool definition.
