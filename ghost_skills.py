@@ -93,8 +93,8 @@ def validate_skill_model(model: str | None) -> Tuple[bool, str]:
     
     # List of known providers
     known_providers = {
-        "openrouter", "openai", "anthropic", "google", 
-        "xai", "ollama", "openai-codex", "deepseek"
+        "openrouter", "openai", "anthropic", "google",
+        "ollama", "openai-codex", "deepseek"
     }
     
     if provider not in known_providers:

@@ -1970,7 +1970,7 @@ class ToolLoopEngine:
             _KNOWN_PROVIDERS = frozenset({
                 "openrouter", "openai", "anthropic",
                 "google", "ollama", "openai-codex",
-                "deepseek", "xai",
+                "deepseek",
             })
             # Parse "provider:model" (dispatch format) or "provider/model" (OpenRouter format)
             for sep in (":", "/"):

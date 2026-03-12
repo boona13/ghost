@@ -30,8 +30,6 @@ BUDGET_PRESETS: dict[str, float] = {
     "high": 6.00,
 }
 
-SAFE_FALLBACK = "anthropic/claude-sonnet-4.6"
-
 _SEED_BENCHMARKS = {
     "source": "swe-bench-verified",
     "updated": "2026-03-10",
@@ -97,15 +95,14 @@ _SEED_BENCHMARKS = {
                 "openrouter": {"id": "moonshotai/kimi-k2.5", "input": 0.60, "output": 2.40},
             },
         },
-        "deepseek-r1": {
-            "swe_bench": 75.0,
-            "routes": {
-                "deepseek": {"id": "deepseek-reasoner", "input": 0.55, "output": 2.19},
-                "openrouter": {"id": "deepseek/deepseek-r1", "input": 0.55, "output": 2.19},
-            },
-        },
     },
 }
+
+# Providers that must never handle Ghost coding tasks (evolve, feature
+# implementation, autonomous tool loops).  Ollama local models lack the
+# capacity for sustained multi-step coding, and DeepSeek's reasoning model
+# is unreliable with complex tool-calling chains.
+_CODING_EXCLUDED_PROVIDERS = frozenset({"ollama", "deepseek"})
 
 
 def _seed_benchmarks_if_missing():
@@ -120,7 +117,12 @@ def _seed_benchmarks_if_missing():
 
 
 def _get_available_providers(cfg: dict, auth_store=None) -> set[str]:
-    """Return set of provider IDs that have valid credentials configured."""
+    """Return set of provider IDs that have valid credentials configured.
+
+    For no-auth providers (e.g. Ollama), only include them if the user
+    explicitly configured them during setup (has a profile in auth store)
+    to avoid phantom availability from uninstalled local runtimes.
+    """
     available = set()
     try:
         from ghost_providers import PROVIDERS
@@ -129,7 +131,8 @@ def _get_available_providers(cfg: dict, auth_store=None) -> set[str]:
 
     for pid, prov in PROVIDERS.items():
         if prov.auth_type == "none":
-            available.add(pid)
+            if auth_store and auth_store.get_provider_profile(pid):
+                available.add(pid)
             continue
         if prov.auth_type == "oauth":
             if auth_store:
@@ -214,16 +217,58 @@ class ModelDispatcher:
             self._write_cache(task_type, result)
         return result
 
+    def _primary_provider_fallback(self, available: set[str]) -> str | None:
+        """Return the primary provider's default model as a dispatch-format string."""
+        try:
+            from ghost_providers import get_provider
+        except ImportError:
+            return None
+
+        primary = self._cfg.get("primary_provider", "openrouter")
+        if primary in available:
+            prov = get_provider(primary)
+            if prov:
+                if primary == "openrouter":
+                    return prov.default_model
+                return f"{primary}:{prov.default_model}"
+
+        for pid in available:
+            if pid == "ollama":
+                continue
+            prov = get_provider(pid)
+            if prov:
+                if pid == "openrouter":
+                    return prov.default_model
+                return f"{pid}:{prov.default_model}"
+
+        if "ollama" in available:
+            prov = get_provider("ollama")
+            if prov:
+                return f"ollama:{prov.default_model}"
+
+        return None
+
     def _compute_selection(self, task_type: str) -> str | None:
         benchmarks = self._load_benchmarks()
-        if not benchmarks:
-            log.warning("[model_dispatch] No benchmark data, using fallback")
-            return SAFE_FALLBACK
-
         available = _get_available_providers(self._cfg, self._auth_store)
         if not available:
             log.warning("[model_dispatch] No providers available")
             return None
+
+        coding_available = available - _CODING_EXCLUDED_PROVIDERS
+        fallback = self._primary_provider_fallback(coding_available or available)
+
+        if not coding_available:
+            log.warning(
+                "[model_dispatch] No coding-capable providers available "
+                "(configured: %s, excluded: %s)",
+                available, available & _CODING_EXCLUDED_PROVIDERS,
+            )
+            return fallback
+
+        if not benchmarks:
+            log.warning("[model_dispatch] No benchmark data, using primary provider fallback")
+            return fallback
 
         max_cost, strategy = _resolve_budget(self._cfg)
         min_score = self._cfg.get("min_swe_bench_score", 78.0)
@@ -236,7 +281,7 @@ class ModelDispatcher:
             best_route = None
             best_cost = float("inf")
             for provider_id, route in routes.items():
-                if provider_id not in available:
+                if provider_id not in coding_available:
                     continue
                 cost = route.get("input", 999)
                 if cost <= max_cost and cost < best_cost:
@@ -259,15 +304,18 @@ class ModelDispatcher:
                 "provider": provider_id,
                 "score": score,
                 "cost": best_cost,
-                "value": score / max(best_cost, 0.001),
+                "value": score / max(best_cost, 0.10),
             })
 
         if not candidates:
             if max_cost == 0:
                 log.info("[model_dispatch] No free coding models available — returning None")
                 return None
-            log.warning("[model_dispatch] No models within budget ($%.2f/MTok)", max_cost)
-            return SAFE_FALLBACK
+            log.warning(
+                "[model_dispatch] No benchmarked models for available providers; "
+                "falling back to primary provider default",
+            )
+            return fallback
 
         above_min = [c for c in candidates if c["score"] >= min_score]
         pool = above_min if above_min else candidates

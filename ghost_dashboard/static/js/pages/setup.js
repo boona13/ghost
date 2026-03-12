@@ -37,13 +37,6 @@ const PROVIDER_META = {
     keyPrefix: 'AIza', keyPlaceholder: 'AIza...',
     keyHelp: 'Get yours at <a href="https://aistudio.google.com/apikey" target="_blank" class="text-ghost-400 hover:text-ghost-300 underline">aistudio.google.com</a>',
   },
-  xai: {
-    name: 'xAI',
-    icon: '🚀', badge: t('setup.badgePaid'), badgeColor: 'blue',
-    desc: t('setup.descXai'),
-    keyPrefix: 'xai-', keyPlaceholder: 'xai-... or xai-api-key-...',
-    keyHelp: 'Get yours at <a href="https://console.x.ai/" target="_blank" class="text-ghost-400 hover:text-ghost-300 underline">console.x.ai</a>',
-  },
   ollama: {
     name: 'Ollama',
     icon: '🦙', badge: t('setup.badgeFreeLocal'), badgeColor: 'green',
@@ -442,7 +435,10 @@ function renderStep2(container, api, u) {
       btn.disabled = true;
 
       try {
-        await api.post('/api/setup/oauth/codex/start');
+        const resp = await api.post('/api/setup/oauth/codex/start');
+        if (resp.auth_url) {
+          window.open(resp.auth_url, '_blank', 'width=600,height=700');
+        }
 
         const poll = setInterval(async () => {
           try {
@@ -541,16 +537,9 @@ function renderStep3(container, api, u) {
     const primaryRadio = content.querySelector('input[name="primary-provider"]:checked');
     const primary = primaryRadio?.value || selectedProviders[0] || 'openrouter';
 
-    await api.put('/api/primary-provider', { provider: primary });
-
-    if (selectedProviders.includes('openrouter')) {
-      const key = document.querySelector('.provider-key[data-provider="openrouter"]')?.value?.trim();
-      if (key) {
-        await api.post('/api/setup/complete', { api_key: key });
-      }
-    }
-
     await api.put('/api/setup/provider-order', { order: selectedProviders });
+    await api.put('/api/primary-provider', { provider: primary });
+    await api.post('/api/setup/complete', { primary_provider: primary });
 
     updateStepIndicator(4);
     window.location.href = window.location.pathname + '#chat';

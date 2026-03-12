@@ -1911,7 +1911,7 @@ class GhostDaemon:
             return prov.default_model
 
         ALL_PROVIDERS = ["openrouter", "openai", "openai-codex",
-                         "anthropic", "google", "xai", "deepseek", "ollama"]
+                         "anthropic", "google", "deepseek", "ollama"]
 
         explicit_order = self.auth_store.provider_order or []
         provider_order = list(explicit_order)

@@ -22,7 +22,7 @@ import os
 import secrets
 import threading
 import time
-import webbrowser
+
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlencode, urlparse, parse_qs
 
@@ -165,8 +165,6 @@ def start_codex_oauth(on_complete=None) -> dict:
 
     thread = threading.Thread(target=_run_server, daemon=True)
     thread.start()
-
-    webbrowser.open(auth_url)
 
     return {
         "auth_url": auth_url,

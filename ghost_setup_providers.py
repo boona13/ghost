@@ -42,12 +42,6 @@ _PROVIDER_UI_META: dict[str, dict[str, Any]] = {
         "badgeColor": "green",
         "keyPlaceholder": "AIza...",
     },
-    "xai": {
-        "icon": "🚀",
-        "badge": "Paid",
-        "badgeColor": "blue",
-        "keyPlaceholder": "xai-...",
-    },
     "deepseek": {
         "icon": "🔍",
         "badge": "Paid",

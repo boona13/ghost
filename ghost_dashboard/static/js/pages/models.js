@@ -579,7 +579,7 @@ async function loadProviderModels(providerId, current, container, u, api) {
           const poll = setInterval(async () => {
             attempts++;
             const status = await api.get('/api/setup/oauth/codex/status');
-            if (status.authenticated) {
+            if (status.configured) {
               clearInterval(poll);
               u.toast(t('models.codexConnected'));
               render(container);
@@ -685,7 +685,6 @@ function _renderModelPage(models, current, container, u, api) {
   const sourceColors = {
     openrouter: 'purple', openai: 'blue', 'openai-codex': 'green',
     anthropic: 'yellow', google: 'blue', deepseek: 'blue', ollama: 'green',
-    xai: 'red',
   };
 
   grid.innerHTML = visible.map(m => {

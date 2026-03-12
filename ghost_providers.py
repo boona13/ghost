@@ -120,21 +120,6 @@ PROVIDERS: dict[str, ProviderConfig] = {
         ],
         description="Google AI API with free tier",
     ),
-    "xai": ProviderConfig(
-        id="xai",
-        name="xAI (Grok)",
-        base_url="https://api.x.ai/v1/chat/completions",
-        api_format="openai",
-        auth_type="api_key",
-        default_model="grok-4-0709",
-        env_key="XAI_API_KEY",
-        models=[
-            "grok-4-0709",
-            "grok-3-mini",
-            "grok-3-fast",
-        ],
-        description="Direct xAI API access for Grok models",
-    ),
     "ollama": ProviderConfig(
         id="ollama",
         name="Ollama",
@@ -275,7 +260,6 @@ def validate_model_for_provider(provider_id: str, model: str) -> tuple[bool, str
             "openai-codex": {"openai-codex", "codex", "openai"},
             "anthropic": {"anthropic", "claude"},
             "google": {"google", "gemini"},
-            "xai": {"xai", "grok"},
             "ollama": {"ollama"},
             "deepseek": {"deepseek"},
         }

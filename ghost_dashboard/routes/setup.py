@@ -148,22 +148,48 @@ def codex_oauth_status():
 
 @bp.route("/api/setup/complete", methods=["POST"])
 def complete_setup():
-    """Complete setup — supports both legacy single-key and multi-provider."""
+    """Complete setup — supports both legacy single-key and multi-provider.
+
+    Always called as the final setup step.  Updates config to reflect
+    the chosen primary provider so Ghost is immediately usable without
+    further configuration.
+    """
     data = request.get_json(silent=True) or {}
     api_key = data.get("api_key", "").strip()
+    primary_provider = data.get("primary_provider", "").strip()
+
+    cfg = load_config()
 
     if api_key:
-        cfg = load_config()
         cfg["api_key"] = api_key
-        if data.get("model"):
-            cfg["model"] = data["model"]
-        save_config(cfg)
         os.environ["OPENROUTER_API_KEY"] = api_key
 
         from ghost_auth_profiles import get_auth_store
         get_auth_store().set_api_key("openrouter", api_key)
 
         _hot_swap_key(api_key)
+    elif cfg.get("api_key") == "__SETUP_PENDING__":
+        cfg["api_key"] = ""
+
+    if primary_provider:
+        from ghost_providers import get_provider
+        prov = get_provider(primary_provider)
+        if prov:
+            cfg["primary_provider"] = primary_provider
+            if primary_provider != "openrouter":
+                cfg["model"] = prov.default_model
+            elif not data.get("model"):
+                cfg["model"] = cfg.get("model", DEFAULT_CONFIG["model"])
+
+    if data.get("model"):
+        cfg["model"] = data["model"]
+
+    save_config(cfg)
+
+    from ghost_dashboard import get_daemon
+    daemon = get_daemon()
+    if daemon:
+        daemon.cfg.update({k: cfg[k] for k in ("model", "primary_provider", "api_key") if k in cfg})
 
     return jsonify({"ok": True, "restarting": False})
 
