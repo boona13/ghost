@@ -32,7 +32,6 @@ def register_routes(app: Flask):
     from .projects import bp as projects_bp
     from .prs import bp as prs_bp
     from .doctor import bp as doctor_bp
-    from .langfuse import bp as langfuse_bp
     from .nodes import bp as nodes_bp
     from .media import bp as media_bp
     from .audit import bp as audit_bp
@@ -45,7 +44,7 @@ def register_routes(app: Flask):
                chat_bp, integrations_bp, autonomy_bp, setup_bp,
                security_bp, console_bp, channels_bp, future_features_bp,
                voice_bp, canvas_bp, usage_bp, webhooks_bp, projects_bp,
-               prs_bp, doctor_bp, langfuse_bp,
+               prs_bp, doctor_bp,
                nodes_bp, media_bp, audit_bp, tools_bp,
                structured_memory_bp, subagents_bp]:
         app.register_blueprint(bp)

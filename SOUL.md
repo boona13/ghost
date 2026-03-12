@@ -142,9 +142,6 @@ ghost_pr.py                     — Internal pull-request and review workflow ma
 ghost_resource_manager.py       — Runtime resource tracking and allocation safeguards
 ghost_platform.py               — Cross-platform process and OS utility helpers
 
-# Observability
-ghost_langfuse.py               — Langfuse tracing, telemetry, and observability tools
-
 # Generation Control
 ghost_interrupt.py              — Generation interrupt and prompt injection
 

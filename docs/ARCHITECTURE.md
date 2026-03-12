@@ -299,7 +299,7 @@ ghost_dashboard/
     integrations.py, autonomy.py, setup.py, security.py,
     console.py, channels.py, future_features.py,
     voice.py, canvas.py, usage.py, webhooks.py, projects.py,
-    prs.py, doctor.py, langfuse.py, nodes.py,
+    prs.py, doctor.py, nodes.py,
     media.py, audit.py, tools.py
   templates/
     index.html             SPA shell (Tailwind CDN)
@@ -431,7 +431,6 @@ See [DASHBOARD.md](DASHBOARD.md) for the full page and API reference.
 | `ghost_console.py` | Console logging and SSE event bus |
 | `ghost_usage.py` | Usage tracking and statistics |
 | `ghost_uptime.py` | Uptime monitoring |
-| `ghost_langfuse.py` | Langfuse tracing and observability |
 | `ghost_query_expansion.py` | Query expansion for search quality |
 | `ghost_subagents.py` | Subagent task delegation |
 | `ghost_resource_manager.py` | Runtime resource tracking |

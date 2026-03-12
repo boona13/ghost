@@ -23,14 +23,13 @@ import { render as future_features } from './pages/future_features.js';
 import { render as webhooks } from './pages/webhooks.js';
 import { render as projects } from './pages/projects.js';
 import { render as prs } from './pages/prs.js';
-import { render as langfuse } from './pages/langfuse.js';
 import { render as nodes } from './pages/nodes.js';
 import { render as gallery } from './pages/gallery.js';
 import { render as audit } from './pages/audit.js';
 import { render as evolve_theater } from './pages/evolve_theater.js';
 import { render as tools } from './pages/tools.js';
 import { render as structured_memory } from './pages/structured_memory.js';
-const pages = { overview, chat, models, config, soul, user, skills, cron, memory, feed, evolve, integrations, autonomy, setup, security, console: console_page, channels, future_features, webhooks, projects, prs, langfuse, nodes, gallery, audit, evolve_theater, tools, structured_memory };
+const pages = { overview, chat, models, config, soul, user, skills, cron, memory, feed, evolve, integrations, autonomy, setup, security, console: console_page, channels, future_features, webhooks, projects, prs, nodes, gallery, audit, evolve_theater, tools, structured_memory };
 const container = document.getElementById('page-content');
 let currentPage = null;
 let pollTimer = null;
@@ -156,7 +155,6 @@ const CMD_PAGES = [
   { page: 'channels', label: 'Channels', section: 'Connections' },
   { page: 'webhooks', label: 'Webhooks', section: 'Connections' },
   { page: 'integrations', label: 'Integrations', section: 'Connections' },
-  { page: 'langfuse', label: 'Observability', section: 'Connections' },
   { page: 'config', label: 'Configuration', section: 'System' },
   { page: 'cron', label: 'Cron Jobs', section: 'System' },
   { page: 'security', label: 'Security', section: 'System' },

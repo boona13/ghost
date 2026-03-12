@@ -95,7 +95,7 @@ export async function render(container) {
       <div class="stat-card">
         <h3 class="text-sm font-semibold text-white mb-3">${t('config.featureToggles')}</h3>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8">
-          ${['enable_tool_loop','enable_memory_db','enable_plugins','enable_skills','enable_system_tools','enable_browser_tools','enable_browser_use','enable_channels','enable_cron','enable_evolve','enable_future_features','enable_integrations','enable_web_search','enable_web_fetch','enable_image_gen','enable_vision','enable_tts','enable_canvas','enable_response_integrity','enable_security_audit','enable_session_memory','enable_langfuse'].map(k => toggle(k)).join('')}
+          ${['enable_tool_loop','enable_memory_db','enable_plugins','enable_skills','enable_system_tools','enable_browser_tools','enable_browser_use','enable_channels','enable_cron','enable_evolve','enable_future_features','enable_integrations','enable_web_search','enable_web_fetch','enable_image_gen','enable_vision','enable_tts','enable_canvas','enable_response_integrity','enable_security_audit','enable_session_memory'].map(k => toggle(k)).join('')}
         </div>
       </div>
 
@@ -115,31 +115,6 @@ export async function render(container) {
           ${numInput('session_max_age_days', t('config.maxAgeDays'), 1, 365, 1)}
           ${numInput('session_disk_budget_mb', t('config.diskBudgetMb'), 50, 10000, 50)}
         </div>
-      </div>
-
-      <!-- Langfuse Observability -->
-      <div class="stat-card mt-4">
-        <h3 class="text-sm font-semibold text-white mb-1">${t('config.langfuseObs')}</h3>
-        <div class="text-[10px] text-zinc-600 mb-3">${t('config.langfuseObsDesc')}</div>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label class="form-label">${t('config.hostUrl')}</label>
-            <input type="text" class="form-input w-full text-xs font-mono" data-key="langfuse_host" value="${u.escapeHtml(cfg.langfuse_host || 'https://cloud.langfuse.com')}" placeholder="https://cloud.langfuse.com">
-          </div>
-          <div>
-            <label class="form-label">${t('config.projectId')}</label>
-            <input type="text" class="form-input w-full text-xs font-mono" data-key="langfuse_project_id" value="${u.escapeHtml(cfg.langfuse_project_id || '')}" placeholder="(optional)">
-          </div>
-          <div>
-            <label class="form-label">${t('config.publicKey')}</label>
-            <input type="text" class="form-input w-full text-xs font-mono" data-key="langfuse_public_key" value="${u.escapeHtml(cfg.langfuse_public_key || '')}" placeholder="pk-lf-...">
-          </div>
-          <div>
-            <label class="form-label">${t('config.secretKey')}</label>
-            <input type="password" class="form-input w-full text-xs font-mono" data-key="langfuse_secret_key" value="${u.escapeHtml(cfg.langfuse_secret_key || '')}" placeholder="sk-lf-...">
-          </div>
-        </div>
-        <div class="text-[10px] text-zinc-500 mt-2">${t('config.langfuseKeysHint')}</div>
       </div>
 
     </div>

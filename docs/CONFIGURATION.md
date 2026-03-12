@@ -126,8 +126,6 @@ The dispatcher checks all configured providers and picks the cheapest route to t
 | `XAI_API_KEY` | xAI/Grok API key. |
 | `DEEPSEEK_API_KEY` | DeepSeek API key. |
 | `ELEVENLABS_API_KEY` | ElevenLabs TTS API key. |
-| `LANGFUSE_PUBLIC_KEY` | Langfuse observability public key. |
-| `LANGFUSE_SECRET_KEY` | Langfuse observability secret key. |
 
 ## File Locations
 

@@ -40,9 +40,6 @@ huggingface-hub>=0.23
 # Optional: browser-use agent framework
 # browser-use>=0.1
 
-# Optional: observability (Langfuse tracing)
-# langfuse>=2.0
-
 # Optional: document parsing (LlamaParse)
 # llama-cloud>=0.1
 

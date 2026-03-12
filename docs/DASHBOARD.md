@@ -190,8 +190,6 @@ Third-party service configuration.
 - **Image generation** — Provider settings
 - **Vision** — Provider configuration
 - **TTS** — Provider and voice settings
-- **Langfuse** — Observability configuration
-
 ### Security
 
 AI-driven security auditing.
@@ -249,13 +247,6 @@ Health diagnostics.
 - **System checks** — API connectivity, disk space, dependencies
 - **Repair** — Fix common issues
 - **Recommendations** — Improvement suggestions
-
-### Langfuse
-
-Observability and tracing.
-
-- **Trace viewer** — LLM call traces with token counts and latency
-- **Configuration** — Langfuse connection settings
 
 ### Usage
 
@@ -527,7 +518,6 @@ Scheduler status (running, job counts, next wake).
 | `GET /api/projects` | Project list |
 | `GET /api/media` | Media gallery |
 | `GET /api/audit` | Audit log |
-| `GET /api/langfuse` | Observability config |
 | `GET /api/voice/status` | Voice mode status |
 
 ---

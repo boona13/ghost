@@ -92,7 +92,6 @@ from ghost_structured_memory import (
     get_structured_memory_config, StructuredMemoryConfig,
     set_structured_memory_config,
 )
-from ghost_langfuse import get_langfuse_manager, build_langfuse_tools
 # from ghost_browser_use import build_browser_use_tools  # disabled — burns rate limits
 from ghost_resource_manager import ResourceManager, build_resource_manager_tools
 from ghost_node_manager import NodeManager, build_node_manager_tools
@@ -487,12 +486,6 @@ DEFAULT_CONFIG = {
     # Webhook Triggers (auto-generated on startup if empty for security)
     "webhook_secret": "",
     "webhook_max_concurrent": 3,
-    # Langfuse Observability
-    "enable_langfuse": False,
-    "langfuse_host": "https://cloud.langfuse.com",
-    "langfuse_public_key": "",
-    "langfuse_secret_key": "",
-    "langfuse_project_id": "",
     # Skill Model Aliases - configurable shortcuts for per-skill model overrides
     "skill_model_aliases": {
         "cheap": "openrouter/google/gemini-2.0-flash-001",
@@ -1662,17 +1655,6 @@ class GhostDaemon:
             print("  [structured_memory] Initialized structured memory system")
         except Exception as e:
             print(f"  [structured_memory] Failed to initialize: {e}")
-
-        # Langfuse Observability — LLM Tracing and Monitoring
-        if cfg.get("enable_langfuse", False):
-            try:
-                # Initialize the Langfuse manager singleton
-                get_langfuse_manager(cfg)
-                for tool_def in build_langfuse_tools(cfg):
-                    self.tool_registry.register(tool_def)
-                print("  [langfuse] Initialized observability system")
-            except Exception as e:
-                print(f"  [langfuse] Failed to initialize: {e}")
 
         # Middleware pipeline (shared pre/post-processing for all entry points)
         self.middleware_chain = self._build_middleware_chain()
