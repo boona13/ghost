@@ -1202,7 +1202,7 @@ GROWTH_ROUTINES = [
             '     "<model-name>": {"swe_bench": <score>, "routes": {<provider>: {"id": "<id>", "input": <$/MTok>, "output": <$/MTok>}}}\n'
             "   }}\n"
             "6. For NEW models not already in the file, add routes based on what you find.\n"
-            "   Common providers: openrouter, anthropic, openai, google, deepseek, xai.\n"
+            "   Common providers: openrouter, anthropic, openai, openai-codex, google, deepseek.\n"
             "   Use the model's API pricing from their official docs or OpenRouter.\n"
             "7. Write the updated JSON back:\n"
             "   file_write(path='~/.ghost/coding_benchmarks.json', content=<updated JSON>)\n"
