@@ -74,7 +74,11 @@ _DEFERRAL_RE = _re.compile(
     r"|I wasn'?t able to|I don'?t have (?:access|enough)"
     r"|unable to (?:find|access|extract|fetch|retrieve|get)"
     r"|I can (?:try|do) (?:a |that |this )?(?:next|instead|as a follow)"
-    r"|I can do a (?:browser|deeper|second|follow))",
+    r"|I can do a (?:browser|deeper|second|follow)"
+    r"|I'?m going to (?:do|try|use|run|extract|scrape|handle|approach|switch|take|need)"
+    r"|I'?ll (?:do|try|use|run|handle|take|need to) (?:this|it|a )"
+    r"|let me (?:do|try|handle|approach) this (?:properly|correctly|right|differently)"
+    r"|I (?:will|need to) (?:do|try) (?:this|it) (?:properly|correctly|differently))",
     _re.IGNORECASE,
 )
 _MIN_TOOLS_BEFORE_ACCEPT_DEFERRAL = 4

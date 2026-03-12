@@ -111,6 +111,7 @@ log = logging.getLogger("ghost")
 _ESCALATION_COACHING = (
     "That approach did not work. Do NOT repeat it. "
     "Do NOT say you can't — you have more tools available. "
+    "Do NOT describe what you plan to do — actually DO it by calling tools NOW. "
     "Follow the escalation ladder:\n"
     "1. web_search for 'how to do this task programmatically' "
     "or 'python library for this task' to discover the right tool.\n"
@@ -127,10 +128,12 @@ _GIVE_UP_CLASSIFIER_PROMPT = (
     "The agent replied with the text below. Did the agent GIVE UP or FAIL to "
     "complete the task? Signs of giving up include: saying it can't do something, "
     "asking the user to do it themselves, suggesting manual steps, apologizing "
-    "for limitations, or providing partial results while admitting it couldn't "
-    "finish.\n\n"
+    "for limitations, providing partial results while admitting it couldn't "
+    "finish, or PROMISING to do the work later instead of delivering actual "
+    "results NOW (e.g. 'I'm going to...', 'I will try...', 'let me do this "
+    "properly').\n\n"
     "Reply with ONLY one word: YES or NO.\n"
-    "YES = the agent gave up or failed to deliver the result.\n"
+    "YES = the agent gave up, failed to deliver, or only described what it plans to do.\n"
     "NO = the agent delivered a complete, concrete result."
 )
 
