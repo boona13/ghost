@@ -254,6 +254,33 @@ def _is_ghost_codebase_path(path_str):
         return False
 
 
+_PROJECTS_DIR = Path.home() / "Projects"
+_auto_register_seen = set()
+
+
+def _auto_register_project(file_path: Path):
+    """Auto-register a project when files are written inside ~/Projects/<name>/."""
+    try:
+        resolved = file_path.resolve()
+        if _PROJECTS_DIR not in resolved.parents:
+            return
+        rel = resolved.relative_to(_PROJECTS_DIR)
+        project_name = rel.parts[0]
+        project_path = _PROJECTS_DIR / project_name
+        if project_name in _auto_register_seen:
+            return
+        _auto_register_seen.add(project_name)
+        ghost_dir = project_path / ".ghost"
+        if (ghost_dir / "project.json").exists():
+            return
+        from ghost_projects import ProjectRegistry
+        registry = ProjectRegistry()
+        display_name = project_name.replace("-", " ").replace("_", " ").title()
+        registry.create(project_path, display_name)
+    except Exception:
+        pass
+
+
 def _check_command_allowed(command, allowed_commands, blocked_commands):
     """Verify a shell command is not in the blocked patterns list.
 
@@ -708,6 +735,11 @@ def make_file_write(cfg):
             try:
                 from ghost_artifacts import auto_register
                 auto_register(str(p))
+            except Exception:
+                pass
+
+            try:
+                _auto_register_project(p)
             except Exception:
                 pass
 

@@ -438,6 +438,15 @@ def _process_message(session, daemon):
             f"- `shell_exec` runs from {PROJECT_DIR} by default.\n"
             f"- `file_read`/`file_write` accept absolute paths — use `{PROJECT_DIR}/filename` for project files.\n"
             f"- Do NOT search for the project directory. You already know it.\n\n"
+            "## USER PROJECT CREATION (READ BEFORE ANY 'create project' TASK)\n"
+            "When the user asks to create a project, app, tool, or any new codebase:\n"
+            "1. **FIRST call `project_create`** — before mkdir, before file_write, before anything else.\n"
+            f"   `project_create(path='{Path.home() / 'Projects'}/<project-name>', name='<Display Name>', description='...')`\n"
+            "2. Then write all files inside that path.\n"
+            "3. Set up venv + deps inside the project path.\n"
+            f"Default location is ALWAYS `{Path.home() / 'Projects'}/<name>` unless the user specifies otherwise.\n"
+            "If you skip `project_create`, the project is invisible to Ghost (no dashboard entry, no project memory, no Canvas context). "
+            "This is a HARD REQUIREMENT, not a suggestion.\n\n"
             "## AGENT BEHAVIOR — NEVER GIVE UP\n\n"
             "**COMPLETION RULE (READ THIS FIRST):**\n"
             "Parse EVERY verb in the user's message. Each verb is a REQUIRED action. "
@@ -487,18 +496,13 @@ def _process_message(session, daemon):
             "the working script from ~/.ghost/sandbox/, and the pip deps>', "
             "priority='P1', source='user_request')`\n"
             "This queues it for the Evolution Runner → evolve loop → PR review.\n\n"
-            "### AUTOMATIC BUG FIX ESCALATION (NON-NEGOTIABLE):\n"
-            "If ANY Ghost tool returns an error, throws an exception, or behaves incorrectly — "
-            "you MUST IMMEDIATELY submit a bug fix. Do NOT wait for the user to ask. "
-            "Do NOT just work around it. The fix request is MANDATORY every single time.\n"
-            "1. Submit the fix FIRST, before anything else:\n"
-            "   `add_future_feature(title='Bug fix: <description>', "
-            "description='<root cause analysis, affected files, exact fix needed>', "
-            "priority='P0', source='user_request', category='bugfix')`\n"
-            "2. Tell the user the bug was detected and a fix has been queued.\n"
-            "3. THEN work around the bug if possible (e.g. using shell_exec or sandbox).\n"
-            "This applies to ALL errors: tool execution failures, missing tools, "
-            "import errors, broken wiring, wrong output, unexpected behavior — everything.\n\n"
+            "### WHEN TOOLS FAIL — SOLVE IT, DON'T REPORT IT:\n"
+            "If a tool call fails (error, exception, unexpected output), your ONLY job is to "
+            "get the user's task done. Try a different approach, use a different tool, work around "
+            "the issue. NEVER call `add_future_feature` to file a bug report during a user conversation — "
+            "that is NOT solving the problem, it is giving up with extra steps. "
+            "Ghost has self-repair and health-check systems that catch internal bugs automatically. "
+            "You focus on the user's task. Period.\n\n"
             "## AVAILABLE TOOLS\n" + ", ".join(tool_names) + "\n\n"
             "## TOOL GUIDE\n"
             "**Memory**: memory_search, memory_save\n"
@@ -519,6 +523,17 @@ def _process_message(session, daemon):
             "The Feature Implementer will pick it up and implement it via the serial evolution queue. "
             "You can check status with `list_future_features` and `get_feature_stats`. "
             "This serialization prevents concurrent deploys from killing other running work.\n"
+            "**Projects**: project_create, project_list, project_get, project_update, project_delete, project_resolve — "
+            "Ghost has a first-class project management system. "
+            "When the user asks to 'create a project', 'start a new project', 'make an app', or similar:\n"
+            "  1. ALWAYS use `project_create` to register the project. "
+            f"Default location: `{Path.home() / 'Projects'}/<project-name>` (unless the user specifies a path).\n"
+            "  2. Then write files inside that project path using `file_write`.\n"
+            "  3. Set up the project with a venv if needed: `shell_exec('cd <project-path> && python3 -m venv .venv && source .venv/bin/activate && pip install <deps>')`\n"
+            "  4. To run the project, use the project's own venv — NOT Ghost's venv.\n"
+            "  NEVER create user projects directly on Desktop, Documents, or random locations. "
+            f"ALWAYS use `{Path.home() / 'Projects'}/` as the base directory.\n"
+            "  NEVER skip `project_create` — the project must be registered so it appears in the Ghost dashboard.\n"
             "**Other**: app_control, notify, uptime\n\n"
             "## URL & WEB TOOL RULES (CRITICAL — follow exactly)\n"
             "When the user's message contains a URL (http/https link):\n"
@@ -551,11 +566,16 @@ def _process_message(session, daemon):
             "9. After completing ALL parts of the task, reply directly to the user with what you did and the result.\n"
             "10. For self-modification / code change tasks → use `add_future_feature(title, description, priority='P0', source='user_request')` "
             "to queue the work. The Evolution Runner will implement it. Check status with `list_future_features`.\n"
-            "11. **COMPLETENESS**: Never do half the work. Every feature must be complete across ALL layers "
+            "11. **PROJECT CREATION (MANDATORY)**: When the user asks to create a project, app, or any new codebase:\n"
+            "   a. Your FIRST tool call MUST be `project_create(path='...', name='...', description='...')` to register it in Ghost.\n"
+            f"   b. Default path: `{Path.home() / 'Projects'}/<project-name>` — NEVER Desktop, Documents, or random locations.\n"
+            "   c. THEN create files inside that project path. NEVER write project files before calling `project_create`.\n"
+            "   d. If you skip `project_create`, the project won't appear in the dashboard and project features won't work.\n"
+            "12. **COMPLETENESS**: Never do half the work. Every feature must be complete across ALL layers "
             "(backend + frontend JS + CSS + wiring). Every function you define must be called. Every variable "
             "you reference must be declared. Every DOM element must have its CSS class defined. Every API "
             "endpoint must be called by the frontend. Trace the full data flow: user action → event → API → response → DOM.\n"
-            "12. **READ BEFORE WRITE**: Before modifying any file, ALWAYS file_read the ENTIRE "
+            "13. **READ BEFORE WRITE**: Before modifying any file, ALWAYS file_read the ENTIRE "
             "file first. Your patches must match the ACTUAL current content, not what you assume is there.\n\n"
             "## DEVELOPMENT STANDARDS (MANDATORY for all code changes)\n"
             "### Modular Architecture\n"
@@ -595,6 +615,28 @@ def _process_message(session, daemon):
 
         prompt_parts = [chat_prompt_body]
 
+        # Canvas — available globally whenever the tool is registered
+        if daemon.tool_registry and "canvas" in (daemon.tool_registry.names() if daemon.tool_registry else []):
+            canvas_section = (
+                "\n## CANVAS — LIVE PREVIEW\n"
+                "You have a **Canvas** panel that renders HTML/CSS/JS live beside this chat.\n"
+                "**WHEN TO USE CANVAS (MANDATORY):**\n"
+                "- When you build ANY web app, UI, page, or visual content — ALWAYS preview it in Canvas first.\n"
+                "- Prototyping UI components, pages, or layouts\n"
+                "- Debugging CSS/JS issues with immediate visual feedback\n"
+                "- Showing the user a live demo before finalizing\n"
+                "- Any task where seeing the rendered output helps\n\n"
+                "**Workflow:**\n"
+                "1. Use `canvas(action='write', file_path='index.html', content='...')` to write HTML/CSS/JS files\n"
+                "2. The Canvas auto-opens and renders the content as a live preview\n"
+                "3. Write additional files (style.css, app.js) and they live in the same session\n"
+                "4. Use `canvas(action='eval_js', js_code='...')` to run JS in the preview for testing\n"
+                "5. Use `canvas(action='snapshot')` to capture a screenshot and verify the result visually\n"
+                "6. Once satisfied, copy the final files to the actual project path using `file_write`\n\n"
+                "Do NOT skip Canvas when building web content. The user expects to SEE the result, not just read file paths.\n"
+            )
+            prompt_parts.append(canvas_section)
+
         if active_project:
             project_prompt = format_project_for_prompt(active_project)
             project_section = (
@@ -608,29 +650,6 @@ def _process_message(session, daemon):
                 f"- The project working directory is: `{active_project.path}`\n"
                 f"- Use this path as the base for any file operations within the project.\n"
             )
-
-            _WEB_SKILLS = {"browser", "fullstack-development", "ui-development", "web_research"}
-            project_skills = set(active_project.config.get("skills", []))
-            has_web_skills = not project_skills or bool(project_skills & _WEB_SKILLS)
-            if has_web_skills and daemon.tool_registry and "canvas" in (daemon.tool_registry.names() if daemon.tool_registry else []):
-                project_section += (
-                    "\n## CANVAS — LIVE PREVIEW\n"
-                    "You have a **Canvas** panel that renders HTML/CSS/JS live beside this chat. "
-                    "Use it when building or debugging any visual/web content for this project.\n"
-                    "**Workflow:**\n"
-                    "1. Use `canvas(action='write', file_path='index.html', content='...')` to write HTML/CSS/JS files\n"
-                    "2. The Canvas auto-opens and renders the content as a live preview\n"
-                    "3. Write additional files (style.css, app.js) and they live in the same session\n"
-                    "4. Use `canvas(action='eval_js', js_code='...')` to run JS in the preview for testing\n"
-                    "5. Use `canvas(action='snapshot')` to capture a screenshot and verify the result visually\n"
-                    "6. Once satisfied, copy the final files to the actual project path using `file_write`\n\n"
-                    "**When to use Canvas:**\n"
-                    "- Prototyping UI components, pages, or layouts\n"
-                    "- Debugging CSS/JS issues with immediate visual feedback\n"
-                    "- Showing the user a live demo before committing to the project\n"
-                    "- Any task where seeing the rendered output helps\n\n"
-                    f"**Project path:** `{active_project.path}` — write final versions here with `file_write`\n"
-                )
             prompt_parts.append(project_section)
 
         chat_history = _build_chat_history(daemon, max_turns=10)

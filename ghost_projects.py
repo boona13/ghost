@@ -155,6 +155,27 @@ class ProjectRegistry:
                             last_modified=mtime,
                         )
 
+        # Auto-register unregistered directories under ~/Projects/
+        projects_home = Path.home() / "Projects"
+        if projects_home.exists():
+            _skip = {".DS_Store", ".git", ".venv", "__pycache__", "node_modules"}
+            for child in projects_home.iterdir():
+                if not child.is_dir() or child.name.startswith("."):
+                    continue
+                pid = self._project_id(child)
+                if pid in self._projects or pid in found_paths:
+                    continue
+                contents = [f.name for f in child.iterdir() if f.name not in _skip]
+                if not contents:
+                    continue
+                # Auto-create .ghost/project.json so future scans find it
+                display_name = child.name.replace("-", " ").replace("_", " ").title()
+                try:
+                    self.create(child, display_name)
+                    found_paths.add(pid)
+                except Exception:
+                    pass
+
         for pid in list(self._projects.keys()):
             if pid in found_paths:
                 continue
