@@ -356,6 +356,7 @@ def get_coding_dispatch():
 
     benchmarks = {}
     selected = None
+    coding_chain = []
     available_providers = []
     try:
         from ghost_model_dispatch import (
@@ -371,6 +372,7 @@ def get_coding_dispatch():
 
         dispatcher = ModelDispatcher(cfg, auth_store)
         selected = dispatcher._compute_selection("coding")
+        coding_chain = dispatcher.select_chain("coding")
 
         max_cost, strategy = _resolve_budget(cfg)
     except Exception:
@@ -403,6 +405,7 @@ def get_coding_dispatch():
 
     return jsonify({
         "selected_model": selected,
+        "coding_chain": [f"{p}:{m}" for p, m in coding_chain],
         "budget": budget_val,
         "budget_resolved": {"max_cost": max_cost, "strategy": strategy},
         "override": override,

@@ -734,6 +734,7 @@ function _renderModelPage(models, current, container, u, api) {
 
 function _renderCodingDispatch(d, u) {
   const selected = d.selected_model || '—';
+  const codingChain = d.coding_chain || [];
   const budget = d.budget ?? 'auto';
   const override = d.override || '';
   const minScore = d.min_swe_bench_score ?? 78.0;
@@ -752,6 +753,12 @@ function _renderCodingDispatch(d, u) {
     high: t('models.budgetHigh'),
   };
 
+  const chainHtml = codingChain.length > 1
+    ? `<div class="mt-2 text-[10px] text-zinc-500">${t('models.codingChainLabel')}: ${codingChain.map((m, i) =>
+        `<span class="font-mono ${i === 0 ? 'text-ghost-400' : 'text-zinc-400'}">${u.escapeHtml(m)}</span>`
+      ).join(' → ')}</div>`
+    : '';
+
   return `
     <div class="stat-card mb-4">
       <div class="flex items-center justify-between flex-wrap gap-3 mb-4">
@@ -759,6 +766,7 @@ function _renderCodingDispatch(d, u) {
           <div class="text-xs text-zinc-500 mb-1">${t('models.dispatchSelected')}</div>
           <div class="text-sm font-semibold text-white font-mono">${u.escapeHtml(selected)}</div>
           <div class="text-[10px] text-zinc-500 mt-0.5">${t('models.dispatchStrategy')}: ${strategy === 'best_value' ? t('models.strategyValue') : t('models.strategyQuality')} · ${t('models.dispatchMaxCost')}: $${maxCost}/MTok</div>
+          ${chainHtml}
         </div>
         <button class="btn btn-ghost btn-sm" id="btn-dispatch-refresh">${t('models.dispatchRefresh')}</button>
       </div>

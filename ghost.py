@@ -2040,6 +2040,7 @@ class GhostDaemon:
                     return False
 
                 coding_model = None
+                coding_chain = None
                 coding_jobs = self.cfg.get("coding_jobs", [
                     _FEATURE_IMPLEMENTER_JOB, "_ghost_growth_bug_hunter",
                 ])
@@ -2059,9 +2060,11 @@ class GhostDaemon:
                         return
                     try:
                         from ghost_model_dispatch import get_dispatcher
-                        coding_model = get_dispatcher(
-                            self.cfg, self.auth_store
-                        ).select("coding")
+                        dispatcher = get_dispatcher(self.cfg, self.auth_store)
+                        coding_chain = dispatcher.select_chain("coding")
+                        if coding_chain:
+                            p, m = coding_chain[0]
+                            coding_model = m if p == "openrouter" else f"{p}:{m}"
                     except Exception as _dispatch_err:
                         log.warning("Model dispatch failed: %s", _dispatch_err)
 
@@ -2098,6 +2101,7 @@ class GhostDaemon:
                     on_step=terminal_step,
                     cancel_check=_cron_cancel_check,
                     model_override=coding_model,
+                    coding_model_chain=coding_chain,
                     meta={
                         "is_evolution_runner": is_evolution_runner,
                         "job_name": job_name,

@@ -104,6 +104,25 @@ _SEED_BENCHMARKS = {
 # is unreliable with complex tool-calling chains.
 _CODING_EXCLUDED_PROVIDERS = frozenset({"ollama", "deepseek"})
 
+_KNOWN_PROVIDERS = frozenset({
+    "openrouter", "openai", "anthropic",
+    "google", "ollama", "openai-codex", "deepseek",
+})
+
+
+def _parse_model_to_provider_tuple(model_str: str) -> tuple[str, str]:
+    """Parse dispatch-format string to (provider_id, model_id) tuple.
+
+    Dispatch format uses colon for direct providers ('anthropic:claude-opus-4-6')
+    and bare model IDs for OpenRouter ('minimax/minimax-m2.5').
+    """
+    if ":" in model_str:
+        idx = model_str.index(":")
+        prefix = model_str[:idx]
+        if prefix in _KNOWN_PROVIDERS:
+            return (prefix, model_str[idx + 1:])
+    return ("openrouter", model_str)
+
 
 def _seed_benchmarks_if_missing():
     """Write initial benchmark data if the file doesn't exist yet."""
@@ -203,22 +222,29 @@ class ModelDispatcher:
         Returns a model string like "anthropic:claude-opus-4-6" or
         "minimax/minimax-m2.5" (OpenRouter), or None if nothing found.
         """
+        chain = self.select_chain(task_type)
+        if not chain:
+            return None
+        provider_id, model_id = chain[0]
+        return model_id if provider_id == "openrouter" else f"{provider_id}:{model_id}"
+
+    def select_chain(self, task_type: str = "coding") -> list[tuple[str, str]]:
+        """Select a ranked list of (provider, model) pairs for coding tasks.
+
+        Returns tuples like ("anthropic", "claude-opus-4-6") for direct
+        providers or ("openrouter", "minimax/minimax-m2.5") for OpenRouter.
+        The first entry is the primary pick; remaining entries are
+        coding-quality fallbacks scoped to the user's available providers.
+        """
         override = self._cfg.get("coding_model_override")
         if override:
             log.info("[model_dispatch] Using manual override: %s", override)
-            return override
+            return [_parse_model_to_provider_tuple(override)]
 
-        cached = self._read_cache(task_type)
-        if cached:
-            return cached
+        return self._compute_ranked_chain(task_type)
 
-        result = self._compute_selection(task_type)
-        if result:
-            self._write_cache(task_type, result)
-        return result
-
-    def _primary_provider_fallback(self, available: set[str]) -> str | None:
-        """Return the primary provider's default model as a dispatch-format string."""
+    def _primary_provider_fallback_tuple(self, available: set[str]) -> tuple[str, str] | None:
+        """Return the primary provider's default model as a (provider, model) tuple."""
         try:
             from ghost_providers import get_provider
         except ImportError:
@@ -228,35 +254,45 @@ class ModelDispatcher:
         if primary in available:
             prov = get_provider(primary)
             if prov:
-                if primary == "openrouter":
-                    return prov.default_model
-                return f"{primary}:{prov.default_model}"
+                return (primary, prov.default_model)
 
         for pid in available:
             if pid == "ollama":
                 continue
             prov = get_provider(pid)
             if prov:
-                if pid == "openrouter":
-                    return prov.default_model
-                return f"{pid}:{prov.default_model}"
+                return (pid, prov.default_model)
 
         if "ollama" in available:
             prov = get_provider("ollama")
             if prov:
-                return f"ollama:{prov.default_model}"
+                return ("ollama", prov.default_model)
 
         return None
 
-    def _compute_selection(self, task_type: str) -> str | None:
+    def _primary_provider_fallback(self, available: set[str]) -> str | None:
+        """Return the primary provider's default model as a dispatch-format string."""
+        entry = self._primary_provider_fallback_tuple(available)
+        if entry is None:
+            return None
+        pid, model = entry
+        return model if pid == "openrouter" else f"{pid}:{model}"
+
+    def _compute_ranked_chain(self, task_type: str) -> list[tuple[str, str]]:
+        """Compute a ranked list of coding-quality models across available providers.
+
+        Each provider contributes its cheapest route per benchmarked model.
+        The list is sorted by the budget strategy (best_value or best_quality)
+        so the caller can iterate through progressively as a coding-specific
+        fallback chain.
+        """
         benchmarks = self._load_benchmarks()
         available = _get_available_providers(self._cfg, self._auth_store)
         if not available:
             log.warning("[model_dispatch] No providers available")
-            return None
+            return []
 
         coding_available = available - _CODING_EXCLUDED_PROVIDERS
-        fallback = self._primary_provider_fallback(coding_available or available)
 
         if not coding_available:
             log.warning(
@@ -264,11 +300,13 @@ class ModelDispatcher:
                 "(configured: %s, excluded: %s)",
                 available, available & _CODING_EXCLUDED_PROVIDERS,
             )
-            return fallback
+            fb = self._primary_provider_fallback_tuple(coding_available or available)
+            return [fb] if fb else []
 
         if not benchmarks:
             log.warning("[model_dispatch] No benchmark data, using primary provider fallback")
-            return fallback
+            fb = self._primary_provider_fallback_tuple(coding_available)
+            return [fb] if fb else []
 
         max_cost, strategy = _resolve_budget(self._cfg)
         min_score = self._cfg.get("min_swe_bench_score", 78.0)
@@ -293,15 +331,11 @@ class ModelDispatcher:
 
             provider_id, route = best_route
             model_id = route["id"]
-            if provider_id == "openrouter":
-                full_id = model_id
-            else:
-                full_id = f"{provider_id}:{model_id}"
 
             candidates.append({
                 "name": name,
-                "full_id": full_id,
                 "provider": provider_id,
+                "model_id": model_id,
                 "score": score,
                 "cost": best_cost,
                 "value": score / max(best_cost, 0.10),
@@ -309,13 +343,14 @@ class ModelDispatcher:
 
         if not candidates:
             if max_cost == 0:
-                log.info("[model_dispatch] No free coding models available — returning None")
-                return None
+                log.info("[model_dispatch] No free coding models available")
+                return []
             log.warning(
                 "[model_dispatch] No benchmarked models for available providers; "
                 "falling back to primary provider default",
             )
-            return fallback
+            fb = self._primary_provider_fallback_tuple(coding_available)
+            return [fb] if fb else []
 
         above_min = [c for c in candidates if c["score"] >= min_score]
         pool = above_min if above_min else candidates
@@ -328,15 +363,26 @@ class ModelDispatcher:
             )
 
         if strategy == "best_value":
-            pick = max(pool, key=lambda c: c["value"])
+            pool.sort(key=lambda c: c["value"], reverse=True)
         else:
-            pick = max(pool, key=lambda c: c["score"])
+            pool.sort(key=lambda c: c["score"], reverse=True)
+
+        result = [(c["provider"], c["model_id"]) for c in pool]
 
         log.info(
-            "[model_dispatch] Selected %s via %s (SWE: %.1f%%, $%.2f/MTok, strategy: %s)",
-            pick["full_id"], pick["provider"], pick["score"], pick["cost"], strategy,
+            "[model_dispatch] Coding chain (%d models, strategy: %s): %s",
+            len(result), strategy,
+            " → ".join(f"{p}:{m}" for p, m in result),
         )
-        return pick["full_id"]
+        return result
+
+    def _compute_selection(self, task_type: str) -> str | None:
+        """Legacy single-model selection (delegates to select_chain)."""
+        chain = self._compute_ranked_chain(task_type)
+        if not chain:
+            return None
+        pid, model_id = chain[0]
+        return model_id if pid == "openrouter" else f"{pid}:{model_id}"
 
     def _load_benchmarks(self) -> dict:
         _seed_benchmarks_if_missing()

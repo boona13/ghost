@@ -1928,7 +1928,8 @@ class ToolLoopEngine:
 
         return provider.base_url, headers, adapted
 
-    def _call_llm(self, payload, timeout=DEFAULT_TIMEOUT, on_token=None, cancel_check=None):
+    def _call_llm(self, payload, timeout=DEFAULT_TIMEOUT, on_token=None,
+                  cancel_check=None, coding_model_chain=None):
         """Make an LLM API call with provider-aware fallback chain and jittered retry.
 
         All providers use streaming (SSE) to avoid blocking on slow responses.
@@ -1940,6 +1941,12 @@ class ToolLoopEngine:
 
         If *cancel_check* returns True, the call aborts immediately with
         a CancelledError-style return so the tool loop can exit fast.
+
+        If *coding_model_chain* is provided (list of (provider, model) tuples
+        from the ModelDispatcher), those coding-quality models are tried first,
+        in order, before falling back to the general fallback chain.  This
+        ensures coding tasks stay on high-quality models even when the primary
+        pick is temporarily unavailable.
 
         Flow:  for each (provider, model) in fallback chain →
                  resolve base_url, headers, adapted payload →
@@ -1958,34 +1965,47 @@ class ToolLoopEngine:
                 time.sleep(min(0.5, end - time.time()))
             return cancel_check() if cancel_check else False
 
-        candidates = self._fallback_chain.get_candidates()
+        regular_candidates = self._fallback_chain.get_candidates()
 
-        # If the payload specifies a model override (via model_override in run()),
-        # prepend it as the first candidate so it's tried before the chain's primary.
-        payload_model = payload.get("model", "")
-        chain_primary = self._fallback_chain.primary if self._fallback_chain._chain else ""
-        if payload_model and payload_model != chain_primary:
-            override_provider = "openrouter"
-            override_model = payload_model
-            _KNOWN_PROVIDERS = frozenset({
-                "openrouter", "openai", "anthropic",
-                "google", "ollama", "openai-codex",
-                "deepseek",
-            })
-            # Parse "provider:model" (dispatch format) or "provider/model" (OpenRouter format)
-            for sep in (":", "/"):
-                if sep in payload_model:
-                    idx = payload_model.index(sep)
-                    potential_provider = payload_model[:idx]
-                    rest = payload_model[idx + 1:]
-                    if potential_provider in _KNOWN_PROVIDERS:
-                        override_provider = potential_provider
-                        override_model = rest
-                        break
-            override_entry = (override_provider, override_model)
-            if override_entry not in candidates:
-                candidates = [override_entry] + candidates
+        if coding_model_chain:
+            # Coding-specific chain: all dispatched models first, then the
+            # regular chain as a last-resort fallback.  Dedup so we don't
+            # retry the same (provider, model) twice.
+            seen = set()
+            candidates = []
+            for entry in coding_model_chain:
+                if entry not in seen:
+                    seen.add(entry)
+                    candidates.append(entry)
+            for entry in regular_candidates:
+                if entry not in seen:
+                    seen.add(entry)
+                    candidates.append(entry)
+        else:
+            candidates = list(regular_candidates)
+            # Legacy single-override: if the payload model differs from the
+            # chain's primary, parse it and prepend as first candidate.
+            payload_model = payload.get("model", "")
+            chain_primary = self._fallback_chain.primary if self._fallback_chain._chain else ""
+            if payload_model and payload_model != chain_primary:
+                override_provider = "openrouter"
+                override_model = payload_model
+                _LP = frozenset({
+                    "openrouter", "openai", "anthropic",
+                    "google", "ollama", "openai-codex", "deepseek",
+                })
+                if ":" in payload_model:
+                    idx = payload_model.index(":")
+                    prefix = payload_model[:idx]
+                    if prefix in _LP:
+                        override_provider = prefix
+                        override_model = payload_model[idx + 1:]
+                override_entry = (override_provider, override_model)
+                if override_entry not in candidates:
+                    candidates = [override_entry] + candidates
 
+        is_coding_call = coding_model_chain is not None
+        coding_set = set(coding_model_chain) if coding_model_chain else set()
         all_errors = []
 
         for provider_id, model in candidates:
@@ -2072,7 +2092,8 @@ class ToolLoopEngine:
                         except ImportError:
                             pass
 
-                    self._fallback_chain.record_success(provider_id, model)
+                    if not (is_coding_call and (provider_id, model) in coding_set):
+                        self._fallback_chain.record_success(provider_id, model)
                     primary = self._fallback_chain._chain[0] if self._fallback_chain._chain else None
                     if primary and (provider_id, model) != primary:
                         log.info("Served by fallback: %s:%s", provider_id, model)
@@ -2143,7 +2164,8 @@ class ToolLoopEngine:
             if self._usage_tracker:
                 self._usage_tracker.call_completed(0, success=False)
 
-            self._fallback_chain.record_failure(provider_id, model, last_err or "unknown")
+            if not (is_coding_call and (provider_id, model) in coding_set):
+                self._fallback_chain.record_failure(provider_id, model, last_err or "unknown")
             all_errors.append(last_err or f"{provider_id}:{model} failed")
 
         error_summary = " → ".join(all_errors)
@@ -2154,7 +2176,7 @@ class ToolLoopEngine:
             image_b64=None, images=None, on_step=None, force_tool=False, history=None,
             cancel_check=None, hook_runner=None, tool_intent_security=None, model_override=None,
             enable_reasoning=False, tool_event_bus=None, on_token=None,
-            middleware_chain=None):
+            middleware_chain=None, coding_model_chain=None):
         """
         Run the autonomous tool loop.
 
@@ -2223,9 +2245,6 @@ class ToolLoopEngine:
                 )
             except Exception:
                 pass
-
-        # Use model_override if provided, otherwise fall back to default model
-        effective_model = model_override if model_override else self.model
 
         tools_schema = None
         if tool_registry and tool_registry.get_all():
@@ -2395,6 +2414,7 @@ class ToolLoopEngine:
                 future = _llm_pool.submit(
                     self._call_llm, payload, DEFAULT_TIMEOUT, on_token,
                     cancel_check=cancel_check,
+                    coding_model_chain=coding_model_chain,
                 )
             except RuntimeError:
                 if sys.is_finalizing():

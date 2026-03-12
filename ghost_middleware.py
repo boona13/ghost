@@ -62,6 +62,7 @@ class InvocationContext:
     force_tool: bool = True
     enable_reasoning: bool = False
     model_override: str | None = None
+    coding_model_chain: list | None = None  # list[tuple[str, str]] from ModelDispatcher
     cancel_check: Any = None
     on_step: Any = None
     on_token: Any = None
@@ -285,6 +286,7 @@ class MiddlewareChain:
                 image_b64=ctx.image_b64,
                 enable_reasoning=ctx.enable_reasoning,
                 model_override=ctx.model_override,
+                coding_model_chain=ctx.coding_model_chain,
                 hook_runner=ctx.daemon.hooks if ctx.daemon else None,
                 tool_intent_security=getattr(
                     ctx.daemon, "tool_intent_security", None),
@@ -683,6 +685,7 @@ class GiveUpDetectionMiddleware(Middleware):
                     image_b64=ctx.image_b64,
                     enable_reasoning=ctx.enable_reasoning,
                     model_override=ctx.model_override,
+                    coding_model_chain=ctx.coding_model_chain,
                     hook_runner=(ctx.daemon.hooks
                                 if ctx.daemon else None),
                     tool_intent_security=getattr(
@@ -1196,6 +1199,7 @@ class ResponseIntegrityMiddleware(Middleware):
                     image_b64=ctx.image_b64,
                     enable_reasoning=ctx.enable_reasoning,
                     model_override=ctx.model_override,
+                    coding_model_chain=ctx.coding_model_chain,
                     hook_runner=(ctx.daemon.hooks if ctx.daemon else None),
                     tool_intent_security=getattr(
                         ctx.daemon, "tool_intent_security", None),
