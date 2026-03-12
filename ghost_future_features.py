@@ -803,14 +803,17 @@ def build_future_features_tools(cfg, on_queue_change=None):
             "Tell the user the feature has been queued."
         )
 
-    def _list_future_features(status: str = "", limit: int = 50):
+    def _list_future_features(status: str = "", limit: int = 50, unaudited_only: bool = False):
         """List features in the backlog.
         
         Args:
             status: Filter by status (pending/approval_required/in_progress/implemented/failed/rejected/deferred)
             limit: Max features to return
+            unaudited_only: If true, exclude features that have already been audited
         """
         items = store.get_all(status if status else None, limit)
+        if unaudited_only:
+            items = [f for f in items if not f.get("audited_at")]
         if not items:
             return "No features found."
         # Sort by priority (P0 first) then by creation date (oldest first)
@@ -1113,12 +1116,13 @@ def build_future_features_tools(cfg, on_queue_change=None):
         },
         {
             "name": "list_future_features",
-            "description": "List features in the backlog",
+            "description": "List features in the backlog. Use unaudited_only=true with status='implemented' to get only features that haven't been audited yet.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "status": {"type": "string", "enum": ["", "pending", "approval_required", "in_progress", "implemented", "failed", "rejected", "review_rejected", "deferred"], "default": "", "description": "Filter by status"},
                     "limit": {"type": "integer", "default": 50, "description": "Max features to return"},
+                    "unaudited_only": {"type": "boolean", "default": False, "description": "If true, exclude already-audited features"},
                 },
             },
             "execute": _list_future_features,
