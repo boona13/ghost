@@ -28,7 +28,7 @@ import logging
 import os
 import tempfile
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -115,6 +115,18 @@ class GoalStore:
     # CRUD
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _validate_cron(expr: str) -> bool:
+        """Return True if ``expr`` is a valid 5-field cron expression."""
+        if not expr or not expr.strip():
+            return False
+        try:
+            from croniter import croniter
+            croniter(expr.strip())
+            return True
+        except Exception:
+            return False
+
     def add(
         self,
         title: str,
@@ -124,6 +136,15 @@ class GoalStore:
     ) -> Dict:
         """Create a new goal in pending_plan state."""
         goals = self._load()
+
+        # Normalize recurrence: empty string → None
+        if isinstance(recurrence, str):
+            recurrence = recurrence.strip() or None
+
+        # Validate cron expression if provided
+        if recurrence and not self._validate_cron(recurrence):
+            return {"_error": f"Invalid cron expression: '{recurrence}'. "
+                    "Expected 5-field format like '0 9 * * 1' (every Monday 9am)."}
 
         # Lightweight duplicate check on title
         title_lower = title.lower().strip()
@@ -176,12 +197,61 @@ class GoalStore:
         return goals[:limit]
 
     def list_actionable(self) -> List[Dict]:
-        """Return goals that the executor should work on (pending_plan or active)."""
+        """Return goals that the executor should work on now.
+
+        For recurring goals that already completed a cycle (all steps were
+        reset to pending by complete_goal), skip them until their next
+        scheduled run time.  But if any step is non-pending (in-progress,
+        completed, failed), the goal is mid-execution and must stay
+        actionable — even if ``last_executed_at`` was recently set.
+        """
         goals = self._load()
-        return [
-            g for g in goals
-            if g.get("status") in (STATUS_PENDING_PLAN, STATUS_ACTIVE)
-        ]
+        now = datetime.now()
+        result = []
+        for g in goals:
+            if g.get("status") not in (STATUS_PENDING_PLAN, STATUS_ACTIVE):
+                continue
+            if g.get("recurrence") and g.get("last_executed_at"):
+                # Only gate on schedule if ALL steps are pending (= cycle reset).
+                # If any step is non-pending, we're mid-execution and must continue.
+                all_pending = all(
+                    s.get("status") == STEP_PENDING
+                    for s in g.get("plan", [])
+                )
+                if all_pending and not self._is_due(g, now):
+                    continue
+            result.append(g)
+        return result
+
+    @staticmethod
+    def _is_due(goal: Dict, now: datetime) -> bool:
+        """Check if a recurring goal is due based on its cron expression.
+
+        Returns True if the next scheduled run (computed from last_executed_at)
+        is at or before ``now``.
+        """
+        recurrence = goal.get("recurrence", "")
+        last_run_str = goal.get("last_executed_at", "")
+        if not recurrence or not last_run_str:
+            return True
+
+        try:
+            last_run = datetime.fromisoformat(last_run_str)
+        except (ValueError, TypeError):
+            return True
+
+        try:
+            from croniter import croniter
+            cron = croniter(recurrence, last_run)
+            next_run = cron.get_next(datetime)
+            return now >= next_run
+        except Exception:
+            pass
+
+        # Fallback: if croniter unavailable, use a simple 6-hour minimum gap
+        # so the goal doesn't re-run every 30 minutes.
+        elapsed = (now - last_run).total_seconds()
+        return elapsed >= 6 * 3600
 
     def _update(self, goal_id: str, updates: Dict) -> Optional[Dict]:
         """Apply a dict of updates to a goal and persist."""
@@ -345,10 +415,13 @@ class GoalStore:
                 continue
             g["last_output"] = output
             history = g.get("output_history") or []
+            # completion_count hasn't been incremented yet (that happens in
+            # complete_goal), so +1 to match the run number that
+            # complete_goal / last_completed_plan will record.
             history.append({
                 "output": output,
                 "at": datetime.now().isoformat(),
-                "run": g.get("completion_count", 0),
+                "run": g.get("completion_count", 0) + 1,
             })
             # Keep last 10 runs
             if len(history) > 10:
@@ -385,6 +458,18 @@ class GoalStore:
         if not g:
             return None
         return self._update(goal_id, {"status": STATUS_ABANDONED})
+
+    def delete_goal(self, goal_id: str) -> bool:
+        """Permanently remove a goal from storage. Creates a backup first."""
+        goals = self._load()
+        before = len(goals)
+        goals = [g for g in goals if g["id"] != goal_id]
+        if len(goals) == before:
+            return False
+        self._backup()
+        self._save(goals)
+        log.info("Goal deleted: [%s]", goal_id)
+        return True
 
     # ------------------------------------------------------------------
     # Helpers for the executor
@@ -467,9 +552,11 @@ def build_goal_tools(store: Optional[GoalStore] = None) -> List[Dict]:
         result = store.add(
             title=title.strip(),
             goal_text=goal_text.strip(),
-            recurrence=recurrence.strip() if recurrence else None,
+            recurrence=recurrence or None,
             context=context or {},
         )
+        if result.get("_error"):
+            return {"error": result["_error"]}
         if result.get("_warning"):
             return result
         return {

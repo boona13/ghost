@@ -26,6 +26,7 @@ MAX_STEP_TOOL_STEPS = 30   # tool-loop steps per individual step session
 MAX_QA_TOOL_STEPS   = 15   # tool-loop steps for the quality-check session
 MAX_RETRIES         = 2    # retries if a step isn't marked done after execution
 MAX_GOALS_PER_RUN   = 5    # max goals to process in one cron fire
+MAX_STEPS_PER_GOAL  = 20   # hard cap on steps per goal to prevent infinite loops
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -129,7 +130,7 @@ class GoalExecutorEngine:
 
         # Phase 2 — execute ALL pending steps back-to-back
         steps_run = []
-        while True:
+        for _ in range(MAX_STEPS_PER_GOAL):
             step = self.store.next_pending_step(goal)
             if not step:
                 break
@@ -140,6 +141,9 @@ class GoalExecutorEngine:
             goal = self.store.get(goal_id)  # reload after each step
             if not goal:
                 break
+        else:
+            log.error("[goal_executor] Goal [%s] hit step limit (%d). Stopping.",
+                      goal_id, MAX_STEPS_PER_GOAL)
 
         # Phase 3 — quality check + complete
         if goal and self.store.all_steps_done(goal) and goal.get("last_output"):

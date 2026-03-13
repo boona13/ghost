@@ -62,12 +62,15 @@ def add_goal():
     if not title or not goal_text:
         return jsonify({"ok": False, "error": "title and goal_text are required"}), 400
     store = _get_store()
+    recurrence = (data.get("recurrence") or "").strip() or None
     goal = store.add(
         title=title,
         goal_text=goal_text,
-        recurrence=data.get("recurrence", ""),
+        recurrence=recurrence,
         context=data.get("context", {}),
     )
+    if goal.get("_error"):
+        return jsonify({"ok": False, "error": goal["_error"]}), 400
     return jsonify({"ok": True, "goal": goal})
 
 
@@ -98,13 +101,10 @@ def abandon_goal(goal_id):
     return jsonify({"ok": True})
 
 
-@bp.route("/<goal_id>/delete", methods=["POST"])
+@bp.route("/<goal_id>/delete", methods=["POST", "DELETE"])
 def delete_goal(goal_id):
     store = _get_store()
-    goals = store._load()
-    before = len(goals)
-    goals = [g for g in goals if g["id"] != goal_id]
-    if len(goals) == before:
+    ok = store.delete_goal(goal_id)
+    if not ok:
         return jsonify({"ok": False, "error": "Goal not found"}), 404
-    store._save(goals)
     return jsonify({"ok": True})

@@ -424,8 +424,35 @@ async function refresh(api) {
     api.get('/api/goals/stats'),
   ]);
   currentGoals = listData.goals || [];
+  const stats = statsData || {};
+
+  // Update stat cards
+  const statValues = [
+    stats.total || 0, stats.active || 0, stats.pending_plan || 0,
+    stats.paused || 0, stats.completed || 0,
+  ];
+  document.querySelectorAll('.stat-card .text-xl').forEach((el, i) => {
+    if (i < statValues.length) el.textContent = statValues[i];
+  });
+
+  // Update filter tab counts
+  const tabCounts = {
+    all: currentGoals.length,
+    active: stats.active || 0,
+    pending_plan: stats.pending_plan || 0,
+    paused: stats.paused || 0,
+    completed: stats.completed || 0,
+    abandoned: stats.abandoned || 0,
+  };
+  document.querySelectorAll('.goal-tab').forEach(tab => {
+    const filter = tab.dataset.filter;
+    const countEl = tab.querySelector('span');
+    if (countEl && tabCounts[filter] !== undefined) {
+      countEl.textContent = tabCounts[filter];
+    }
+  });
+
   document.getElementById('goal-list').innerHTML = renderList(currentGoals, currentFilter);
-  // Rebind without full re-render to preserve scroll
   const { GhostAPI, GhostUtils } = window;
   rebindCards(GhostAPI, GhostUtils);
 }
