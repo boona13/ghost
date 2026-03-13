@@ -29,7 +29,8 @@ import { render as audit } from './pages/audit.js';
 import { render as evolve_theater } from './pages/evolve_theater.js';
 import { render as tools } from './pages/tools.js';
 import { render as structured_memory } from './pages/structured_memory.js';
-const pages = { overview, chat, models, config, soul, user, skills, cron, memory, feed, evolve, integrations, autonomy, setup, security, console: console_page, channels, future_features, webhooks, projects, prs, nodes, gallery, audit, evolve_theater, tools, structured_memory };
+import { render as goals } from './pages/goals.js';
+const pages = { overview, chat, models, config, soul, user, skills, cron, memory, feed, evolve, integrations, autonomy, setup, security, console: console_page, channels, future_features, webhooks, projects, prs, nodes, gallery, audit, evolve_theater, tools, structured_memory, goals };
 const container = document.getElementById('page-content');
 let currentPage = null;
 let pollTimer = null;
@@ -149,6 +150,7 @@ const CMD_PAGES = [
   { page: 'evolve', label: 'Evolution', section: 'Capabilities' },
   { page: 'evolve_theater', label: 'Self-Evolution Theater', section: 'Capabilities' },
   { page: 'prs', label: 'Pull Requests', section: 'Capabilities' },
+  { page: 'goals', label: 'Goals', section: 'Capabilities' },
   { page: 'future_features', label: 'Future Features', section: 'Capabilities' },
   { page: 'nodes', label: 'AI Nodes', section: 'Capabilities' },
   { page: 'gallery', label: 'Media Gallery', section: 'Capabilities' },

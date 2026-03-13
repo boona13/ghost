@@ -36,6 +36,7 @@ DEFAULT_GROWTH_SCHEDULES = {
     "security_patrol":     "0 5 * * *",
     "visual_monitor":      "0 */8 * * *",
     "model_benchmarks":    "0 3 * * 0",
+    "goal_executor":       "*/30 * * * *",
 }
 
 GROWTH_JOB_PREFIX = "_ghost_growth_"
@@ -1211,6 +1212,23 @@ GROWTH_ROUTINES = [
             "10. Delete the dispatch cache so the next coding job picks up new data:\n"
             "    shell_exec(command='rm -f ~/.ghost/model_dispatch_cache.json')\n"
             "Be precise with scores — only use verified benchmark numbers, not estimates."
+        ),
+    },
+    {
+        "id": "goal_executor",
+        "name": "Goal Executor",
+        "description": "Drive user goals forward — plan pending goals, execute all steps of active goals",
+        "prompt": (
+            "You are Ghost running the GOAL EXECUTOR routine.\n"
+            "Your only job: call run_goal_engine() — that's it.\n\n"
+            "The engine handles everything:\n"
+            "  - Planning goals that have no plan yet\n"
+            "  - Executing ALL pending steps back-to-back (not one per run)\n"
+            "  - Verifying each step was actually completed\n"
+            "  - Running a quality check on the output\n"
+            "  - Calling goal_complete when done\n\n"
+            "Call run_goal_engine() now, then call task_complete().\n"
+            + _CAPABILITIES
         ),
     },
 ]

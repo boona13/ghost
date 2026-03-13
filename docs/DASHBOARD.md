@@ -170,6 +170,24 @@ Prioritized backlog for autonomous implementation.
 - **Stats** — Feature counts by status and category
 - **Filters** — By status, priority, category, source
 
+### Goals
+
+Persistent long-horizon goals executed autonomously by the Goal Engine.
+
+- **Stats bar** — Total, Active, Needs Plan, Paused, Completed counts
+- **Filter tabs** — All / Active / Needs Plan / Paused / Completed / Abandoned
+- **Goal cards** — Status badge, recurrence schedule, description, last output preview
+- **New Goal button** — Create a goal with title, description, recurrence (cron or one-shot), and delivery method
+- **Detail drawer** — Click any card to open:
+  - Full goal description and status
+  - **Last Output** — The full deliverable from the most recent run (markdown rendered)
+  - **Output History** — Toggle to see all past run outputs with timestamps
+  - **Execution Plan** — Per-step status (pending/running/completed/failed) with results
+  - **Last Completed Run** — For recurring goals, snapshot of steps from the finished cycle alongside the next cycle's pending steps
+  - **Working Memory** — Observations accumulated across runs
+  - Goal metadata: ID, created date, last run, completion count
+- **Actions** — Pause, Resume, Abandon, Delete a goal
+
 ### Channels
 
 Configure and manage messaging channels (Telegram, Discord, WhatsApp).
@@ -466,6 +484,47 @@ Scheduler status (running, job counts, next wake).
 #### `POST /api/future-features`
 #### `PUT /api/future-features/<id>`
 #### `POST /api/future-features/<id>/approve` / `POST /api/future-features/<id>/reject`
+
+---
+
+### Goals
+
+#### `GET /api/goals/list?status=<status>`
+
+List goals. Optional `status` filter: `pending_plan`, `active`, `paused`, `completed`, `abandoned`.
+
+#### `GET /api/goals/stats`
+
+Returns counts by status (total, active, pending_plan, paused, completed, abandoned).
+
+#### `GET /api/goals/<goal_id>`
+
+Get a single goal with full plan, observations, and output history.
+
+#### `POST /api/goals/add`
+
+Create a new goal.
+
+```json
+{
+  "title": "AI News Weekly Digest",
+  "goal_text": "Every Monday search for top 5 AI stories...",
+  "recurrence": "0 9 * * 1",
+  "context": { "delivery": "notify" }
+}
+```
+
+#### `POST /api/goals/<goal_id>/pause` / `POST /api/goals/<goal_id>/resume`
+
+Pause or resume a goal.
+
+#### `POST /api/goals/<goal_id>/abandon`
+
+Mark a goal as abandoned.
+
+#### `DELETE /api/goals/<goal_id>`
+
+Permanently delete a goal.
 
 ---
 

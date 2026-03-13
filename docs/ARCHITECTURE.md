@@ -332,6 +332,8 @@ See [DASHBOARD.md](DASHBOARD.md) for the full page and API reference.
 |---|---|
 | `ghost_evolve.py` | EvolutionEngine: backup, validate, test, deploy, rollback |
 | `ghost_autonomy.py` | Autonomous growth engine, action items, self-repair |
+| `ghost_goals.py` | Goal Engine: GoalStore, LLM-callable goal tools (create, plan, step, complete) |
+| `ghost_goal_executor.py` | Deterministic Goal Executor: Python-controlled step loop with retry verification and quality-check pass |
 | `ghost_future_features.py` | Prioritized feature queue for serial evolution |
 | `ghost_model_dispatch.py` | Budget-aware coding model selection for evolution & bug hunting |
 | `ghost_state_repair.py` | State file validation and repair |
@@ -378,6 +380,8 @@ See [DASHBOARD.md](DASHBOARD.md) for the full page and API reference.
 | `ghost_skills.py` | SkillLoader: discover and match skills |
 | `ghost_skill_manager.py` | Managed skill installation with validation |
 | `ghost_skill_registry.py` | GhostHub: public skill registry client |
+| `ghost_goals.py` | Goal Engine: GoalStore, LLM-callable tools (create, plan, step, complete) |
+| `ghost_goal_executor.py` | Deterministic Goal Executor: Python step loop, retry verification, QA pass |
 | `ghost_projects.py` | Project management |
 
 ### GhostNodes
@@ -513,6 +517,7 @@ All daemon threads are marked `daemon=True`, so they die when the main thread ex
   memory.db                      SQLite memory database
   coding_benchmarks.json         SWE-bench scores for coding model selection
   model_dispatch_cache.json      Cached coding model selection (24h TTL)
+  goals.json                  Persistent goal definitions (plan, status, output, history)
   cron/jobs.json                 Cron job definitions
   future_features.json           Evolution backlog
   action_items.json              User action items

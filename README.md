@@ -292,6 +292,7 @@ Ghost improves itself on configurable schedules. Each routine is a specialized a
 | **Content Health** | Weekly Sun | Tests web extraction pipeline quality across diverse URL types |
 | **Visual Monitor** | Every 8h | Screenshot analysis for visual issues and accessibility |
 | **Model Benchmarks** | Weekly Sun | Searches for the latest SWE-bench leaderboard, updates coding model benchmark data |
+| **Goal Executor** | Every 30m | Runs the deterministic Goal Engine — plans pending goals, executes ALL steps back-to-back in one pass, verifies each step, quality-checks output, then completes the goal |
 | **Feature Implementer** | Event-driven | Picks features from the priority queue, implements them through the full evolution pipeline |
 | **Implementation Auditor** | Event-driven | Verifies deployed features across 4 layers: structural wiring, API contracts, frontend-backend integration, actual rendering |
 
@@ -446,6 +447,7 @@ The web dashboard at [http://localhost:3333](http://localhost:3333) provides ful
 | **Autonomy** | Action items, growth routine status, growth log, crash reports |
 | **Evolution** | Self-modification history, approve/reject pending changes, view diffs, rollback |
 | **Future Features** | Prioritized backlog for autonomous implementation — add, approve, reject, track |
+| **Goals** | Create and monitor persistent long-horizon goals — recurring digests, research tasks, weekly reports — with real-time step progress, output history, and per-run deliverables |
 | **Channels** | Configure, enable/disable, test, and monitor messaging channels (Telegram, Discord, WhatsApp) |
 | **Integrations** | Google OAuth, Grok, ElevenLabs, web search providers, image gen, vision, TTS |
 | **Configuration** | All settings with hot-reload — feature toggles, rate limits, growth schedules, security, voice, factory reset |
@@ -480,6 +482,8 @@ ghost_plugins.py            Plugin system — hooks, custom tools, plugin data
 ghost_evolve.py             Evolution engine — backup, validate, test, deploy, rollback
 ghost_pr.py                 Adversarial PR review — separate LLM instance with 7 tools
 ghost_autonomy.py           Autonomous growth — 11+ routines, action items, self-repair
+ghost_goals.py              Goal Engine — persistent long-horizon goals, GoalStore, LLM-callable tools
+ghost_goal_executor.py      Deterministic Goal Executor — Python-controlled step loop, retry verification, quality check
 ghost_model_dispatch.py     Budget-aware coding model selection for evolution & bug hunting
 ghost_future_features.py    Feature backlog — prioritized queue with dedup and dependency ordering
 ghost_providers.py          LLM providers — 7 providers with format adapters and fallback chains
@@ -506,8 +510,8 @@ ghost_x_tracker.py          X/Twitter tracker — deduplication for social actio
 ghost_credentials.py        Credential storage — structured service credentials with audit trail
 ghost_supervisor.py         Process supervisor — crash recovery, auto-rollback after 5 crashes
 ghost_platform.py           Cross-platform — macOS/Linux/Windows abstraction layer
-ghost_dashboard/            Flask web dashboard — 28+ pages, real-time SSE
-  routes/                   31 API blueprint modules
+  ghost_dashboard/            Flask web dashboard — 28+ pages, real-time SSE
+  routes/                   32 API blueprint modules
   static/js/pages/          Frontend page modules (SPA, no build step)
   templates/                HTML shell
 ghost_channels/             3 messaging channel implementations
@@ -563,6 +567,7 @@ All runtime data lives in `~/.ghost/`:
   coding_benchmarks.json    SWE-bench scores for coding model selection
   model_dispatch_cache.json Cached coding model selection (24h TTL)
   cron/jobs.json            Scheduled job definitions
+  goals.json                Persistent user goals (status, plan, output, history)
   evolve/backups/           Project backups before self-modifications
   evolve/history.json       Evolution history (all deploys and rollbacks)
   nodes/                    User-installed AI nodes

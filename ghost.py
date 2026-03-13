@@ -86,6 +86,8 @@ from ghost_dependency_doctor import build_dependency_doctor_tools
 from ghost_pr import build_pr_tools
 from ghost_subagents import build_subagent_tools
 from ghost_subagent_config import build_typed_subagent_tools
+from ghost_goals import GoalStore, build_goal_tools
+from ghost_goal_executor import build_goal_executor_tool
 from ghost_structured_memory import (
     get_memory_queue, format_memory_for_injection,
     get_memory_data, build_structured_memory_tools,
@@ -1249,6 +1251,19 @@ class GhostDaemon:
 
         for tool_def in build_future_features_tools(cfg, on_queue_change=_on_queue_change):
             self.tool_registry.register(tool_def)
+
+        # Goal Engine (Persistent Cognitive Architecture for user goals)
+        if cfg.get("enable_goals", True):
+            for tool_def in build_goal_tools(GoalStore()):
+                self.tool_registry.register(tool_def)
+            # Deterministic executor tool — used by cron and direct invocation
+            for tool_def in build_goal_executor_tool(
+                cfg=cfg,
+                tool_registry=self.tool_registry,
+                auth_store=getattr(self, "auth_store", None),
+                provider_chain=getattr(self, "provider_chain", None),
+            ):
+                self.tool_registry.register(tool_def)
 
         # Reconcile stale open/reviewing PRs from previous runs.
         # If a PR is open but its evolution is no longer active, auto-close it
