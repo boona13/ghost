@@ -664,9 +664,23 @@ def _process_message(session, daemon):
                 "time": datetime.now().isoformat(),
             })
 
+        def on_tool_progress(tool_id, message):
+            """Called by ToolAPI.log() during tool execution — pushes live progress to SSE."""
+            session.progress.append({
+                "node": f"tool:{tool_id}",
+                "message": message,
+                "time": datetime.now().isoformat(),
+            })
+
         try:
             from ghost_node_manager import set_node_progress_callback
             set_node_progress_callback(on_node_progress)
+        except ImportError:
+            pass
+
+        try:
+            from ghost_tool_builder import set_tool_progress_callback
+            set_tool_progress_callback(on_tool_progress)
         except ImportError:
             pass
 
@@ -789,6 +803,11 @@ def _process_message(session, daemon):
         try:
             from ghost_node_manager import clear_node_progress_callback
             clear_node_progress_callback()
+        except ImportError:
+            pass
+        try:
+            from ghost_tool_builder import clear_tool_progress_callback
+            clear_tool_progress_callback()
         except ImportError:
             pass
 

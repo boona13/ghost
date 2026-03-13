@@ -29,6 +29,22 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+_tool_progress = threading.local()
+
+
+def set_tool_progress_callback(callback):
+    """Set a thread-local callback for tool progress updates.
+
+    callback(tool_id: str, message: str) is called by ToolAPI.log().
+    """
+    _tool_progress.callback = callback
+
+
+def clear_tool_progress_callback():
+    """Clear the thread-local progress callback."""
+    _tool_progress.callback = None
+
+
 log = logging.getLogger("ghost.tool_builder")
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -293,8 +309,14 @@ class ToolAPI:
         (self._data_dir / filename).write_text(content, encoding="utf-8")
 
     def log(self, message: str):
-        """Log with tool prefix."""
+        """Log with tool prefix and push to any active chat progress stream."""
         log.info("[tool:%s] %s", self.id, message)
+        cb = getattr(_tool_progress, "callback", None)
+        if cb:
+            try:
+                cb(self.id, message)
+            except Exception:
+                pass
 
     def memory_save(self, content: str, tags: list[str] | None = None,
                     type: str = "tool") -> bool:

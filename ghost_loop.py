@@ -60,6 +60,7 @@ DEFAULT_MAX_TOKENS = 4096
 DEFAULT_TOOL_RESULT_LIMIT = 6000
 DEFAULT_TIMEOUT = 30
 MAX_LLM_WALL_CLOCK = 180     # generous deadline — streaming keeps connection alive
+DEFAULT_TOOL_TIMEOUT = 300   # hard timeout for any single tool execution (seconds)
 DEFAULT_MAX_STEPS = 200
 FALLBACK_COOLDOWN_SEC = 60    # base cooldown — escalates with consecutive failures
 FALLBACK_PROBE_INTERVAL = 30  # probe every 30s
@@ -2733,32 +2734,44 @@ class ToolLoopEngine:
                                     tool_result = f"BLOCKED by tool-intent security: {reason_intent}"
                                 else:
                                     _caller_ctx = get_shell_caller_context()
-                                    if fn_name in KNOWN_POLL_TOOLS:
-                                        set_shell_caller_context(_caller_ctx)
-                                        tool_result = tool_registry.execute(fn_name, exec_args)
-                                    else:
-                                        def _exec_tool_with_ctx(_ctx=_caller_ctx, _name=fn_name, _args=exec_args):
-                                            set_shell_caller_context(_ctx)
-                                            return tool_registry.execute(_name, _args)
+                                    def _exec_tool_with_ctx(_ctx=_caller_ctx, _name=fn_name, _args=exec_args):
+                                        set_shell_caller_context(_ctx)
+                                        return tool_registry.execute(_name, _args)
+                                    try:
+                                        tool_future = _llm_pool.submit(_exec_tool_with_ctx)
+                                    except RuntimeError:
+                                        if sys.is_finalizing():
+                                            tool_result = "Aborted: interpreter is shutting down"
+                                            break
+                                        raise
+                                    _tool_deadline = time.time() + DEFAULT_TOOL_TIMEOUT
+                                    while True:
+                                        if cancel_check:
+                                            _cmsg = _cancel_msg()
+                                            if _cmsg:
+                                                tool_future.cancel()
+                                                tool_result = _cmsg
+                                                break
+                                        if time.time() >= _tool_deadline:
+                                            tool_future.cancel()
+                                            tool_result = (
+                                                f"Tool error ({fn_name}): execution timed out after "
+                                                f"{DEFAULT_TOOL_TIMEOUT}s. The tool was killed. "
+                                                f"Do NOT retry — inform the user that this operation "
+                                                f"took too long and suggest breaking it into smaller steps."
+                                            )
+                                            log.warning(
+                                                "Tool '%s' timed out after %ds — abandoning thread and recycling pool",
+                                                fn_name, DEFAULT_TOOL_TIMEOUT,
+                                            )
+                                            _llm_pool.shutdown(wait=False)
+                                            _llm_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+                                            break
                                         try:
-                                            tool_future = _llm_pool.submit(_exec_tool_with_ctx)
-                                        except RuntimeError:
-                                            if sys.is_finalizing():
-                                                tool_result = "Aborted: interpreter is shutting down"
-                                                break
-                                            raise
-                                        while True:
-                                            if cancel_check:
-                                                _cmsg = _cancel_msg()
-                                                if _cmsg:
-                                                    tool_future.cancel()
-                                                    tool_result = _cmsg
-                                                    break
-                                            try:
-                                                tool_result = tool_future.result(timeout=0.5)
-                                                break
-                                            except concurrent.futures.TimeoutError:
-                                                continue
+                                            tool_result = tool_future.result(timeout=0.5)
+                                            break
+                                        except concurrent.futures.TimeoutError:
+                                            continue
                             except Exception as e:
                                 tool_result = f"Tool execution failed: {e}"
 
