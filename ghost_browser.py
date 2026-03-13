@@ -11,6 +11,8 @@ Uses Playwright's BUILT-IN accessibility APIs — not custom JS hacks.
 import json
 import time
 import threading
+import queue
+import concurrent.futures
 import secrets
 import ipaddress
 import logging
@@ -26,8 +28,49 @@ BROWSER_DATA_DIR.mkdir(parents=True, exist_ok=True)
 _pw = None
 _context = None
 _page = None
-_lock = threading.Lock()
 _ref_store = {}  # ref -> {role, name, nth}
+
+# Dedicated browser thread — Playwright sync API has strict thread-affinity.
+# All Playwright calls MUST run on the same thread that started it.
+_worker_thread = None
+_work_queue = None
+_worker_init_lock = threading.Lock()
+
+
+def _ensure_worker():
+    """Ensure the dedicated browser worker thread is running."""
+    global _worker_thread, _work_queue
+    with _worker_init_lock:
+        if _worker_thread is None or not _worker_thread.is_alive():
+            _work_queue = queue.Queue()
+            _worker_thread = threading.Thread(
+                target=_worker_loop, daemon=True, name="ghost-browser-worker"
+            )
+            _worker_thread.start()
+
+
+def _worker_loop():
+    """Process browser commands sequentially on the dedicated thread."""
+    while True:
+        item = _work_queue.get()
+        if item is None:
+            break
+        func, args, kwargs, future = item
+        try:
+            result = func(*args, **kwargs)
+            if not future.cancelled():
+                future.set_result(result)
+        except Exception as e:
+            if not future.cancelled():
+                future.set_exception(e)
+
+
+def _run_on_browser_thread(func, *args, **kwargs):
+    """Submit func to the browser thread, block until result (max 120s)."""
+    _ensure_worker()
+    future = concurrent.futures.Future()
+    _work_queue.put((func, args, kwargs, future))
+    return future.result(timeout=120)
 
 
 # ───────────── Security ─────────────
@@ -102,19 +145,45 @@ def _ensure_playwright():
     return _page
 
 
-def browser_stop():
+def _stop_browser_impl():
+    """Stop Playwright — MUST run on the browser worker thread."""
     global _pw, _context, _page, _ref_store
-    with _lock:
-        try:
-            if _context: _context.close()
-        except Exception as exc:
-            logging.getLogger("ghost.browser").warning("Failed to close browser context: %s", exc)
-        try:
-            if _pw: _pw.stop()
-        except Exception as exc:
-            logging.getLogger("ghost.browser").warning("Failed to stop playwright: %s", exc)
-        _pw = _context = _page = None
-        _ref_store = {}
+    try:
+        if _context:
+            _context.close()
+    except Exception as exc:
+        logging.getLogger("ghost.browser").warning("Failed to close browser context: %s", exc)
+    try:
+        if _pw:
+            _pw.stop()
+    except Exception as exc:
+        logging.getLogger("ghost.browser").warning("Failed to stop playwright: %s", exc)
+    _pw = _context = _page = None
+    _ref_store = {}
+
+
+def browser_stop():
+    """Stop the browser and shut down the dedicated worker thread."""
+    global _worker_thread, _work_queue
+    with _worker_init_lock:
+        if _worker_thread is None or not _worker_thread.is_alive():
+            _worker_thread = None
+            _work_queue = None
+            return
+        wt = _worker_thread
+        wq = _work_queue
+    # Lock released — submit cleanup directly to avoid deadlock
+    try:
+        future = concurrent.futures.Future()
+        wq.put((_stop_browser_impl, (), {}, future))
+        future.result(timeout=30)
+    except Exception as exc:
+        logging.getLogger("ghost.browser").warning("Error during browser stop: %s", exc)
+    wq.put(None)  # sentinel to exit worker loop
+    wt.join(timeout=10)
+    with _worker_init_lock:
+        _worker_thread = None
+        _work_queue = None
 
 
 # ───────────── Snapshot using Playwright's accessibility API ─────────────
@@ -362,386 +431,368 @@ def _get_locator(page, ref):
 # ───────────── Action dispatcher ─────────────
 
 def _do_browser(action, **kwargs):
-
+    """Route all browser operations through the dedicated worker thread."""
     if action == "stop":
         browser_stop()
         return {"status": "ok", "message": "Browser closed"}
+    return _run_on_browser_thread(_do_browser_impl, action, **kwargs)
 
-    with _lock:
-        page = _ensure_playwright()
 
-        # ── navigate ──
-        if action == "navigate":
-            url = kwargs.get("url", "")
-            if not url.startswith(("http://", "https://")):
-                url = "https://" + url
-            _validate_url(url)
-            page.goto(url, wait_until=kwargs.get("wait_until", "domcontentloaded"), timeout=30000)
-            page.wait_for_timeout(1500)
-            return {"status": "ok", "title": page.title(), "url": page.url}
+def _do_browser_impl(action, **kwargs):
+    """Actual browser logic — always runs on the dedicated browser thread."""
+    global _page
+    page = _ensure_playwright()
 
-        # ── snapshot (Playwright accessibility API) ──
-        elif action == "snapshot":
-            return _build_snapshot(page, interactive_only=kwargs.get("interactive_only", False))
+    if action == "navigate":
+        url = kwargs.get("url", "")
+        if not url.startswith(("http://", "https://")):
+            url = "https://" + url
+        _validate_url(url)
+        page.goto(url, wait_until=kwargs.get("wait_until", "domcontentloaded"), timeout=30000)
+        page.wait_for_timeout(1500)
+        return {"status": "ok", "title": page.title(), "url": page.url}
 
-        # ── click ──
-        elif action == "click":
-            ref = kwargs.get("ref")
-            sel = kwargs.get("selector")
-            timeout = kwargs.get("timeout_ms", 10000)
-            wait_after = kwargs.get("wait_after_ms", 500)
+    elif action == "snapshot":
+        return _build_snapshot(page, interactive_only=kwargs.get("interactive_only", False))
 
-            if ref:
-                loc, info = _get_locator(page, ref)
-                if not info:
-                    return {"status": "error", "error": f"Ref '{ref}' not found. Run snapshot first."}
-                if loc:
-                    try:
-                        loc.click(timeout=timeout)
-                        page.wait_for_timeout(wait_after)
-                        return {"status": "ok", "clicked_ref": ref,
-                                "element": f'{info["role"]} "{info["name"]}"'}
-                    except Exception as e:
-                        return {"status": "error", "error": str(e)[:200],
-                                "hint": "Ref locator failed. Try a new snapshot or use evaluate with JS."}
-                return {"status": "error", "error": f"Could not resolve ref '{ref}' to locator."}
+    elif action == "click":
+        ref = kwargs.get("ref")
+        sel = kwargs.get("selector")
+        timeout = kwargs.get("timeout_ms", 10000)
+        wait_after = kwargs.get("wait_after_ms", 500)
 
-            elif sel:
+        if ref:
+            loc, info = _get_locator(page, ref)
+            if not info:
+                return {"status": "error", "error": f"Ref '{ref}' not found. Run snapshot first."}
+            if loc:
                 try:
-                    page.locator(sel).first.click(timeout=timeout)
+                    loc.click(timeout=timeout)
                     page.wait_for_timeout(wait_after)
-                    return {"status": "ok", "clicked": sel}
+                    return {"status": "ok", "clicked_ref": ref,
+                            "element": f'{info["role"]} "{info["name"]}"'}
                 except Exception as e:
                     return {"status": "error", "error": str(e)[:200],
-                            "hint": "Use snapshot + refs instead of CSS selectors."}
-            else:
-                return {"status": "error", "error": "Provide 'ref' (from snapshot) or 'selector'."}
+                            "hint": "Ref locator failed. Try a new snapshot or use evaluate with JS."}
+            return {"status": "error", "error": f"Could not resolve ref '{ref}' to locator."}
 
-        # ── type ──
-        elif action == "type":
-            ref = kwargs.get("ref")
-            sel = kwargs.get("selector")
-            text = kwargs.get("text", "")
-            timeout = kwargs.get("timeout_ms", 10000)
-            submit = kwargs.get("press_enter", False)
-            slowly = kwargs.get("slowly", False)
-
-            if ref:
-                loc, info = _get_locator(page, ref)
-                if not info:
-                    return {"status": "error", "error": f"Ref '{ref}' not found."}
-                if loc:
-                    try:
-                        if slowly:
-                            loc.click(timeout=timeout)
-                            page.keyboard.type(text, delay=50)
-                        else:
-                            loc.fill(text, timeout=timeout)
-                    except Exception:
-                        try:
-                            loc.click(timeout=timeout)
-                            page.wait_for_timeout(300)
-                            if len(text) > 200:
-                                page.keyboard.insert_text(text)
-                            else:
-                                page.keyboard.type(text, delay=20)
-                        except Exception as e:
-                            return {"status": "error", "error": str(e)[:200]}
-                else:
-                    return {"status": "error", "error": f"Could not resolve ref '{ref}'."}
-                if submit:
-                    page.keyboard.press("Enter")
-                    page.wait_for_timeout(500)
-                return {"status": "ok", "typed": text[:80], "chars": len(text),
-                        "into_ref": ref, "element": f'{info["role"]} "{info["name"]}"'}
-
-            elif sel:
-                try:
-                    page.locator(sel).first.fill(text, timeout=timeout)
-                except Exception:
-                    try:
-                        page.locator(sel).first.click(timeout=timeout)
-                        page.keyboard.type(text, delay=20)
-                    except Exception as e:
-                        return {"status": "error", "error": str(e)[:200]}
-                if submit:
-                    page.keyboard.press("Enter")
-                    page.wait_for_timeout(500)
-                return {"status": "ok", "typed": text[:50], "into": sel}
-
-            else:
-                page.keyboard.type(text, delay=20 if not slowly else 50)
-                if submit:
-                    page.keyboard.press("Enter")
-                    page.wait_for_timeout(500)
-                return {"status": "ok", "typed": text[:50], "into": "focused_element"}
-
-        # ── fill (multi-field form fill) ──
-        elif action == "fill":
-            fields = kwargs.get("fields", [])
-            if not fields:
-                return {"status": "error", "error": "fields required: [{ref, value}, ...]"}
-            results = []
-            for f in fields:
-                fref = f.get("ref", "")
-                fval = str(f.get("value", ""))
-                loc, info = _get_locator(page, fref)
-                if not loc:
-                    results.append({"ref": fref, "error": "not found"})
-                    continue
-                try:
-                    role = info.get("role", "")
-                    if role in ("checkbox", "radio", "switch"):
-                        loc.set_checked(fval.lower() in ("true", "1", "yes", "on"), timeout=5000)
-                    else:
-                        loc.fill(fval, timeout=5000)
-                    results.append({"ref": fref, "ok": True})
-                except Exception as e:
-                    results.append({"ref": fref, "error": str(e)[:80]})
-            return {"status": "ok", "filled": results}
-
-        # ── content (security-wrapped) ──
-        elif action == "content":
-            sel = kwargs.get("selector")
-            max_chars = kwargs.get("max_chars", 8000)
-            if sel:
-                el = page.query_selector(sel)
-                raw = el.inner_text() if el else f"Selector '{sel}' not found"
-            else:
-                raw = page.inner_text("body")
-            wrapped = _wrap_external(raw[:max_chars], source=page.url[:60])
-            return {"status": "ok", "title": page.title(), "url": page.url,
-                    "content": wrapped, "truncated": len(raw) > max_chars}
-
-        # ── evaluate ──
-        elif action == "evaluate":
-            js = kwargs.get("js_code", kwargs.get("code", ""))
-            result = page.evaluate(js)
-            return {"status": "ok", "result": str(result)[:4000] if result else None}
-
-        # ── console ──
-        elif action == "console":
-            msgs = []
-            def handler(m):
-                msgs.append({"type": m.type, "text": m.text[:200]})
-            page.on("console", handler)
-            page.wait_for_timeout(200)
-            page.remove_listener("console", handler)
-            return {"status": "ok", "messages": msgs[-20:]}
-
-        # ── screenshot ──
-        elif action == "screenshot":
-            ts = time.strftime("%Y%m%d_%H%M%S")
-            path = SCREENSHOTS_DIR / f"browser_{ts}.png"
-            ref = kwargs.get("ref")
-            sel = kwargs.get("selector")
-            if ref:
-                loc, _ = _get_locator(page, ref)
-                if loc:
-                    loc.screenshot(path=str(path))
-                else:
-                    page.screenshot(path=str(path))
-            elif sel:
-                el = page.query_selector(sel)
-                if el:
-                    el.screenshot(path=str(path))
-                else:
-                    page.screenshot(path=str(path))
-            else:
-                page.screenshot(path=str(path), full_page=kwargs.get("full_page", False))
-            return {"status": "ok", "path": str(path),
-                    "size_kb": round(path.stat().st_size / 1024, 1)}
-
-        # ── wait ──
-        elif action == "wait":
-            sel = kwargs.get("selector")
-            ms = kwargs.get("timeout_ms", 2000)
-            if sel:
-                page.wait_for_selector(sel, timeout=ms)
-                return {"status": "ok", "found": sel}
-            else:
-                page.wait_for_timeout(ms)
-                return {"status": "ok", "waited_ms": ms}
-
-        # ── press ──
-        elif action == "press":
-            key = kwargs.get("key", "Enter")
-            page.keyboard.press(key)
-            page.wait_for_timeout(300)
-            return {"status": "ok", "pressed": key}
-
-        # ── scroll ──
-        elif action == "scroll":
-            ref = kwargs.get("ref")
-            if ref:
-                loc, _ = _get_locator(page, ref)
-                if loc:
-                    try:
-                        loc.scroll_into_view_if_needed(timeout=5000)
-                        return {"status": "ok", "scrolled_to_ref": ref}
-                    except Exception:
-                        pass
-            d = kwargs.get("direction", "down")
-            raw_amt = kwargs.get("amount", 3)
-            # LLMs often pass 1-10 meaning "pages"; convert to pixels
-            amt = raw_amt * 600 if raw_amt <= 20 else raw_amt
-            dy = amt if d == "down" else -amt if d == "up" else 0
-            dx = amt if d == "right" else -amt if d == "left" else 0
-            page.mouse.wheel(dx, dy)
-            page.wait_for_timeout(1500)
-            return {"status": "ok", "scrolled": d, "pixels": amt}
-
-        # ── hover ──
-        elif action == "hover":
-            ref = kwargs.get("ref")
-            sel = kwargs.get("selector")
-            timeout = kwargs.get("timeout_ms", 5000)
-            if ref:
-                loc, info = _get_locator(page, ref)
-                if loc:
-                    loc.hover(timeout=timeout)
-                    return {"status": "ok", "hovered_ref": ref}
-                return {"status": "error", "error": f"Ref '{ref}' not found."}
-            elif sel:
-                page.locator(sel).first.hover(timeout=timeout)
-                return {"status": "ok", "hovered": sel}
-            return {"status": "error", "error": "Provide 'ref' or 'selector'."}
-
-        # ── select ──
-        elif action == "select":
-            ref = kwargs.get("ref")
-            sel = kwargs.get("selector")
-            vals = kwargs.get("values", [])
-            if ref:
-                loc, _ = _get_locator(page, ref)
-                if loc:
-                    loc.select_option(vals, timeout=5000)
-                    return {"status": "ok", "selected": vals}
-            if sel:
-                page.locator(sel).first.select_option(vals, timeout=5000)
-                return {"status": "ok", "selected": vals}
-            return {"status": "error", "error": "Provide 'ref' or 'selector'."}
-
-        # ── upload (programmatic file input — NO Finder dialog) ──
-        elif action == "upload":
-            file_path = kwargs.get("file_path", "")
-            sel = kwargs.get("selector", 'input[type="file"]')
-            if not file_path:
-                return {"status": "error", "error": "file_path is required"}
-            fp = Path(file_path)
-            if not fp.exists():
-                return {"status": "error", "error": f"File not found: {file_path}"}
+        elif sel:
             try:
-                loc = page.locator(sel)
-                if loc.count() == 0:
-                    return {"status": "error", "error": f"No element found for selector: {sel}",
-                            "hint": "Try 'input[type=file]' or a more specific selector. "
-                                    "Or use paste_image action instead."}
-                loc.first.set_input_files(str(fp))
-                page.wait_for_timeout(2000)
-                return {"status": "ok", "uploaded": str(fp),
-                        "selector": sel, "size_kb": round(fp.stat().st_size / 1024, 1)}
+                page.locator(sel).first.click(timeout=timeout)
+                page.wait_for_timeout(wait_after)
+                return {"status": "ok", "clicked": sel}
             except Exception as e:
                 return {"status": "error", "error": str(e)[:200],
-                        "hint": "Try paste_image action as fallback."}
+                        "hint": "Use snapshot + refs instead of CSS selectors."}
+        else:
+            return {"status": "error", "error": "Provide 'ref' (from snapshot) or 'selector'."}
 
-        # ── paste_image (clipboard paste — cross-platform, best for X/Twitter) ──
-        elif action == "paste_image":
-            import subprocess, platform as _plat
-            file_path = kwargs.get("file_path", "")
-            if not file_path:
-                return {"status": "error", "error": "file_path is required"}
-            fp = Path(file_path)
-            if not fp.exists():
-                return {"status": "error", "error": f"File not found: {file_path}"}
-            try:
-                _os = _plat.system()
-                if _os == "Darwin":
-                    osa_script = (
-                        f'set the clipboard to '
-                        f'(read (POSIX file "{fp}") as «class PNGf»)'
-                    )
-                    subprocess.run(["osascript", "-e", osa_script],
-                                   check=True, capture_output=True, timeout=10)
-                elif _os == "Linux":
-                    subprocess.run(
-                        ["xclip", "-selection", "clipboard", "-t", "image/png", "-i", str(fp)],
-                        check=True, capture_output=True, timeout=10,
-                    )
-                elif _os == "Windows":
-                    ps_cmd = (
-                        f'Add-Type -AssemblyName System.Windows.Forms; '
-                        f'[System.Windows.Forms.Clipboard]::SetImage('
-                        f'[System.Drawing.Image]::FromFile("{fp}"))'
-                    )
-                    subprocess.run(["powershell", "-Command", ps_cmd],
-                                   check=True, capture_output=True, timeout=10)
-                else:
-                    return {"status": "error", "error": f"paste_image not supported on {_os}"}
+    elif action == "type":
+        ref = kwargs.get("ref")
+        sel = kwargs.get("selector")
+        text = kwargs.get("text", "")
+        timeout = kwargs.get("timeout_ms", 10000)
+        submit = kwargs.get("press_enter", False)
+        slowly = kwargs.get("slowly", False)
 
-                paste_key = "Control+v" if _os == "Windows" else "Meta+v"
-                ref = kwargs.get("ref")
-                if ref:
-                    loc, info = _get_locator(page, ref)
-                    if loc:
-                        loc.click(timeout=5000)
+        if ref:
+            loc, info = _get_locator(page, ref)
+            if not info:
+                return {"status": "error", "error": f"Ref '{ref}' not found."}
+            if loc:
+                try:
+                    if slowly:
+                        loc.click(timeout=timeout)
+                        page.keyboard.type(text, delay=50)
+                    else:
+                        loc.fill(text, timeout=timeout)
+                except Exception:
+                    try:
+                        loc.click(timeout=timeout)
                         page.wait_for_timeout(300)
-                page.keyboard.press(paste_key)
-                page.wait_for_timeout(3000)
-                return {"status": "ok", "pasted_image": str(fp),
-                        "size_kb": round(fp.stat().st_size / 1024, 1),
-                        "hint": "Image pasted from clipboard. Take a snapshot to verify it appeared."}
-            except subprocess.CalledProcessError as e:
-                return {"status": "error",
-                        "error": f"Clipboard copy failed: {e.stderr.decode('utf-8', errors='replace')[:200]}",
-                        "hint": "Try upload action instead."}
-            except Exception as e:
-                return {"status": "error", "error": str(e)[:200]}
+                        if len(text) > 200:
+                            page.keyboard.insert_text(text)
+                        else:
+                            page.keyboard.type(text, delay=20)
+                    except Exception as e:
+                        return {"status": "error", "error": str(e)[:200]}
+            else:
+                return {"status": "error", "error": f"Could not resolve ref '{ref}'."}
+            if submit:
+                page.keyboard.press("Enter")
+                page.wait_for_timeout(500)
+            return {"status": "ok", "typed": text[:80], "chars": len(text),
+                    "into_ref": ref, "element": f'{info["role"]} "{info["name"]}"'}
 
-        # ── pdf ──
-        elif action == "pdf":
-            ts = time.strftime("%Y%m%d_%H%M%S")
-            path = SCREENSHOTS_DIR / f"page_{ts}.pdf"
-            page.pdf(path=str(path))
-            return {"status": "ok", "path": str(path)}
-
-        # ── tabs ──
-        elif action == "tabs":
-            global _page
-            tabs = []
-            if _context:
-                for i, p in enumerate(_context.pages):
-                    tabs.append({"index": i,
-                                 "title": p.title() if not p.is_closed() else "",
-                                 "url": p.url if not p.is_closed() else "",
-                                 "active": p == _page})
-            return {"status": "ok", "tabs": tabs}
-
-        # ── new_tab ──
-        elif action == "new_tab":
-            _page = _context.new_page()
-            url = kwargs.get("url")
-            if url:
-                if not url.startswith(("http://", "https://")): url = "https://" + url
-                _validate_url(url)
-                _page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                _page.wait_for_timeout(500)
-            return {"status": "ok", "title": _page.title(), "url": _page.url}
-
-        # ── close_tab ──
-        elif action == "close_tab":
-            idx = kwargs.get("index")
-            pages = _context.pages if _context else []
-            if idx is not None and 0 <= idx < len(pages):
-                pages[idx].close()
-            elif _page and not _page.is_closed():
-                _page.close()
-            remaining = [p for p in (_context.pages if _context else []) if not p.is_closed()]
-            _page = remaining[-1] if remaining else None
-            return {"status": "ok", "remaining_tabs": len(remaining)}
+        elif sel:
+            try:
+                page.locator(sel).first.fill(text, timeout=timeout)
+            except Exception:
+                try:
+                    page.locator(sel).first.click(timeout=timeout)
+                    page.keyboard.type(text, delay=20)
+                except Exception as e:
+                    return {"status": "error", "error": str(e)[:200]}
+            if submit:
+                page.keyboard.press("Enter")
+                page.wait_for_timeout(500)
+            return {"status": "ok", "typed": text[:50], "into": sel}
 
         else:
-            return {"status": "error", "error": f"Unknown action: {action}"}
+            page.keyboard.type(text, delay=20 if not slowly else 50)
+            if submit:
+                page.keyboard.press("Enter")
+                page.wait_for_timeout(500)
+            return {"status": "ok", "typed": text[:50], "into": "focused_element"}
+
+    elif action == "fill":
+        fields = kwargs.get("fields", [])
+        if not fields:
+            return {"status": "error", "error": "fields required: [{ref, value}, ...]"}
+        results = []
+        for f in fields:
+            fref = f.get("ref", "")
+            fval = str(f.get("value", ""))
+            loc, info = _get_locator(page, fref)
+            if not loc:
+                results.append({"ref": fref, "error": "not found"})
+                continue
+            try:
+                role = info.get("role", "")
+                if role in ("checkbox", "radio", "switch"):
+                    loc.set_checked(fval.lower() in ("true", "1", "yes", "on"), timeout=5000)
+                else:
+                    loc.fill(fval, timeout=5000)
+                results.append({"ref": fref, "ok": True})
+            except Exception as e:
+                results.append({"ref": fref, "error": str(e)[:80]})
+        return {"status": "ok", "filled": results}
+
+    elif action == "content":
+        sel = kwargs.get("selector")
+        max_chars = kwargs.get("max_chars", 8000)
+        if sel:
+            el = page.query_selector(sel)
+            raw = el.inner_text() if el else f"Selector '{sel}' not found"
+        else:
+            raw = page.inner_text("body")
+        wrapped = _wrap_external(raw[:max_chars], source=page.url[:60])
+        return {"status": "ok", "title": page.title(), "url": page.url,
+                "content": wrapped, "truncated": len(raw) > max_chars}
+
+    elif action == "evaluate":
+        js = kwargs.get("js_code", kwargs.get("code", ""))
+        result = page.evaluate(js)
+        return {"status": "ok", "result": str(result)[:4000] if result else None}
+
+    elif action == "console":
+        msgs = []
+        def handler(m):
+            msgs.append({"type": m.type, "text": m.text[:200]})
+        page.on("console", handler)
+        page.wait_for_timeout(200)
+        page.remove_listener("console", handler)
+        return {"status": "ok", "messages": msgs[-20:]}
+
+    elif action == "screenshot":
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        path = SCREENSHOTS_DIR / f"browser_{ts}.png"
+        ref = kwargs.get("ref")
+        sel = kwargs.get("selector")
+        if ref:
+            loc, _ = _get_locator(page, ref)
+            if loc:
+                loc.screenshot(path=str(path))
+            else:
+                page.screenshot(path=str(path))
+        elif sel:
+            el = page.query_selector(sel)
+            if el:
+                el.screenshot(path=str(path))
+            else:
+                page.screenshot(path=str(path))
+        else:
+            page.screenshot(path=str(path), full_page=kwargs.get("full_page", False))
+        return {"status": "ok", "path": str(path),
+                "size_kb": round(path.stat().st_size / 1024, 1)}
+
+    elif action == "wait":
+        sel = kwargs.get("selector")
+        ms = kwargs.get("timeout_ms", 2000)
+        if sel:
+            page.wait_for_selector(sel, timeout=ms)
+            return {"status": "ok", "found": sel}
+        else:
+            page.wait_for_timeout(ms)
+            return {"status": "ok", "waited_ms": ms}
+
+    elif action == "press":
+        key = kwargs.get("key", "Enter")
+        page.keyboard.press(key)
+        page.wait_for_timeout(300)
+        return {"status": "ok", "pressed": key}
+
+    elif action == "scroll":
+        ref = kwargs.get("ref")
+        if ref:
+            loc, _ = _get_locator(page, ref)
+            if loc:
+                try:
+                    loc.scroll_into_view_if_needed(timeout=5000)
+                    return {"status": "ok", "scrolled_to_ref": ref}
+                except Exception:
+                    pass
+        d = kwargs.get("direction", "down")
+        raw_amt = kwargs.get("amount", 3)
+        amt = raw_amt * 600 if raw_amt <= 20 else raw_amt
+        dy = amt if d == "down" else -amt if d == "up" else 0
+        dx = amt if d == "right" else -amt if d == "left" else 0
+        page.mouse.wheel(dx, dy)
+        page.wait_for_timeout(1500)
+        return {"status": "ok", "scrolled": d, "pixels": amt}
+
+    elif action == "hover":
+        ref = kwargs.get("ref")
+        sel = kwargs.get("selector")
+        timeout = kwargs.get("timeout_ms", 5000)
+        if ref:
+            loc, info = _get_locator(page, ref)
+            if loc:
+                loc.hover(timeout=timeout)
+                return {"status": "ok", "hovered_ref": ref}
+            return {"status": "error", "error": f"Ref '{ref}' not found."}
+        elif sel:
+            page.locator(sel).first.hover(timeout=timeout)
+            return {"status": "ok", "hovered": sel}
+        return {"status": "error", "error": "Provide 'ref' or 'selector'."}
+
+    elif action == "select":
+        ref = kwargs.get("ref")
+        sel = kwargs.get("selector")
+        vals = kwargs.get("values", [])
+        if ref:
+            loc, _ = _get_locator(page, ref)
+            if loc:
+                loc.select_option(vals, timeout=5000)
+                return {"status": "ok", "selected": vals}
+        if sel:
+            page.locator(sel).first.select_option(vals, timeout=5000)
+            return {"status": "ok", "selected": vals}
+        return {"status": "error", "error": "Provide 'ref' or 'selector'."}
+
+    elif action == "upload":
+        file_path = kwargs.get("file_path", "")
+        sel = kwargs.get("selector", 'input[type="file"]')
+        if not file_path:
+            return {"status": "error", "error": "file_path is required"}
+        fp = Path(file_path)
+        if not fp.exists():
+            return {"status": "error", "error": f"File not found: {file_path}"}
+        try:
+            loc = page.locator(sel)
+            if loc.count() == 0:
+                return {"status": "error", "error": f"No element found for selector: {sel}",
+                        "hint": "Try 'input[type=file]' or a more specific selector. "
+                                "Or use paste_image action instead."}
+            loc.first.set_input_files(str(fp))
+            page.wait_for_timeout(2000)
+            return {"status": "ok", "uploaded": str(fp),
+                    "selector": sel, "size_kb": round(fp.stat().st_size / 1024, 1)}
+        except Exception as e:
+            return {"status": "error", "error": str(e)[:200],
+                    "hint": "Try paste_image action as fallback."}
+
+    elif action == "paste_image":
+        import subprocess, platform as _plat
+        file_path = kwargs.get("file_path", "")
+        if not file_path:
+            return {"status": "error", "error": "file_path is required"}
+        fp = Path(file_path)
+        if not fp.exists():
+            return {"status": "error", "error": f"File not found: {file_path}"}
+        try:
+            _os = _plat.system()
+            if _os == "Darwin":
+                osa_script = (
+                    f'set the clipboard to '
+                    f'(read (POSIX file "{fp}") as «class PNGf»)'
+                )
+                subprocess.run(["osascript", "-e", osa_script],
+                               check=True, capture_output=True, timeout=10)
+            elif _os == "Linux":
+                subprocess.run(
+                    ["xclip", "-selection", "clipboard", "-t", "image/png", "-i", str(fp)],
+                    check=True, capture_output=True, timeout=10,
+                )
+            elif _os == "Windows":
+                ps_cmd = (
+                    f'Add-Type -AssemblyName System.Windows.Forms; '
+                    f'[System.Windows.Forms.Clipboard]::SetImage('
+                    f'[System.Drawing.Image]::FromFile("{fp}"))'
+                )
+                subprocess.run(["powershell", "-Command", ps_cmd],
+                               check=True, capture_output=True, timeout=10)
+            else:
+                return {"status": "error", "error": f"paste_image not supported on {_os}"}
+
+            paste_key = "Control+v" if _os == "Windows" else "Meta+v"
+            ref = kwargs.get("ref")
+            if ref:
+                loc, info = _get_locator(page, ref)
+                if loc:
+                    loc.click(timeout=5000)
+                    page.wait_for_timeout(300)
+            page.keyboard.press(paste_key)
+            page.wait_for_timeout(3000)
+            return {"status": "ok", "pasted_image": str(fp),
+                    "size_kb": round(fp.stat().st_size / 1024, 1),
+                    "hint": "Image pasted from clipboard. Take a snapshot to verify it appeared."}
+        except subprocess.CalledProcessError as e:
+            return {"status": "error",
+                    "error": f"Clipboard copy failed: {e.stderr.decode('utf-8', errors='replace')[:200]}",
+                    "hint": "Try upload action instead."}
+        except Exception as e:
+            return {"status": "error", "error": str(e)[:200]}
+
+    elif action == "pdf":
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        path = SCREENSHOTS_DIR / f"page_{ts}.pdf"
+        page.pdf(path=str(path))
+        return {"status": "ok", "path": str(path)}
+
+    elif action == "tabs":
+        tabs = []
+        if _context:
+            for i, p in enumerate(_context.pages):
+                tabs.append({"index": i,
+                             "title": p.title() if not p.is_closed() else "",
+                             "url": p.url if not p.is_closed() else "",
+                             "active": p == _page})
+        return {"status": "ok", "tabs": tabs}
+
+    elif action == "new_tab":
+        _page = _context.new_page()
+        url = kwargs.get("url")
+        if url:
+            if not url.startswith(("http://", "https://")): url = "https://" + url
+            _validate_url(url)
+            _page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            _page.wait_for_timeout(500)
+        return {"status": "ok", "title": _page.title(), "url": _page.url}
+
+    elif action == "close_tab":
+        idx = kwargs.get("index")
+        pages = _context.pages if _context else []
+        if idx is not None and 0 <= idx < len(pages):
+            pages[idx].close()
+        elif _page and not _page.is_closed():
+            _page.close()
+        remaining = [p for p in (_context.pages if _context else []) if not p.is_closed()]
+        _page = remaining[-1] if remaining else None
+        return {"status": "ok", "remaining_tabs": len(remaining)}
+
+    else:
+        return {"status": "error", "error": f"Unknown action: {action}"}
 
 
 # ───────────── Tool entry point ─────────────
