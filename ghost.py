@@ -2263,7 +2263,7 @@ class GhostDaemon:
 
     def _run_goal_executor_direct(self):
         """Run the goal executor engine directly — no LLM wrapper needed."""
-        from ghost_goal_executor import GoalExecutorEngine, deliver_goal_results
+        from ghost_goal_executor import GoalExecutorEngine, deliver_goal_results, reflect_on_goal_execution
 
         start = time.time()
         try:
@@ -2291,6 +2291,16 @@ class GhostDaemon:
             # Deliver results (feed, notifications, channels)
             if results:
                 deliver_goal_results(results, self)
+
+            # Self-improvement: analyze execution and queue improvements
+            if results and self.cfg.get("enable_goal_reflection", True):
+                try:
+                    n_features = reflect_on_goal_execution(results, self)
+                    if n_features > 0:
+                        console_bus.emit("info", "cron", _GOAL_EXECUTOR_JOB,
+                                         f"Self-reflection submitted {n_features} improvement(s)")
+                except Exception as refl_exc:
+                    log.warning("[goal_executor] Reflection failed (non-fatal): %s", refl_exc)
 
             terminal_print("cron", f"[goal_executor] {processed} processed, {completed} completed",
                            result.get("message", f"{completed} goal(s) completed"))

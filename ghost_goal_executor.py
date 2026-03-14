@@ -18,7 +18,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -124,14 +124,19 @@ class GoalExecutorEngine:
 
     def _process_goal(self, goal: Dict) -> Dict:
         goal_id = goal["id"]
+        goal_start = time.time()
         result_info = {
             "goal_id": goal_id,
             "title": goal.get("title", ""),
+            "goal_text": goal.get("goal_text", ""),
             "completed": False,
             "output": None,
             "summary": None,
             "delivery": goal.get("delivery", ""),
             "recurrence": goal.get("recurrence"),
+            "qa_passed": None,
+            "failed_step_ids": [],
+            "retried_step_ids": [],
         }
 
         # Phase 0 — Recover failed steps that are under the retry cap
@@ -139,6 +144,10 @@ class GoalExecutorEngine:
         if recovered > 0:
             log.info("[goal_executor] Recovered %d failed step(s) for [%s]", recovered, goal_id)
             goal = self.store.get(goal_id)
+            result_info["retried_step_ids"] = [
+                s["id"] for s in goal.get("plan", [])
+                if s.get("retry_count", 0) > 0 and s["status"] == STEP_PENDING
+            ]
 
         # Phase 1 — plan if needed
         if goal["status"] == "pending_plan":
@@ -159,8 +168,15 @@ class GoalExecutorEngine:
                 break
             log.info("[goal_executor] Executing step [%s/%s] %s",
                      goal_id, step["id"], step["description"][:60])
+            step_start = time.time()
             ok = self._execute_step(goal, step)
-            steps_run.append({"step_id": step["id"], "ok": ok})
+            step_elapsed = int((time.time() - step_start) * 1000)
+            steps_run.append({
+                "step_id": step["id"],
+                "description": step["description"][:100],
+                "ok": ok,
+                "elapsed_ms": step_elapsed,
+            })
             goal = self.store.get(goal_id)
             if not goal:
                 break
@@ -169,6 +185,7 @@ class GoalExecutorEngine:
                       goal_id, MAX_STEPS_PER_GOAL)
 
         result_info["steps_run"] = steps_run
+        result_info["total_elapsed_ms"] = int((time.time() - goal_start) * 1000)
 
         if not goal:
             return result_info
@@ -182,12 +199,23 @@ class GoalExecutorEngine:
         has_pending = self.store.next_pending_step(goal) is not None
         has_failed = any(s["status"] == STEP_FAILED for s in goal.get("plan", []))
 
+        # Capture failed step IDs and error messages for reflection
+        result_info["failed_step_ids"] = [
+            s["id"] for s in goal.get("plan", []) if s["status"] == STEP_FAILED
+        ]
+        result_info["step_errors"] = {
+            s["id"]: s.get("error", "unknown")
+            for s in goal.get("plan", [])
+            if s["status"] == STEP_FAILED and s.get("error")
+        }
+
         # Phase 3 — quality check + complete
         if all_done:
             output = goal.get("last_output", "")
             if output:
                 log.info("[goal_executor] Quality check for goal [%s]", goal_id)
                 qa_passed = self._quality_check(goal)
+                result_info["qa_passed"] = qa_passed
 
                 refreshed = self.store.get(goal_id)
                 if refreshed:
@@ -226,6 +254,8 @@ class GoalExecutorEngine:
                 result_info["output"] = refreshed.get("last_output", "")
                 result_info["summary"] = summary
 
+        result_info["total_elapsed_ms"] = int((time.time() - goal_start) * 1000)
+        result_info["observations"] = goal.get("observations", [])[-10:]
         return result_info
 
     # ------------------------------------------------------------------
@@ -610,6 +640,293 @@ def _deliver_memory(title: str, output: str, summary: str,
             content=f"Goal output: {title}\n\n{output[:2000]}",
             tags=f"goal,{goal_id}",
         )
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  SELF-IMPROVEMENT REFLECTION — Ghost learns from every goal cycle
+# ═══════════════════════════════════════════════════════════════════
+
+_REFLECTION_RATE_FILE = Path.home() / ".ghost" / "goal_reflection_log.json"
+_REFLECTION_COOLDOWN_HOURS = 8
+
+_REFLECT_SYSTEM = """\
+You are Ghost's self-improvement engine. You have just completed a goal execution
+cycle and must analyze the execution data for concrete improvements to Ghost's
+codebase. You are looking at real execution metrics — timing, failures, retries,
+and QA outcomes.
+
+Your job: identify specific, actionable improvements and submit each one via
+add_future_feature. Focus on things that will make Ghost BETTER at running
+goals — not the goal's content itself.
+
+WHAT TO LOOK FOR:
+1. Steps that took >30s — can they be parallelized, cached, or use a faster tool?
+2. Steps that FAILED — what broke? Is there a missing error handler? A tool bug?
+3. Steps that were RETRIED — intermittent failures suggest fragile tool integration.
+4. QA rejections — the output format or quality was wrong. What prompt or tool change fixes this?
+5. Missing tools — did Ghost have to work around a capability it should have natively?
+6. Repeated patterns across recurring goals — these compound and deserve optimization.
+
+CRITICAL — DISTINGUISH BUGS FROM ENVIRONMENT:
+Not every failure is a code bug. Before submitting anything, evaluate the ROOT CAUSE:
+- Network timeouts, DNS failures, rate limits, API outages → these are TRANSIENT. Do NOT submit features for them.
+- Slow steps caused by large data or external API latency → NOT a Ghost bug. Skip.
+- Authentication errors from expired tokens → NOT a code bug unless Ghost should auto-refresh.
+- Failures that happen once but not repeatedly → likely transient. Skip.
+Only submit a feature if the problem is CLEARLY in Ghost's own code, logic, prompts, or architecture.
+When in doubt, do NOT submit. False negatives are far better than spam.
+
+DEDUPLICATION:
+Before calling add_future_feature, think about whether a similar improvement was likely
+already submitted (e.g. from a previous run of this same recurring goal). The system has
+built-in duplicate detection, but you should still avoid submitting near-duplicates with
+slightly different wording. If the improvement is generic enough that it was probably
+already proposed, skip it.
+
+RULES:
+- Be SPECIFIC: name the exact file, function, or tool that needs changing.
+- Use category "bugfix" for failures, "improvement" for performance, "feature" for missing capabilities.
+- Set priority P2 for optimizations, P1 for things that caused actual failures.
+- If execution was clean and fast (<30s total, no failures, QA passed), say "No improvements needed" and do NOT submit any features.
+- If failures look transient (network, rate-limit, timeout) say "Transient issues — no code changes needed" and do NOT submit.
+- Maximum 3 features per reflection — focus on the highest-impact items.
+- NEVER submit vague features like "improve error handling" or "make things faster".
+- NEVER submit features about external services being slow or unavailable.
+"""
+
+
+def _should_reflect(goal_id: str) -> bool:
+    """Rate-limit: at most one reflection per goal every _REFLECTION_COOLDOWN_HOURS."""
+    try:
+        if _REFLECTION_RATE_FILE.exists():
+            log_data = json.loads(_REFLECTION_RATE_FILE.read_text(encoding="utf-8"))
+        else:
+            log_data = {}
+        last = log_data.get(goal_id)
+        if last:
+            last_dt = datetime.fromisoformat(last)
+            if datetime.now() - last_dt < timedelta(hours=_REFLECTION_COOLDOWN_HOURS):
+                return False
+    except Exception:
+        pass
+    return True
+
+
+def _mark_reflected(goal_id: str) -> None:
+    """Record that we reflected on this goal."""
+    try:
+        log_data = {}
+        if _REFLECTION_RATE_FILE.exists():
+            log_data = json.loads(_REFLECTION_RATE_FILE.read_text(encoding="utf-8"))
+        log_data[goal_id] = datetime.now().isoformat()
+        cutoff = datetime.now() - timedelta(days=7)
+        log_data = {
+            k: v for k, v in log_data.items()
+            if datetime.fromisoformat(v) > cutoff
+        }
+        _REFLECTION_RATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _REFLECTION_RATE_FILE.write_text(json.dumps(log_data, indent=2), encoding="utf-8")
+    except Exception as exc:
+        log.warning("[goal_reflection] Failed to write rate-limit log: %s", exc)
+
+
+def _build_reflection_prompt(r: Dict) -> str:
+    """Build the analysis prompt from execution result data."""
+    lines = [
+        f"## Goal Execution Report",
+        f"**Goal**: {r.get('title', 'Untitled')}",
+        f"**Description**: {r.get('goal_text', 'N/A')}",
+        f"**Total time**: {r.get('total_elapsed_ms', 0)}ms",
+        f"**Completed**: {r.get('completed', False)}",
+        f"**QA passed**: {r.get('qa_passed', 'N/A')}",
+        f"**Recurring**: {r.get('recurrence') or 'one-shot'}",
+        "",
+        "### Steps Executed:",
+    ]
+
+    for s in r.get("steps_run", []):
+        status = "OK" if s.get("ok") else "FAILED"
+        lines.append(f"  - [{status}] {s.get('description', '?')} — {s.get('elapsed_ms', 0)}ms")
+
+    failed = r.get("failed_step_ids", [])
+    if failed:
+        lines.append(f"\n**Permanently failed steps**: {', '.join(failed)}")
+
+    retried = r.get("retried_step_ids", [])
+    if retried:
+        lines.append(f"**Steps that needed retries**: {', '.join(retried)}")
+
+    # Include actual error messages so the LLM can distinguish transient vs structural
+    step_errors = r.get("step_errors", {})
+    if step_errors:
+        lines.append("\n### Error Details:")
+        for sid, err in step_errors.items():
+            lines.append(f"  - Step {sid}: {str(err)[:300]}")
+
+    observations = r.get("observations", [])
+    if observations:
+        lines.append("\n### Observations (from execution):")
+        for obs in observations:
+            text = obs.get("text") if isinstance(obs, dict) else str(obs)
+            lines.append(f"  - {text}")
+
+    lines.append(
+        "\n---\nAnalyze the above. First decide: are the issues TRANSIENT (network, "
+        "rate-limits, external API) or STRUCTURAL (Ghost code bug, missing tool, bad prompt)? "
+        "Only submit improvements for structural issues via add_future_feature. "
+        "If transient or clean, state why and do NOT submit any features."
+    )
+    return "\n".join(lines)
+
+
+def reflect_on_goal_execution(results: List[Dict], daemon) -> int:
+    """Analyze completed goal executions and submit self-improvement features.
+
+    Returns the number of features submitted.
+    """
+    from ghost_future_features import FutureFeaturesStore, SOURCE_GOAL_REFLECTION
+
+    qualifying = []
+    for r in results:
+        if r.get("error") or r.get("skipped"):
+            continue
+
+        goal_id = r.get("goal_id", "")
+        if not goal_id:
+            continue
+
+        if not _should_reflect(goal_id):
+            log.debug("[goal_reflection] Skipping [%s] — reflected recently", goal_id)
+            continue
+
+        has_failures = bool(r.get("failed_step_ids"))
+        has_retries = bool(r.get("retried_step_ids"))
+        qa_failed = r.get("qa_passed") is False
+        is_recurring = bool(r.get("recurrence"))
+        slow_steps = any(
+            s.get("elapsed_ms", 0) > 30000
+            for s in r.get("steps_run", [])
+        )
+
+        if has_failures or has_retries or qa_failed or is_recurring or slow_steps:
+            qualifying.append(r)
+
+    if not qualifying:
+        log.info("[goal_reflection] No goals qualify for reflection this cycle.")
+        return 0
+
+    features_store = FutureFeaturesStore()
+    total_submitted = 0
+
+    cfg = daemon.cfg if daemon else {}
+    auth_store = getattr(daemon, "auth_store", None)
+    provider_chain = getattr(daemon, "provider_chain", None)
+
+    api_key = None
+    if auth_store:
+        try:
+            api_key = auth_store.get_api_key("openrouter")
+        except Exception:
+            pass
+    if not api_key:
+        api_key = os.environ.get("OPENROUTER_API_KEY", "")
+    if not api_key:
+        log.warning("[goal_reflection] No API key — skipping reflection")
+        return 0
+
+    for r in qualifying[:3]:
+        goal_id = r.get("goal_id", "?")
+        try:
+            prompt = _build_reflection_prompt(r)
+            log.info("[goal_reflection] Reflecting on goal [%s]: %s", goal_id, r.get("title", ""))
+
+            ff_tool = _build_reflection_ff_tool(features_store, goal_id)
+
+            from ghost_loop import ToolLoopEngine, ToolRegistry
+            registry = ToolRegistry()
+            registry.register(ff_tool)
+
+            engine = ToolLoopEngine(
+                api_key=api_key,
+                model=cfg.get("model", "anthropic/claude-sonnet-4"),
+                fallback_models=cfg.get("fallback_models", []),
+                auth_store=auth_store,
+                provider_chain=provider_chain,
+            )
+
+            engine.run(
+                system_prompt=_REFLECT_SYSTEM,
+                user_message=prompt,
+                tool_registry=registry,
+                max_steps=10,
+                temperature=0.3,
+                max_tokens=2048,
+            )
+
+            submitted = ff_tool["_submitted_count"]["count"]
+            total_submitted += submitted
+            _mark_reflected(goal_id)
+
+            log.info("[goal_reflection] Goal [%s] reflection done — %d feature(s) submitted",
+                     goal_id, submitted)
+
+        except Exception as exc:
+            log.error("[goal_reflection] Failed to reflect on goal [%s]: %s",
+                      goal_id, exc, exc_info=True)
+
+    return total_submitted
+
+
+def _build_reflection_ff_tool(store, goal_id: str) -> Dict:
+    """Build a lightweight add_future_feature tool for the reflection session."""
+    from ghost_future_features import SOURCE_GOAL_REFLECTION
+
+    state = {"count": 0}
+
+    def add_future_feature(title: str, description: str, priority: str = "P2",
+                           category: str = "improvement", affected_files: str = "",
+                           proposed_approach: str = "", **kwargs) -> Dict:
+        result = store.add(
+            title=title,
+            description=description,
+            priority=priority,
+            source=SOURCE_GOAL_REFLECTION,
+            source_detail=f"goal:{goal_id}",
+            category=category,
+            affected_files=affected_files,
+            proposed_approach=proposed_approach,
+            tags=["goal_reflection", f"goal:{goal_id}"],
+            auto_implement=True,
+        )
+        if not result.get("_warning"):
+            state["count"] += 1
+        return result
+
+    tool = {
+        "name": "add_future_feature",
+        "description": (
+            "Submit a specific improvement to Ghost's codebase based on goal execution analysis. "
+            "Be specific: name exact files, functions, or tools. "
+            "Categories: bugfix, improvement, feature, refactor. "
+            "Priorities: P1 (caused failures), P2 (optimization)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Short title for the improvement"},
+                "description": {"type": "string", "description": "Detailed description of what to change and why"},
+                "priority": {"type": "string", "enum": ["P1", "P2", "P3"], "description": "P1=failure fix, P2=optimization, P3=nice-to-have"},
+                "category": {"type": "string", "enum": ["bugfix", "improvement", "feature", "refactor"]},
+                "affected_files": {"type": "string", "description": "Comma-separated file paths that need changing"},
+                "proposed_approach": {"type": "string", "description": "Concrete implementation approach"},
+            },
+            "required": ["title", "description"],
+        },
+        "execute": add_future_feature,
+        "_submitted_count": state,
+    }
+    tool["_submitted_count"] = state
+    return tool
 
 
 # ═══════════════════════════════════════════════════════════════════

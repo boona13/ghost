@@ -400,6 +400,16 @@ function renderDrawer(goal) {
       </div>
     ` : ''}
 
+    <!-- Self-Improvement: loaded async -->
+    <div id="goal-improvements-section" class="hidden mb-5">
+      <div class="flex items-center gap-2 mb-2">
+        <div class="text-[10px] uppercase tracking-wider text-violet-400 font-semibold">Self-Improvement</div>
+        <span class="text-[9px] px-1.5 py-0.5 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-400" id="improvements-count"></span>
+      </div>
+      <p class="text-[10px] text-zinc-600 mb-2">Ghost analyzed this goal's execution and submitted these improvements to its own codebase:</p>
+      <div id="goal-improvements-list" class="space-y-1.5"></div>
+    </div>
+
     <div class="text-[10px] text-zinc-600 mt-4 pt-4 border-t border-zinc-800">
       ID: <span class="font-mono">${goal.id}</span>
       &nbsp;·&nbsp; Created: ${(goal.created_at || '').slice(0, 16).replace('T', ' ')}
@@ -635,6 +645,39 @@ function openDrawer(goal, api, u) {
         }
       });
     });
+  }
+
+  // Fetch self-improvements Ghost made from this goal
+  if (api) {
+    api.get(`/api/goals/${goal.id}/improvements`).then(data => {
+      const section = document.getElementById('goal-improvements-section');
+      const list = document.getElementById('goal-improvements-list');
+      const count = document.getElementById('improvements-count');
+      if (!section || !list || !data.improvements || data.improvements.length === 0) return;
+
+      count.textContent = `${data.improvements.length} queued`;
+      list.innerHTML = data.improvements.map(imp => {
+        const priorityColor = imp.priority === 'P1' ? 'text-red-400 border-red-500/30 bg-red-500/5'
+          : imp.priority === 'P2' ? 'text-amber-400 border-amber-500/30 bg-amber-500/5'
+          : 'text-zinc-400 border-zinc-600/30 bg-zinc-700/20';
+        const statusIcon = imp.status === 'implemented' || imp.status === 'completed'
+          ? '<svg class="w-3 h-3 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>'
+          : imp.status === 'in_progress'
+          ? '<svg class="w-3 h-3 text-blue-400 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>'
+          : '<svg class="w-3 h-3 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>';
+        return `
+          <div class="p-2.5 rounded-lg border ${priorityColor} transition-all hover:brightness-110">
+            <div class="flex items-center gap-2 mb-1">
+              ${statusIcon}
+              <span class="text-[11px] font-semibold">${escHtml(imp.title)}</span>
+              <span class="text-[9px] px-1 py-0.5 rounded font-mono">${imp.priority}</span>
+              <span class="text-[9px] px-1 py-0.5 rounded bg-zinc-700/30 text-zinc-500">${imp.category}</span>
+            </div>
+            <p class="text-[10px] text-zinc-500 leading-snug ml-5">${escHtml((imp.description || '').slice(0, 200))}</p>
+          </div>`;
+      }).join('');
+      section.classList.remove('hidden');
+    }).catch(() => {});
   }
 }
 

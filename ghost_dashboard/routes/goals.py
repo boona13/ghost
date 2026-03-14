@@ -156,8 +156,9 @@ def run_goal_now(goal_id):
 
     def _run_in_background():
         try:
-            from ghost_goal_executor import GoalExecutorEngine, deliver_goal_results
-            # Reload goal from store to avoid stale data
+            from ghost_goal_executor import (
+                GoalExecutorEngine, deliver_goal_results, reflect_on_goal_execution,
+            )
             fresh_goal = store.get(goal_id)
             if not fresh_goal:
                 log.warning("Goal [%s] disappeared before run-now could execute", goal_id)
@@ -169,11 +170,44 @@ def run_goal_now(goal_id):
                 provider_chain=getattr(daemon, "provider_chain", None),
             )
             result = executor._process_goal(fresh_goal)
+            results = [result]
             if result.get("completed"):
-                deliver_goal_results([result], daemon)
+                deliver_goal_results(results, daemon)
+            if daemon.cfg.get("enable_goal_reflection", True):
+                try:
+                    reflect_on_goal_execution(results, daemon)
+                except Exception:
+                    pass
         except Exception as exc:
             log.error("Goal run-now failed for [%s]: %s", goal_id, exc, exc_info=True)
 
     t = threading.Thread(target=_run_in_background, daemon=True, name=f"goal-run-{goal_id}")
     t.start()
     return jsonify({"ok": True, "message": f"Goal execution started in background for [{goal_id}]"})
+
+
+@bp.route("/<goal_id>/improvements")
+def goal_improvements(goal_id):
+    """Fetch self-improvement features Ghost submitted after reflecting on this goal."""
+    try:
+        from ghost_future_features import FutureFeaturesStore
+        ff_store = FutureFeaturesStore()
+        all_features = ff_store._load()
+        tag = f"goal:{goal_id}"
+        improvements = [
+            {
+                "id": f.get("id"),
+                "title": f.get("title"),
+                "description": f.get("description"),
+                "priority": f.get("priority"),
+                "category": f.get("category"),
+                "status": f.get("status"),
+                "created_at": f.get("created_at"),
+            }
+            for f in all_features
+            if tag in f.get("tags", []) or f.get("source_detail", "") == tag
+        ]
+        return jsonify({"ok": True, "improvements": improvements, "count": len(improvements)})
+    except Exception as exc:
+        log.error("Failed to fetch improvements for goal [%s]: %s", goal_id, exc)
+        return jsonify({"ok": True, "improvements": [], "count": 0})
