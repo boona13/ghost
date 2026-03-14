@@ -161,6 +161,7 @@ class GoalStore:
             "plan": [],
             "current_step": 0,
             "observations": [],
+            "scratch": {},
             "context": context or {},
             "recurrence": recurrence,
             "delivery": context.get("delivery", "") if context else "",
@@ -280,6 +281,7 @@ class GoalStore:
                 "status": STEP_PENDING,
                 "result": None,
                 "error": None,
+                "retry_count": 0,
                 "started_at": None,
                 "completed_at": None,
             })
@@ -322,7 +324,7 @@ class GoalStore:
         return None
 
     def mark_step_failed(self, goal_id: str, step_id: str, error: str = "") -> Optional[Dict]:
-        """Mark a step as failed."""
+        """Mark a step as failed and increment its retry counter."""
         goals = self._load()
         for g in goals:
             if g["id"] != goal_id:
@@ -332,6 +334,7 @@ class GoalStore:
                 return None
             g["plan"][idx]["status"] = STEP_FAILED
             g["plan"][idx]["error"] = error
+            g["plan"][idx]["retry_count"] = g["plan"][idx].get("retry_count", 0) + 1
             g["plan"][idx]["completed_at"] = datetime.now().isoformat()
             g["last_executed_at"] = datetime.now().isoformat()
             g["updated_at"] = datetime.now().isoformat()
@@ -358,6 +361,66 @@ class GoalStore:
             return g
         return None
 
+    # ------------------------------------------------------------------
+    # Scratch space (inter-step structured data)
+    # ------------------------------------------------------------------
+
+    def set_scratch(self, goal_id: str, key: str, value: Any) -> Optional[Dict]:
+        """Store a key-value pair in the goal's scratch space.
+
+        Scratch survives across steps within a cycle, allowing steps to
+        pass structured data (URLs, lists, intermediate results) forward.
+        Scratch is cleared when a recurring goal resets for the next cycle.
+        """
+        goals = self._load()
+        for g in goals:
+            if g["id"] != goal_id:
+                continue
+            scratch = g.setdefault("scratch", {})
+            scratch[key] = value
+            g["updated_at"] = datetime.now().isoformat()
+            self._save(goals)
+            return g
+        return None
+
+    def get_scratch(self, goal_id: str) -> Dict:
+        """Return the full scratch dict for a goal."""
+        g = self.get(goal_id)
+        if not g:
+            return {}
+        return g.get("scratch", {})
+
+    # ------------------------------------------------------------------
+    # Failed step recovery
+    # ------------------------------------------------------------------
+
+    def retry_failed_steps(self, goal_id: str, max_retries: int = 3) -> int:
+        """Reset STEP_FAILED steps back to STEP_PENDING if under retry cap.
+
+        Returns the number of steps reset.
+        """
+        goals = self._load()
+        reset_count = 0
+        for g in goals:
+            if g["id"] != goal_id:
+                continue
+            for step in g.get("plan", []):
+                if step["status"] == STEP_FAILED:
+                    retries = step.get("retry_count", 0)
+                    if retries < max_retries:
+                        step["status"] = STEP_PENDING
+                        step["error"] = None
+                        step["completed_at"] = None
+                        reset_count += 1
+                    else:
+                        log.info("Step [%s/%s] exceeded max retries (%d), staying failed",
+                                 goal_id, step["id"], max_retries)
+            if reset_count > 0:
+                g["updated_at"] = datetime.now().isoformat()
+                self._save(goals)
+            return reset_count
+        return 0
+
     def complete_goal(self, goal_id: str, summary: str = "") -> Optional[Dict]:
         """Mark a goal as completed.
 
@@ -382,14 +445,16 @@ class GoalStore:
                     "completed_at": datetime.now().isoformat(),
                     "run": g["completion_count"],
                 }
-                # Reset steps for the next cycle
+                # Reset steps and scratch for the next cycle
                 for step in g.get("plan", []):
                     step["status"] = STEP_PENDING
                     step["result"] = None
                     step["error"] = None
+                    step["retry_count"] = 0
                     step["started_at"] = None
                     step["completed_at"] = None
                 g["current_step"] = 0
+                g["scratch"] = {}
                 g["status"] = STATUS_ACTIVE
                 g["completed_at"] = None
             else:
@@ -836,6 +901,32 @@ def build_goal_tools(store: Optional[GoalStore] = None) -> List[Dict]:
         }
 
     # ------------------------------------------------------------------
+    # goal_set_scratch
+    # ------------------------------------------------------------------
+    def goal_set_scratch(goal_id: str, key: str, value: str, **kwargs):
+        """
+        Store structured data in the goal's scratch space for use by later steps.
+
+        Scratch persists across steps within the same execution cycle. Use it to
+        pass URLs, lists, intermediate results, or any data that a future step
+        needs. Scratch is cleared when a recurring goal resets for the next cycle.
+
+        Args:
+            goal_id: The goal ID.
+            key: A descriptive key (e.g. 'competitor_urls', 'research_findings').
+            value: The data to store (string — use JSON for structured data).
+        """
+        updated = store.set_scratch(goal_id, key, value)
+        if not updated:
+            return {"error": f"Goal not found: {goal_id}"}
+        return {
+            "ok": True,
+            "goal_id": goal_id,
+            "key": key,
+            "scratch_keys": list(updated.get("scratch", {}).keys()),
+        }
+
+    # ------------------------------------------------------------------
     # goal_set_delivery
     # ------------------------------------------------------------------
     def goal_set_delivery(goal_id: str, delivery: str, **kwargs):
@@ -1096,6 +1187,30 @@ def build_goal_tools(store: Optional[GoalStore] = None) -> List[Dict]:
                 "required": ["goal_id", "output"],
             },
             "execute": goal_set_output,
+        },
+        {
+            "name": "goal_set_scratch",
+            "description": (
+                "Store structured data in a goal's scratch space for later steps. "
+                "Use to pass URLs, lists, findings, or intermediate results between "
+                "steps. Persists within the execution cycle. Cleared on cycle reset."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "goal_id": {"type": "string"},
+                    "key": {
+                        "type": "string",
+                        "description": "Descriptive key (e.g. 'research_urls', 'price_data').",
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "Data to store. Use JSON string for structured data.",
+                    },
+                },
+                "required": ["goal_id", "key", "value"],
+            },
+            "execute": goal_set_scratch,
         },
         {
             "name": "goal_set_delivery",

@@ -386,6 +386,7 @@ _FEATURE_MUTATE_TOOL_NAMES = frozenset({
 
 _FEATURE_IMPLEMENTER_JOB = "_ghost_growth_feature_implementer"
 _IMPLEMENTATION_AUDITOR_JOB = "_ghost_growth_implementation_auditor"
+_GOAL_EXECUTOR_JOB = "_ghost_growth_goal_executor"
 
 _CRON_JOB_TIMEOUTS: dict[str, int] = {
     _FEATURE_IMPLEMENTER_JOB: 900,
@@ -2024,6 +2025,13 @@ class GhostDaemon:
                 )
                 return
 
+        # Goal Executor — run directly without LLM wrapper (deterministic engine)
+        if job_name == _GOAL_EXECUTOR_JOB:
+            if not self.cfg.get("enable_goals", True):
+                return
+            self._run_goal_executor_direct()
+            return
+
         if ptype == "task":
             prompt = payload.get("prompt", "")
             if not prompt:
@@ -2252,6 +2260,45 @@ class GhostDaemon:
                 )
         except Exception as exc:
             log.debug("Cron summary notification failed: %s", exc)
+
+    def _run_goal_executor_direct(self):
+        """Run the goal executor engine directly — no LLM wrapper needed."""
+        from ghost_goal_executor import GoalExecutorEngine, deliver_goal_results
+
+        start = time.time()
+        try:
+            executor = GoalExecutorEngine(
+                cfg=self.cfg,
+                tool_registry=self.tool_registry,
+                auth_store=getattr(self, "auth_store", None),
+                provider_chain=getattr(self, "provider_chain", None),
+            )
+            result = executor.run_all()
+            elapsed = time.time() - start
+
+            processed = result.get("processed", 0)
+            results = result.get("results", [])
+            completed = sum(1 for r in results if r.get("completed"))
+
+            if processed == 0:
+                console_bus.emit("info", "cron", _GOAL_EXECUTOR_JOB,
+                                 "No actionable goals")
+                return
+
+            console_bus.emit("success", "cron", _GOAL_EXECUTOR_JOB,
+                             f"Processed {processed} goal(s), {completed} completed in {elapsed:.1f}s")
+
+            # Deliver results (feed, notifications, channels)
+            if results:
+                deliver_goal_results(results, self)
+
+            terminal_print("cron", f"[goal_executor] {processed} processed, {completed} completed",
+                           result.get("message", f"{completed} goal(s) completed"))
+
+        except Exception as exc:
+            log.error("[goal_executor] Direct execution failed: %s", exc, exc_info=True)
+            console_bus.emit("error", "cron", _GOAL_EXECUTOR_JOB,
+                             f"Executor error: {exc}")
 
     def stop(self, *_):
         console_bus.emit("warn", "system", "daemon_stop", "Ghost shutting down")
