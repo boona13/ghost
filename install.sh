@@ -7,8 +7,8 @@ set -euo pipefail
 #   2. Local:      cd ghost && bash install.sh
 #
 # Options:
-#   --no-interactive    Skip prompts (Playwright=no, API key=skip)
-#   --with-playwright   Auto-install Playwright without asking
+#   --no-interactive    Skip prompts (API key=skip)
+#   --no-pinchtab       Skip PinchTab install (browser automation will auto-install on first use)
 #   --api-key KEY       Set the OpenRouter API key non-interactively
 #   --fresh             Wipe ~/.ghost/ and start clean (backs up existing data)
 # ─────────────────────────────────────────────────────────────────────
@@ -20,14 +20,15 @@ RST="\033[0m"; B="\033[1m"; DIM="\033[2m"
 RED="\033[31m"; GRN="\033[32m"; YLW="\033[33m"; CYN="\033[36m"
 
 NO_INTERACTIVE=false
-WITH_PLAYWRIGHT=false
+SKIP_PINCHTAB=false
 FRESH_INSTALL=false
 API_KEY_ARG=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --no-interactive) NO_INTERACTIVE=true; shift ;;
-    --with-playwright) WITH_PLAYWRIGHT=true; shift ;;
+    --no-pinchtab) SKIP_PINCHTAB=true; shift ;;
+    --with-pinchtab) shift ;;  # kept for backward compat, now default
     --fresh) FRESH_INSTALL=true; shift ;;
     --api-key) API_KEY_ARG="$2"; shift 2 ;;
     *) shift ;;
@@ -132,31 +133,22 @@ pip install --upgrade pip -q 2>&1 | tail -1 || true
 pip install -r "$GHOST_DIR/requirements.txt" -q 2>&1 | tail -1 || fail "pip install failed — check requirements.txt"
 ok "Dependencies installed"
 
-# ── 4. Optional: Playwright ──────────────────────────────────────────
+# ── 4. PinchTab (browser automation) ─────────────────────────────────
 
-step "Browser automation (optional)..."
-INSTALL_PW=false
+step "Browser automation (PinchTab)..."
 
-if [ "$WITH_PLAYWRIGHT" = true ]; then
-  INSTALL_PW=true
-elif [ "$NO_INTERACTIVE" = false ]; then
-  echo ""
-  echo -e "    Playwright enables Ghost to control a real browser."
-  echo -e "    This downloads ~150MB of browser binaries."
-  echo ""
-  read -p "    Install Playwright? [y/N] " -n 1 -r
-  echo ""
-  if [[ $REPLY =~ ^[Yy]$ ]]; then
-    INSTALL_PW=true
-  fi
-fi
-
-if [ "$INSTALL_PW" = true ]; then
-  pip install playwright -q 2>/dev/null
-  python -m playwright install chromium 2>/dev/null
-  ok "Playwright + Chromium installed"
+if [ "$SKIP_PINCHTAB" = true ]; then
+  ok "Skipped (Ghost will auto-install PinchTab on first browser use)"
+elif command -v pinchtab &>/dev/null; then
+  PT_VER=$(pinchtab --version 2>/dev/null || echo "unknown")
+  ok "PinchTab already installed ($PT_VER)"
 else
-  ok "Skipped (install later: pip install playwright && python -m playwright install chromium)"
+  echo -e "    ${DIM}Installing PinchTab (~12MB binary, uses your existing Chrome)...${RST}"
+  if curl -fsSL https://pinchtab.com/install.sh | bash 2>/dev/null; then
+    ok "PinchTab installed"
+  else
+    warn "PinchTab install failed — Ghost will auto-install on first browser use"
+  fi
 fi
 
 # ── 5. Create ~/.ghost directory ─────────────────────────────────────

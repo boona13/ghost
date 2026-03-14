@@ -82,7 +82,21 @@ _DEFERRAL_RE = _re.compile(
     r"|I (?:will|need to) (?:do|try) (?:this|it) (?:properly|correctly|differently))",
     _re.IGNORECASE,
 )
+_INCOMPLETE_TASK_RE = _re.compile(
+    r"(?:not yet (?:delivered|complete|finished|verified|done|placed)"
+    r"|haven'?t (?:finished|completed|verified|placed|done|delivered)"
+    r"|still (?:need|needs|working|trying|attempting|in progress)"
+    r"|not (?:fully )?(?:complete|done|finished|verified)"
+    r"|couldn'?t (?:click|select|find|interact|complete|place|submit|open|close)"
+    r"|failed to (?:click|select|find|interact|complete|place|submit)"
+    r"|dialog (?:is )?still (?:open|showing|visible|present)"
+    r"|page (?:didn'?t|did not) (?:change|update|navigate|respond)"
+    r"|button (?:didn'?t|did not) (?:work|respond|activate|click)"
+    r"|I (?:was|am) unable to (?:click|complete|select|place|submit|interact))",
+    _re.IGNORECASE,
+)
 _MIN_TOOLS_BEFORE_ACCEPT_DEFERRAL = 4
+_MIN_BROWSER_STEPS = 8
 
 # ═════════════════════════════════════════════════════════════════════
 #  MODEL FALLBACK CHAIN
@@ -3038,6 +3052,38 @@ class ToolLoopEngine:
                                 "Do NOT ask the user what they want — just try it yourself."
                             )
                             _debug_logger.step_text_response(step, text_content, "pushback_deferral")
+                            messages.append({"role": "user", "content": pushback})
+                            continue
+
+                        # Browser task incomplete detection: if the model used
+                        # browser tools but admits the task isn't done, push back
+                        # and force it to keep going autonomously.
+                        browser_used = any(
+                            tc.get("name") == "browser" for tc in tool_calls_log
+                        )
+                        task_incomplete = bool(_INCOMPLETE_TASK_RE.search(text_content))
+                        too_few_browser_steps = (
+                            browser_used
+                            and sum(1 for tc in tool_calls_log if tc.get("name") == "browser") < _MIN_BROWSER_STEPS
+                        )
+
+                        if (task_incomplete or too_few_browser_steps) and rctx.consecutive_text_only <= 2:
+                            pushback = (
+                                "You stopped but the task is NOT complete. "
+                                "You are an AUTONOMOUS agent — you MUST self-debug and keep going.\n\n"
+                                "WHAT TO DO NOW:\n"
+                                "1. Take a snapshot to see the current page state\n"
+                                "2. If a dialog/modal is still open, your previous click didn't work\n"
+                                "3. Escalate your click approach:\n"
+                                "   - Try 'evaluate' with JS: find the element by text content, then "
+                                "dispatch full event sequence (pointerdown, mousedown, pointerup, mouseup, click)\n"
+                                "   - Try clicking a PARENT element instead of the exact ref\n"
+                                "   - Try keyboard navigation: focus the element, then press Enter\n"
+                                "4. After each attempt, snapshot to verify the page actually changed\n"
+                                "5. Keep iterating until the task is VERIFIABLY complete with a screenshot\n\n"
+                                "DO NOT respond with text. Call browser tool NOW."
+                            )
+                            _debug_logger.step_text_response(step, text_content, "pushback_browser_incomplete")
                             messages.append({"role": "user", "content": pushback})
                             continue
 

@@ -12,6 +12,20 @@ fi
 GHOST_HOME="$HOME/.ghost"
 GHOST_PORT="${GHOST_PORT:-3333}"
 
+# PinchTab: enable JS evaluate endpoint for browser automation fallbacks
+export PINCHTAB_ALLOW_EVALUATE="${PINCHTAB_ALLOW_EVALUATE:-true}"
+
+# ── Ensure PinchTab is running (browser automation server) ────────
+PINCHTAB_PORT="${PINCHTAB_PORT:-9867}"
+if command -v pinchtab &>/dev/null; then
+  if ! curl -s -o /dev/null -w "%{http_code}" "http://localhost:$PINCHTAB_PORT/health" 2>/dev/null | grep -q "200"; then
+    echo "Starting PinchTab browser server..."
+    PINCHTAB_ALLOW_EVALUATE=true nohup pinchtab server > "$GHOST_HOME/pinchtab.log" 2>&1 &
+    echo $! > "$GHOST_HOME/pinchtab.pid"
+    sleep 2
+  fi
+fi
+
 # ── Kill any running Ghost instances (PID files + port) ──────────
 killed=false
 

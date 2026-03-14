@@ -94,7 +94,7 @@ from ghost_structured_memory import (
     get_structured_memory_config, StructuredMemoryConfig,
     set_structured_memory_config,
 )
-# from ghost_browser_use import build_browser_use_tools  # disabled — burns rate limits
+# ghost_browser_use removed — replaced by PinchTab in ghost_browser.py
 from ghost_resource_manager import ResourceManager, build_resource_manager_tools
 from ghost_node_manager import NodeManager, build_node_manager_tools
 from ghost_media_store import MediaStore, build_media_store_tools
@@ -417,7 +417,8 @@ DEFAULT_CONFIG = {
     "enable_skills": True,
     "enable_system_tools": True,
     "enable_browser_tools": True,
-    "enable_browser_use": True,  # AI-native browser automation via browser-use
+    "pinchtab_url": "http://localhost:9867",
+    "pinchtab_profile": "ghost",
     "strict_tool_registration": True,   # Security: True prevents tool shadowing (CVE-2025-59536/21852 defense)
     "enable_cron": True,
     "enable_evolve": True,
@@ -1063,15 +1064,16 @@ class GhostDaemon:
             for tool_def in build_default_tools(cfg):
                 self.tool_registry.register(tool_def)
 
-        # Browser tools (lazy-loaded, only activated when the LLM calls them)
+        # Browser tools (PinchTab HTTP API)
         if cfg.get("enable_browser_tools", True):
+            from ghost_browser import pinchtab_health
+            if pinchtab_health():
+                log.info("PinchTab connected: %s", cfg.get("pinchtab_url", "http://localhost:9867"))
+            else:
+                log.warning("PinchTab not reachable at %s. Browser tools registered but will fail until PinchTab starts. "
+                            "Run: pinchtab", cfg.get("pinchtab_url", "http://localhost:9867"))
             for tool_def in build_browser_tools():
                 self.tool_registry.register(tool_def)
-
-        # Browser-use tools — disabled (uses separate LLM calls that burn rate limits)
-        # if cfg.get("enable_browser_use", True):
-        #     for tool_def in build_browser_use_tools(cfg):
-        #         self.tool_registry.register(tool_def)
 
         # Persistent memory (skip in dry-run mode for faster startup)
         self.memory_db = None

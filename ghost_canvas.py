@@ -9,6 +9,7 @@ bidirectional messaging between the rendered content and the agent.
 
 import json
 import logging
+import os
 import time
 import uuid
 from pathlib import Path
@@ -199,7 +200,7 @@ class CanvasEngine:
             return p.read_text(encoding="utf-8")
 
     def screenshot(self, dashboard_port: int = 3333) -> str:
-        """Capture a pixel-level screenshot of the current canvas via Playwright."""
+        """Capture a pixel-level screenshot of the current canvas via PinchTab."""
         with self._lock:
             if not self._session_id or not self._target:
                 return ""
@@ -210,13 +211,38 @@ class CanvasEngine:
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / f"canvas_{self._session_id}_{int(time.time())}.png"
         try:
-            from playwright.sync_api import sync_playwright
-            with sync_playwright() as pw:
-                browser = pw.chromium.launch(headless=True)
-                page = browser.new_page(viewport={"width": 640, "height": 480})
-                page.goto(target, wait_until="networkidle", timeout=10000)
-                page.screenshot(path=str(out_path))
-                browser.close()
+            import requests
+            base = os.environ.get("PINCHTAB_URL", "http://localhost:9867")
+            headers = {"Content-Type": "application/json"}
+            r = requests.post(f"{base}/instances/start",
+                              json={"mode": "headless"}, headers=headers, timeout=10)
+            r.raise_for_status()
+            inst_id = r.json()["id"]
+            for _ in range(8):
+                time.sleep(1)
+                try:
+                    ri = requests.get(f"{base}/instances", headers=headers, timeout=5)
+                    for inst in ri.json():
+                        if isinstance(inst, dict) and inst.get("id") == inst_id and inst.get("status") == "running":
+                            break
+                    else:
+                        continue
+                    break
+                except Exception:
+                    continue
+            r = requests.post(f"{base}/instances/{inst_id}/tabs/open",
+                              json={"url": target}, headers=headers, timeout=15)
+            r.raise_for_status()
+            tab_id = r.json()["tabId"]
+            time.sleep(2)
+            r = requests.get(f"{base}/tabs/{tab_id}/screenshot", headers=headers, timeout=10)
+            if r.headers.get("content-type", "").startswith("image/"):
+                out_path.write_bytes(r.content)
+            else:
+                import base64
+                png_data = base64.b64decode(r.json().get("data", ""))
+                out_path.write_bytes(png_data)
+            requests.post(f"{base}/instances/{inst_id}/stop", headers=headers, timeout=5)
             log.info("Canvas screenshot saved: %s", out_path)
             return str(out_path)
         except Exception as e:

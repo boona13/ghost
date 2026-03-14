@@ -77,19 +77,18 @@ Step "Installing Python dependencies..."
 if ($LASTEXITCODE -ne 0) { Fail "pip install failed" }
 Ok "Core dependencies installed (flask, requests, pyyaml, croniter)"
 
-# 4. Optional: Playwright
+# 4. Optional: PinchTab (browser automation)
 Step "Browser automation (optional)..."
 Write-Host ""
-Write-Host "    Playwright enables Ghost to control a real browser."
-Write-Host "    This downloads ~150MB of browser binaries."
+Write-Host "    PinchTab enables Ghost to control a real browser."
+Write-Host "    Standalone binary, uses your existing Chrome."
 Write-Host ""
-$reply = Read-Host "    Install Playwright? [y/N]"
+$reply = Read-Host "    Install PinchTab? [y/N]"
 if ($reply -match "^[Yy]$") {
-    & $VENV_PIP install playwright -q 2>$null
-    & $VENV_PY -m playwright install chromium
-    Ok "Playwright + Chromium installed"
+    npm install -g pinchtab 2>$null
+    Ok "PinchTab installed (run 'pinchtab' to start the browser server)"
 } else {
-    Ok "Skipped (install later: pip install playwright && python -m playwright install chromium)"
+    Ok "Skipped (install later: npm install -g pinchtab)"
 }
 
 # 5. Create ~/.ghost directory

@@ -34,11 +34,9 @@ huggingface-hub>=0.23
 # Optional: on-device speech-to-text (Moonshine — fast, offline, free)
 # moonshine-onnx>=0.1
 
-# Optional: browser automation (install separately — requires system browsers)
-# playwright>=1.40
-
-# Optional: browser-use agent framework
-# browser-use>=0.1
+# Browser automation: PinchTab (install separately — standalone binary, no Python dep)
+# Install: curl -fsSL https://pinchtab.com/install.sh | bash
+# Then run: pinchtab
 
 # Optional: document parsing (LlamaParse)
 # llama-cloud>=0.1

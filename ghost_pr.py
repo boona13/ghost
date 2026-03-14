@@ -128,7 +128,7 @@ stop the next one. Check EVERY section below.
 ghost.py          — Main daemon, GhostDaemon class, tool registration
 ghost_loop.py     — ToolLoopEngine, ToolRegistry, LoopDetector
 ghost_tools.py    — Core tools: shell_exec, file_read/write, web_fetch, notify
-ghost_browser.py  — Playwright browser automation
+ghost_browser.py  — PinchTab browser automation (HTTP API)
 ghost_memory.py   — SQLite FTS5 memory (save/search/prune)
 ghost_cron.py     — CronService, build_cron_tools()
 ghost_skills.py   — SkillLoader, trigger matching, prompt injection

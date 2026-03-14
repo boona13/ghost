@@ -361,7 +361,7 @@ _GHOST_SYSTEM_MAP = (
     "ghost.py          — Main daemon, GhostDaemon class, tool registration\n"
     "ghost_loop.py     — ToolLoopEngine, ToolRegistry, LoopDetector\n"
     "ghost_tools.py    — Core tools: shell_exec, file_read/write, web_fetch, notify\n"
-    "ghost_browser.py  — Playwright browser automation\n"
+    "ghost_browser.py  — PinchTab browser automation (HTTP API)\n"
     "ghost_memory.py   — SQLite FTS5 memory (save/search/prune)\n"
     "ghost_cron.py     — CronService, build_cron_tools()\n"
     "ghost_skills.py   — SkillLoader, trigger matching, prompt injection\n"
