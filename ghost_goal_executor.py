@@ -51,22 +51,44 @@ RULES (non-negotiable):
    BEFORE calling goal_step_done.
 5. Do NOT attempt other steps. Do NOT call goal_complete. Do exactly one step.
 6. NEVER narrate. If you would say "I searched..." without having called web_search, go back and call it.
+
+VERIFICATION — Evidence before claims:
+7. Before calling goal_step_done, verify the step actually succeeded.
+   If you ran a command, check the exit code. If you fetched data, confirm it contains
+   what was needed. Do NOT claim success based on assumptions.
+8. If the step fails or produces incomplete results, say so in the result summary.
+   Honest failure is better than false success.
 """
 
 _PLAN_SYSTEM = """You are Ghost creating an execution plan for a user goal.
 Your ONLY job: call goal_plan(goal_id=..., steps=[...]) with 3-6 concrete steps.
-Each step must be completable by Ghost with 1-2 tool calls (web_search, web_fetch,
-memory_save, file_write, notify, etc.).
-The FINAL step must always be: "Compile full output and call goal_set_output, then mark cycle complete."
-Do not do any research now. Just create the plan.
+
+PLANNING RULES:
+1. Each step must be completable by Ghost with 1-3 tool calls (web_search, web_fetch,
+   memory_save, file_write, shell_exec, notify, etc.).
+2. Each step description must be specific and actionable — state exactly what to do
+   and what tool(s) to use, not vague instructions like "research the topic".
+3. Include a verification action in steps that produce artifacts (e.g., "verify the file
+   was written" or "confirm the search returned results").
+4. The FINAL step must always be: "Compile full output and call goal_set_output, then mark cycle complete."
+5. Do not do any research now. Just create the plan.
+6. Prefer fewer, well-defined steps over many vague ones. Each step should have
+   a clear success criterion.
 """
 
 _QA_SYSTEM = """You are Ghost doing a quality check on a completed goal execution.
 Read the goal description and the output that was produced.
 Decide: does the output fully satisfy what the user asked for?
 
+VERIFICATION RULES — Evidence before claims:
+1. Re-read the original goal description carefully.
+2. Check the output against each requirement in the goal — not just "looks good overall".
+3. If the goal asked for specific data, verify it is present in the output.
+4. Do NOT use words like "should", "probably", or "seems to" — state facts.
+5. If output is empty or clearly incomplete, that is a NO.
+
 If YES: call goal_complete(goal_id=..., summary=<one sentence>) to close the cycle.
-If NO: call goal_add_observation with a specific note about what's missing.
+If NO: call goal_add_observation with a specific note about what's missing or wrong.
        Do NOT call goal_complete — the executor will handle retries.
 
 Do NOT re-execute any steps. Do NOT call goal_set_output again. Just evaluate.
@@ -162,10 +184,24 @@ class GoalExecutorEngine:
 
         # Phase 2 — execute ALL pending steps back-to-back
         steps_run = []
+        consecutive_failures = 0
         for _ in range(MAX_STEPS_PER_GOAL):
             step = self.store.next_pending_step(goal)
             if not step:
                 break
+
+            # Circuit breaker: 3 consecutive failures → stop and reassess
+            if consecutive_failures >= 3:
+                log.warning(
+                    "[goal_executor] Goal [%s] hit 3 consecutive step failures. "
+                    "Stopping execution to prevent thrashing.", goal_id)
+                self.store.add_observation(
+                    goal_id,
+                    "CIRCUIT BREAKER: 3 consecutive steps failed. This may indicate "
+                    "a systemic issue (wrong approach, missing dependency, bad plan). "
+                    "Remaining steps skipped — needs reassessment.")
+                break
+
             log.info("[goal_executor] Executing step [%s/%s] %s",
                      goal_id, step["id"], step["description"][:60])
             step_start = time.time()
@@ -177,6 +213,10 @@ class GoalExecutorEngine:
                 "ok": ok,
                 "elapsed_ms": step_elapsed,
             })
+            if ok:
+                consecutive_failures = 0
+            else:
+                consecutive_failures += 1
             goal = self.store.get(goal_id)
             if not goal:
                 break

@@ -301,9 +301,10 @@ class CronService:
       - {"type": "shell",  "command": "..."}  -> run shell command
     """
 
-    def __init__(self, on_fire=None, store_path=None):
+    def __init__(self, on_fire=None, on_done=None, store_path=None):
         self.store = CronStore(store_path)
         self._on_fire = on_fire
+        self._on_done = on_done
         self._running = False
         self._timer = None
         self._timer_lock = threading.Lock()
@@ -479,6 +480,11 @@ class CronService:
             now_str = datetime.now().strftime("%H:%M:%S")
             dur = _format_duration(duration_ms)
             print(f"  {DIM}{now_str}{RST}  {GRN}⏰ Cron done:{RST} {job['name']} ({dur})")
+            if self._on_done:
+                try:
+                    self._on_done(job)
+                except Exception:
+                    pass
 
         self.store.update_state(job_id, state_updates)
 

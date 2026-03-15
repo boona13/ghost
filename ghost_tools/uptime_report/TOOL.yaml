@@ -1,0 +1,5 @@
+name: uptime_report
+description: Report daemon uptime, current session tool calls, and completed cron jobs.
+version: 1.0.0
+enabled: true
+deps: []

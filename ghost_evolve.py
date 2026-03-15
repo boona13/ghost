@@ -835,7 +835,7 @@ class EvolutionEngine:
                             r"WARNING\s+\[.*\].*\n?",
                         ]:
                             filtered_stderr = re.sub(noise_pattern, "", filtered_stderr)
-                        output = filtered_stderr.strip()[:300] if filtered_stderr.strip() else None
+                        output = filtered_stderr.strip()[:1000] if filtered_stderr.strip() else None
                     else:
                         output = None
                 except subprocess.TimeoutExpired:
@@ -865,13 +865,13 @@ class EvolutionEngine:
                         r"WARNING\s+\[.*\].*\n?",
                     ]:
                         filtered_stderr = re.sub(noise_pattern, "", filtered_stderr)
-                    output = filtered_stderr.strip()[:300] if filtered_stderr.strip() else "Unknown error"
+                    output = filtered_stderr.strip()[:1000] if filtered_stderr.strip() else "Unknown error"
                 else:
                     output = "OK"
             except subprocess.TimeoutExpired:
                 ok, output = False, "Smoke test timed out"
             except Exception as e:
-                ok, output = False, str(e)[:300]
+                ok, output = False, str(e)[:1000]
 
             results["smoke"] = {
                 "ok": ok, "output": output if not ok else "OK",

@@ -72,6 +72,24 @@ stop the next one. Check EVERY section below.
 - If any code path could fail silently or produce wrong results at runtime
   despite passing syntax/import checks — BLOCK the PR.
 
+### 🔴 ToolAPI Attribute Verification (CRITICAL — catches "silently broken" tools)
+- The `api` object in register(api) is a ToolAPI (ghost_tool_builder.py).
+  Its ONLY public attributes/methods are:
+    api.id, api.manifest, api._config,
+    api.register_tool(), api.register_hook(), api.register_cron(),
+    api.register_setting(), api.get_setting(), api.set_setting(),
+    api.read_data(), api.write_data(), api.log(),
+    api.memory_save(), api.memory_search(), api.llm_summarize()
+- There is NO api.daemon, NO api.cron, NO api.session_stats, NO api.stats.
+- If tool code uses getattr(api, 'anything', None) or accesses api.anything:
+  CHECK: does that attribute exist on ToolAPI? If not, the code will
+  silently get None and return fake/zero/empty data — this is WORSE than
+  crashing because it ships a non-functional tool that appears to work.
+- Use read_pr_file('ghost_tool_builder.py') to verify if uncertain.
+- A tool that would return all-zeros, 'unavailable', or placeholder data
+  at runtime because its attribute lookups silently fail = BLOCK.
+  The tool must return REAL data from VERIFIED sources.
+
 ### Tool Execute Signatures (caused 6+ TypeError crashes)
 - Every tool execute function MUST accept **kwargs or match the schema exactly
 - Optional params MUST have defaults (e.g. `_=None`, `limit=50`)
@@ -144,8 +162,13 @@ ghost_supervisor.py   — Process supervisor (PROTECTED — cannot modify)
 
 ### Ghost Tools (ghost_tools/<name>/)
 Isolated LLM-callable tools. Each has TOOL.yaml + tool.py with register(api).
-ToolAPI: register_tool, register_hook, register_cron, get/set_setting, read/write_data.
-NO UI methods. Tools are backend-only.
+ToolAPI (ghost_tool_builder.py) — COMPLETE public interface:
+  api.id, api.manifest, api._config (dict),
+  api.register_tool(def), api.register_hook(event, cb), api.register_cron(name, cb, schedule),
+  api.register_setting(schema), api.get_setting(key, default), api.set_setting(key, value),
+  api.read_data(filename), api.write_data(filename, content), api.log(message),
+  api.memory_save(content, tags, type), api.memory_search(query, limit), api.llm_summarize(text, instruction)
+NO api.daemon, NO api.cron, NO api.stats, NO api.session_stats. Tools are backend-only.
 
 ### Dashboard Routes (ghost_dashboard/routes/)
 chat.py, status.py, config.py, models.py, identity.py, skills.py,
@@ -192,6 +215,15 @@ SkillLoader (ghost_skills.py):
 - Be ACTIONABLE: every REQUEST_CHANGES must have a clear fix path.
 - Use suggest_change when the fix is obvious — saves the developer a round trip.
 - Leave comments AS YOU GO, not all at the end. One concern per comment.
+
+## Evidence-Based Review — NO Claims Without Verification
+- NEVER say "this looks correct" without running grep_codebase or read_file to verify.
+- For EVERY import: grep_codebase to confirm the imported symbol exists.
+- For EVERY new route/endpoint: verify the frontend calls it (grep JS files).
+- For EVERY method call on an internal class: verify the method exists in the source.
+- Trace execution mentally: what happens with None input? Empty string? Missing key?
+  If you find a path that would crash at runtime, that's a BLOCK.
+- If you cannot verify a claim from the diff alone, use your tools. Assumptions = bugs.
 
 **Response format as REVIEWER:**
 1. Brief summary (1-2 sentences)

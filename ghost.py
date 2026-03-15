@@ -1084,10 +1084,13 @@ class GhostDaemon:
             self.tool_registry.register(make_memory_search(self.memory_db))
             self.tool_registry.register(make_memory_save(self.memory_db))
 
-        # Runtime stats (used by uptime/introspection tools)
+        # Runtime stats (exposed via cfg for ghost_tools introspection)
         self._start_time = time.time()
         self._msg_count = 0
         self._tool_count = 0
+        self._cron_completed = 0
+        cfg["session_tool_calls"] = 0
+        cfg["cron_completed_jobs"] = 0
 
         # New: Hook runner (before plugins so they can register hooks)
         self.hooks = HookRunner()
@@ -1115,7 +1118,7 @@ class GhostDaemon:
         # Cron scheduler (skip in dry-run mode for faster startup)
         self.cron = None
         if not dry_run and cfg.get("enable_cron", True):
-            self.cron = CronService(on_fire=self._cron_fire)
+            self.cron = CronService(on_fire=self._cron_fire, on_done=lambda _job: self._track_cron_done())
             for tool_def in build_cron_tools(self.cron):
                 self.tool_registry.register(tool_def)
 
@@ -1681,6 +1684,16 @@ class GhostDaemon:
         # Middleware pipeline (shared pre/post-processing for all entry points)
         self.middleware_chain = self._build_middleware_chain()
 
+    def _track_tool_calls(self, count):
+        """Increment tool call counter and sync to cfg for introspection tools."""
+        self._tool_count += count
+        self.cfg["session_tool_calls"] = self._tool_count
+
+    def _track_cron_done(self):
+        """Increment cron completion counter and sync to cfg."""
+        self._cron_completed += 1
+        self.cfg["cron_completed_jobs"] = self._cron_completed
+
     def _build_middleware_chain(self):
         from ghost_middleware import build_default_chain
         return build_default_chain()
@@ -2147,7 +2160,7 @@ class GhostDaemon:
                 result = inv.result_text
                 tools_used = inv.tools_used
                 tool_calls_log = inv.result.tool_calls if inv.result else []
-                self._tool_count += len(tool_calls_log)
+                self._track_tool_calls(len(tool_calls_log))
 
                 if inv.meta.get("engine_error"):
                     console_bus.emit("error", "cron", job_name,
@@ -2728,7 +2741,7 @@ class GhostDaemon:
             self.middleware_chain.invoke(inv)
 
             reply = inv.result_text
-            self._tool_count += len(inv.result.tool_calls) if inv.result else 0
+            self._track_tool_calls(len(inv.result.tool_calls) if inv.result else 0)
             tools_used = inv.tools_used
         else:
             if image_b64:
@@ -2817,7 +2830,7 @@ class GhostDaemon:
             tools_used = inv.tools_used
             tokens_used = inv.tokens_used
             skill_name = inv.matched_skills[0].name if inv.matched_skills else ""
-            self._tool_count += len(inv.result.tool_calls) if inv.result else 0
+            self._track_tool_calls(len(inv.result.tool_calls) if inv.result else 0)
         else:
             result = self.llm.analyze(content_type, llm_input, context_prefix="")
             tools_used = []
@@ -3101,6 +3114,9 @@ class GhostDaemon:
                 "**Browser (visible UI)**: browser tool — use ONLY when web_fetch fails, or for JS-rendered "
                 "SPAs, login-required pages, or interactive tasks (clicking, filling forms). Actions: "
                 "navigate, snapshot, click, type, fill, content, evaluate, console, screenshot, wait, press, scroll, hover, select, pdf, tabs, new_tab, close_tab, stop\n"
+                "**Cron Management**: cron_list (list all scheduled jobs), cron_run (trigger a job immediately by ID), "
+                "cron_add, cron_remove, cron_update, cron_status. Use `cron_list` to find job IDs, "
+                "then `cron_run(job_id='...')` to trigger any job including the feature_implementer.\n"
                 "**Other**: app_control, notify, uptime\n\n"
                 "## BROWSER WORKFLOW:\n"
                 "1. navigate → go to URL\n"
@@ -3184,7 +3200,7 @@ class GhostDaemon:
 
                 result = inv.result_text
                 tools_used = inv.tools_used
-                self._tool_count += len(inv.result.tool_calls) if inv.result else 0
+                self._track_tool_calls(len(inv.result.tool_calls) if inv.result else 0)
             else:
                 result = self.llm.analyze("long_text", source)
                 tools_used = []
@@ -3278,7 +3294,10 @@ class GhostDaemon:
         print(f"  {GRN}{B}ACTIVE{RST}  {DIM}Model: {_display_model}{RST}")
 
         tool_count = len(self.tool_registry.names())
-        skill_count = len(self.skill_loader.list_all()) if self.skill_loader else 0
+        try:
+            skill_count = len(self.skill_loader.list_all()) if self.skill_loader else 0
+        except Exception:
+            skill_count = 0
         mem_count = self.memory_db.count() if self.memory_db else 0
         cron_jobs = self.cron.list_jobs() if self.cron else []
         cron_enabled = sum(1 for j in cron_jobs if j.get("enabled"))

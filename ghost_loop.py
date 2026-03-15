@@ -3016,6 +3016,29 @@ class ToolLoopEngine:
                             )
                             exit_reason = "empty_response_loop"
                             break
+                        if rctx.consecutive_empty == 3:
+                            messages.append({
+                                "role": "user",
+                                "content": (
+                                    "Your last 3 responses were empty (no text and no tool calls). "
+                                    "You appear to be stuck. Describe what you are trying to do "
+                                    "and what is blocking you, then call the appropriate tool. "
+                                    "If a previous tool call failed, read the error carefully and "
+                                    "try a different approach. Do NOT produce another empty response."
+                                ),
+                            })
+                        elif rctx.consecutive_empty == 6:
+                            messages, rctx.compaction_count = self._compact_messages(
+                                messages, step=step,
+                                compaction_count=rctx.compaction_count)
+                            messages.append({
+                                "role": "user",
+                                "content": (
+                                    "URGENT: 6 consecutive empty responses. Context has been "
+                                    "compacted to give you more output room. You MUST call a "
+                                    "tool NOW or call task_complete to end this session."
+                                ),
+                            })
                     else:
                         rctx.consecutive_empty = 0
 
