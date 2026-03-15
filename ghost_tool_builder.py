@@ -451,7 +451,7 @@ class ToolManager:
                 name=manifest.name,
                 path=str(child),
                 manifest=manifest,
-                enabled=manifest.name not in self._disabled,
+                enabled=manifest.enabled and manifest.name not in self._disabled,
             )
             self.tools[manifest.name] = info
 
@@ -505,12 +505,13 @@ class ToolManager:
             name=manifest.name,
             path=str(tool_dir),
             manifest=manifest,
-            enabled=manifest.name not in self._disabled,
+            enabled=manifest.enabled and manifest.name not in self._disabled,
         )
         self.tools[manifest.name] = info
 
         if not info.enabled:
-            return {"loaded": False, "error": "Tool is disabled"}
+            reason = "disabled in TOOL.yaml" if not manifest.enabled else "disabled by user"
+            return {"loaded": False, "error": f"Tool is disabled ({reason})"}
 
         ok, names = self._load_tool(info)
         if ok:
@@ -817,12 +818,16 @@ class ToolManager:
 
     # ── Enable / Disable ──────────────────────────────────────────
 
-    def enable_tool(self, name: str) -> dict:
+    def enable_tool(self, name: str, update_yaml: bool = False) -> dict:
+        """Enable a tool. If update_yaml=True, also set enabled: true in TOOL.yaml."""
         info = self.tools.get(name)
         if not info:
             return {"status": "error", "error": f"Tool '{name}' not found"}
         self._disabled.discard(name)
         self._save_disabled()
+        if update_yaml and info.manifest and not info.manifest.enabled:
+            self._set_yaml_enabled(name, True)
+            info.manifest.enabled = True
         info.enabled = True
         if not info.loaded:
             ok, names = self._load_tool(info)
@@ -830,6 +835,21 @@ class ToolManager:
                 return {"status": "ok", "tools": names}
             return {"status": "error", "error": info.error}
         return {"status": "ok", "tools": info.tools}
+
+    def _set_yaml_enabled(self, name: str, enabled: bool):
+        """Update the enabled field in a tool's TOOL.yaml."""
+        yaml_path = TOOLS_DIR / name / "TOOL.yaml"
+        if not yaml_path.exists():
+            return
+        try:
+            content = yaml_path.read_text(encoding="utf-8")
+            old = "enabled: false" if enabled else "enabled: true"
+            new = "enabled: true" if enabled else "enabled: false"
+            if old in content:
+                content = content.replace(old, new, 1)
+                yaml_path.write_text(content, encoding="utf-8")
+        except Exception as e:
+            log.warning("Failed to update TOOL.yaml for %s: %s", name, e)
 
     def disable_tool(self, name: str) -> dict:
         info = self.tools.get(name)

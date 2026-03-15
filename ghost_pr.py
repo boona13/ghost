@@ -89,6 +89,10 @@ stop the next one. Check EVERY section below.
 - A tool that would return all-zeros, 'unavailable', or placeholder data
   at runtime because its attribute lookups silently fail = BLOCK.
   The tool must return REAL data from VERIFIED sources.
+- EXCEPTION: If the tool's TOOL.yaml has `enabled: false` AND the PR description
+  mentions a pending dependency fix with `enables_tools`, this is the CORRECT
+  pattern for cross-cutting dependencies. The tool is intentionally disabled until
+  a core fix deploys. APPROVE this — it's better than shipping a broken enabled tool.
 
 ### Tool Execute Signatures (caused 6+ TypeError crashes)
 - Every tool execute function MUST accept **kwargs or match the schema exactly

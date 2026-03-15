@@ -106,7 +106,8 @@ class FutureFeaturesStore:
             estimated_effort: str = "medium", auto_implement: bool = True,
             source_detail: str = "", tags: List[str] = None,
             category: str = CATEGORY_FEATURE,
-            affected_files: str = "", proposed_approach: str = "") -> Dict:
+            affected_files: str = "", proposed_approach: str = "",
+            enables_tools: List[str] = None) -> Dict:
         """Add a new feature to the backlog."""
         features = self._load()
         
@@ -179,6 +180,8 @@ class FutureFeaturesStore:
             "estimated_effort": estimated_effort,
             "auto_implement": auto_implement,
             "tags": tags or [],
+            "enables_tools": enables_tools or [],
+            "tools_enabled": False,
             "created_at": datetime.now().isoformat(),
             "updated_at": datetime.now().isoformat(),
             "started_at": None,
@@ -657,6 +660,36 @@ class FutureFeaturesStore:
         }
         return stats
 
+    def _mark_tools_enabled(self, feature_id: str):
+        """Mark a feature's tools_enabled flag as True."""
+        features = self._load()
+        for f in features:
+            if f["id"] == feature_id:
+                f["tools_enabled"] = True
+                f["updated_at"] = datetime.now().isoformat()
+                self._save(features)
+                return
+    
+    def resolve_pending_tool_enables(self) -> List[tuple]:
+        """Find completed features with unresolved enables_tools.
+
+        Returns list of (feature_id, tool_name) pairs. Does NOT mark features
+        as resolved — caller must call _mark_tools_enabled(feature_id) after
+        confirming ALL tools for that feature were successfully enabled.
+
+        This avoids the bug where premature marking prevents retry on failure.
+        """
+        features = self._load()
+        result = []
+        for f in features:
+            if f.get("status") not in (STATUS_IMPLEMENTED, STATUS_COMPLETED):
+                continue
+            if f.get("tools_enabled", False):
+                continue
+            for tool_name in f.get("enables_tools", []):
+                result.append((f["id"], tool_name))
+        return result
+
 
 class FeatureChangelog:
     """Tracks completed features for changelog generation."""
@@ -733,7 +766,7 @@ class FeatureChangelog:
 #  LLM-CALLABLE TOOLS
 # ═══════════════════════════════════════════════════════════════
 
-def build_future_features_tools(cfg, on_queue_change=None):
+def build_future_features_tools(cfg, on_queue_change=None, on_enable_tool=None):
     """Build LLM-callable tools for the future features system.
 
     Args:
@@ -743,6 +776,10 @@ def build_future_features_tools(cfg, on_queue_change=None):
                          The callback is responsible for guarding against parallel
                          implementations — it should check is_queue_ready() before
                          firing the implementer.
+        on_enable_tool: Optional callback(tool_name: str) -> dict called when a
+                        completed feature's dependency is resolved and a blocked
+                        tool should be enabled. Expected to update TOOL.yaml and
+                        reload the tool.
     """
     store = FutureFeaturesStore()
     changelog = FeatureChangelog()
@@ -754,6 +791,11 @@ def build_future_features_tools(cfg, on_queue_change=None):
     stale_ids = store.reset_stale_in_progress(max_age_seconds=0)
     if stale_ids:
         print(f"  [FUTURE_FEATURES] Reset {len(stale_ids)} in_progress features on startup: {stale_ids}")
+
+    # NOTE: Startup tool-enable resolution is NOT done here because the
+    # ToolManager hasn't been initialized yet at this point in the boot
+    # sequence. Instead, the daemon calls resolve_blocked_tools() after
+    # ToolManager.discover_all() + load_all() complete. See ghost.py.
 
     def _notify_queue():
         """Safely invoke on_queue_change callback."""
@@ -779,14 +821,17 @@ def build_future_features_tools(cfg, on_queue_change=None):
                            affected_files: str = "",
                            proposed_approach: str = "",
                            confirmed_not_duplicate: bool = False,
+                           enables_tools: str = "",
                            **kwargs):
         deps = [d.strip() for d in dependencies.split(",") if d.strip()]
         tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+        tool_list = [t.strip() for t in enables_tools.split(",") if t.strip()]
         feature = store.add(title, description, priority, source, deps, 
                            estimated_effort, auto_implement, source_detail, tag_list,
                            category=category,
                            affected_files=affected_files,
-                           proposed_approach=proposed_approach)
+                           proposed_approach=proposed_approach,
+                           enables_tools=tool_list)
         if feature.get("_warning"):
             return f"Feature already exists: [{feature['id']}] {feature['title']}"
 
@@ -846,7 +891,8 @@ def build_future_features_tools(cfg, on_queue_change=None):
                         cooldown_str = " ⏳cooldown"
                 except (ValueError, TypeError):
                     pass
-            lines.append(f"  {status_emoji} [{f['id']}] {f['title']} [{f.get('priority', '?')}]{cat_str}{impl_str}{dep_str}{audited_str}{cooldown_str}")
+            enables_str = f" [enables: {','.join(f['enables_tools'])}]" if f.get("enables_tools") else ""
+            lines.append(f"  {status_emoji} [{f['id']}] {f['title']} [{f.get('priority', '?')}]{cat_str}{impl_str}{dep_str}{enables_str}{audited_str}{cooldown_str}")
         return "\n".join(lines)
 
     _get_feature_call_count: dict = {}
@@ -880,6 +926,9 @@ def build_future_features_tools(cfg, on_queue_change=None):
             lines.append(f"\nAffected Files: {f['affected_files']}")
         if f.get("proposed_approach"):
             lines.append(f"\nProposed Approach:\n{f['proposed_approach']}")
+        if f.get("enables_tools"):
+            enabled_flag = " (already enabled)" if f.get("tools_enabled") else " (pending — will enable on completion)"
+            lines.append(f"\nEnables Tools: {', '.join(f['enables_tools'])}{enabled_flag}")
         if f.get("source_detail"):
             lines.append(f"\nSource Detail: {f['source_detail']}")
         if f.get("started_at"):
@@ -1013,6 +1062,20 @@ def build_future_features_tools(cfg, on_queue_change=None):
         store.mark_implemented(feature_id, implementation_summary)
         changelog.add(item, implementation_summary)
         _notify_queue()
+
+        enabled_tools = []
+        pending_tools = item.get("enables_tools", [])
+        if pending_tools and on_enable_tool:
+            for tool_name in pending_tools:
+                try:
+                    result = on_enable_tool(tool_name)
+                    if result and result.get("status") == "ok":
+                        enabled_tools.append(tool_name)
+                except Exception:
+                    pass
+            if len(enabled_tools) == len(pending_tools):
+                store._mark_tools_enabled(feature_id)
+
         try:
             from ghost_autonomy import GrowthLog
             GrowthLog().add(
@@ -1028,7 +1091,10 @@ def build_future_features_tools(cfg, on_queue_change=None):
             EvolveContextLogger.get().clear()
         except Exception:
             pass
-        return f"Feature completed: [{feature_id}] {item['title']}"
+        msg = f"Feature completed: [{feature_id}] {item['title']}"
+        if enabled_tools:
+            msg += f"\n🔓 Auto-enabled blocked tools: {', '.join(enabled_tools)}"
+        return msg
 
     def _fail_future_feature(feature_id: str, error: str = ""):
         """Mark a feature as failed."""
@@ -1110,6 +1176,7 @@ def build_future_features_tools(cfg, on_queue_change=None):
                     "auto_implement": {"type": "boolean", "default": True, "description": "Auto-implement (false = requires approval)"},
                     "source_detail": {"type": "string", "default": "", "description": "Additional source context (URL, issue link)"},
                     "tags": {"type": "string", "default": "", "description": "Comma-separated tags"},
+                    "enables_tools": {"type": "string", "default": "", "description": "Comma-separated tool names (from ghost_tools/) to auto-enable when this feature completes. Use when a core fix is needed before a disabled tool can function."},
                 },
                 "required": ["title", "description"],
             },

@@ -1256,7 +1256,17 @@ class GhostDaemon:
                 return
             self.cron.fire_now(_FEATURE_IMPLEMENTER_JOB)
 
-        for tool_def in build_future_features_tools(cfg, on_queue_change=_on_queue_change):
+        def _on_enable_blocked_tool(tool_name):
+            """Enable a tool that was disabled pending a core dependency fix."""
+            if not self.tool_manager:
+                return {"status": "error", "error": "ToolManager not initialized"}
+            return self.tool_manager.enable_tool(tool_name, update_yaml=True)
+
+        for tool_def in build_future_features_tools(
+            cfg,
+            on_queue_change=_on_queue_change,
+            on_enable_tool=_on_enable_blocked_tool,
+        ):
             self.tool_registry.register(tool_def)
 
         # Goal Engine (Persistent Cognitive Architecture for user goals)
@@ -1540,6 +1550,34 @@ class GhostDaemon:
 
         if self.evolve_engine and self.tool_manager:
             self.evolve_engine.tool_manager = self.tool_manager
+
+        # Resolve blocked tools from features completed before last restart.
+        # Must run AFTER ToolManager.discover_all()/load_all() so tools exist.
+        if self.tool_manager and self._features_store:
+            try:
+                pending = self._features_store.resolve_pending_tool_enables()
+                if pending:
+                    from collections import defaultdict
+                    by_feature = defaultdict(list)
+                    for fid, tool_name in pending:
+                        by_feature[fid].append(tool_name)
+                    for fid, tools in by_feature.items():
+                        all_ok = True
+                        for tool_name in tools:
+                            try:
+                                result = self.tool_manager.enable_tool(tool_name, update_yaml=True)
+                                if result and result.get("status") == "ok":
+                                    print(f"  [FUTURE_FEATURES] Auto-enabled blocked tool: {tool_name}")
+                                else:
+                                    print(f"  [FUTURE_FEATURES] Could not enable {tool_name}: {result}")
+                                    all_ok = False
+                            except Exception as e:
+                                print(f"  [FUTURE_FEATURES] Error enabling {tool_name}: {e}")
+                                all_ok = False
+                        if all_ok:
+                            self._features_store._mark_tools_enabled(fid)
+            except Exception as e:
+                log.warning("Startup tool-enable resolution failed (non-fatal): %s", e)
 
         # Security Audit tools (self-auditing + auto-fix)
         if cfg.get("enable_security_audit", True):
