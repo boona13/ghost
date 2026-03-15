@@ -561,6 +561,15 @@ class ToolScopeMiddleware(Middleware):
         ]
         ctx.tool_registry = ctx.tool_registry.subset(safe_names)
 
+        # Ghost's built-in growth routines use hardcoded prompts that specify
+        # which tools they need; skill-based narrowing strips essential tools
+        # like add_future_feature and log_growth_activity. User-scheduled cron
+        # jobs should still benefit from skill matching.
+        if ctx.source == "cron":
+            job_name = (ctx.meta or {}).get("job_name", "")
+            if job_name.startswith("_ghost_growth_"):
+                return
+
         if not ctx.matched_skills:
             return
         if not ctx.daemon or not getattr(ctx.daemon, "skill_loader", None):
